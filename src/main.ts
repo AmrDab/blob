@@ -130,7 +130,9 @@ function servePill(req: IncomingMessage, res: ServerResponse): void {
   res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
   res.flushHeaders();
   let mine: Pill | undefined;
-  createInterface({ input: req }).on('line', line => {
+  // A relay is killed whenever clawdcursor hides the pill, so an aborted request is normal, never a crash.
+  req.on('error', () => {});
+  createInterface({ input: req }).on('error', () => {}).on('line', line => {
     if (!mine) {                                    // the first line: what the pill starts as
       let state: PillState | undefined;
       try { state = JSON.parse(line); } catch { /* below */ }
