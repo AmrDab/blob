@@ -25,6 +25,7 @@ const T = { duration: 550, ease: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
 const HOLD_MS = 350;   // a press longer than this is press-and-hold; shorter is a tap (tap again to finish)
 const STILL_MS = 150;  // a press that stays still this long starts the mic
 const DRAG_PX = 4;     // a press that moves further than this drags the window instead
+const BREATH = { duration: 2_200, ease: 'ease-in-out' } as const;   // Speak's idle swell
 const RING = 84;       // the voice ring: Speak's face (its loops fill about 40% of the canvas, which overhangs the blob)
 
 // Shortcut blobs sit on arcs around Speak, from straight left to straight up: 5 on the inner one, 7 more on the outer.
@@ -140,6 +141,15 @@ function App() {
     return () => { removeEventListener('keydown', esc); removeEventListener('pointermove', moved); };
   }, []);
   useEffect(() => { if (!shortcuts.length) setBrowsing(false); }, [shortcuts]);
+  // A caption is read, then goes: a few seconds plus a little per character (not while the mouse is on Blob).
+  useEffect(() => {
+    if (!caption || hover || busy || phase !== 'idle') return;
+    const t = setTimeout(() => setCaption(''), Math.min(20_000, 4_000 + caption.length * 60));
+    return () => clearTimeout(t);
+  }, [caption, hover, busy, phase]);
+  // Speak breathes slowly while idle, so the liquid is always gently moving.
+  const [breath, setBreath] = useState(false);
+  useEffect(() => { const t = setInterval(() => setBreath(b => !b), 2_200); return () => clearInterval(t); }, []);
   // The Type box goes away by itself: when another window is clicked, or soon after the pointer leaves an empty box.
   const typeLeave = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
@@ -418,7 +428,7 @@ function App() {
               </Liquid.Item>,
             ];
           })}
-          <Liquid.Item className="it-main">
+          <Liquid.Item className="it-main" scale={breath && !hover ? 1.07 : 1} transition={BREATH}>
             <button className={`blob main ${phase}`} aria-label="Speak"
               onPointerDown={speakDown} onPointerMove={speakMove} onPointerUp={speakUp} onPointerCancel={speakCancel}>
               {busy ? <ThinkingOrb state="working" size={32} theme="light" />
