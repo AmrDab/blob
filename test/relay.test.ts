@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CLOSE, IDLE_MS, MAX_BYTES, RATE, UNUSED_MS, admit, entered, frame, left, tick, type Host, type Meta, type Role, type Sock,
+  CLOSE, IDLE_MS, MAX_BYTES, RATE, UNUSED_MS, admit, entered, frame, left, tick, type Host, type Live, type Meta, type Role, type Sock,
 } from '../relay/src/room.ts';
 
 class FakeSock implements Sock {
@@ -23,8 +23,8 @@ function fakeRoom() {
     socks: role => state.all.filter(s => s.closed === undefined && (!role || s.role === role)),
   };
   /** Joins like the Durable Object does; gives the socket, or the close code. */
-  async function join(role: Role, auth = 'token', now = 0): Promise<FakeSock | number> {
-    const code = await admit(host, role, auth, now);
+  async function join(role: Role, auth = 'token', now = 0, dev = 'phone-1'): Promise<FakeSock | number> {
+    const code = await admit(host, role, auth, now, role === 'phone' ? dev : undefined);
     if (code) return code;
     const s = new FakeSock(role);
     state.all.push(s);
@@ -47,7 +47,7 @@ describe('relay room', () => {
     const phone = await r.join('phone') as FakeSock;
     expect(phone.texts).toEqual(['{"t":"peer","on":true}']);
     expect(pc.texts.at(-1)).toBe('{"t":"peer","on":true}');
-    expect(r.state.meta?.paired).toBe(true);
+    expect((r.state.meta as Live).paired).toBe(true);
 
     const a = bytes(100), b = bytes(7);
     await frame(r.host, 'phone', phone, a, 1);
@@ -56,7 +56,7 @@ describe('relay room', () => {
     expect(phone.got.at(-1)).toBe(b);
     await frame(r.host, 'phone', phone, 'plain text is not forwarded', 1);
     expect(pc.got.at(-1)).toBe(a);
-    expect(Object.keys(r.state.meta!).sort()).toEqual(['auth', 'created', 'paired', 'seen']);   // no content is kept
+    expect(Object.keys(r.state.meta!).sort()).toEqual(['auth', 'created', 'paired', 'phone', 'seen']);   // no content is kept
   });
 
   it('holds one PC and one phone: a newcomer takes the place of the old socket in its role', async () => {
@@ -90,14 +90,14 @@ describe('relay room', () => {
     await tick(r.host, UNUSED_MS);
     expect(pc.closed).toBe(CLOSE.gone);
     expect(pc.texts.at(-1)).toBe('{"t":"expired"}');
-    expect(r.state.meta).toBeUndefined();
+    expect(r.state.meta).toEqual({ gone: expect.stringMatching(/^[0-9a-f]{64}$/) });   // only the mark that it was
     expect(await r.join('phone', 'token', UNUSED_MS + 1)).toBe(CLOSE.gone);
 
     // Also when the alarm is late: the phone is turned away and the room is gone.
     const late = fakeRoom();
     await late.join('pc');
     expect(await late.join('phone', 'token', UNUSED_MS)).toBe(CLOSE.gone);
-    expect(late.state.meta).toBeUndefined();
+    expect(late.state.meta).toHaveProperty('gone');
   });
 
   it('keeps a paired room past 10 minutes, and drops it after a long time unused', async () => {
@@ -106,16 +106,16 @@ describe('relay room', () => {
     const phone = await r.join('phone', 'token', 60_000) as FakeSock;
     await tick(r.host, UNUSED_MS);
     expect(pc.closed).toBeUndefined();
-    expect(r.state.meta?.paired).toBe(true);
+    expect((r.state.meta as Live).paired).toBe(true);
     pc.close(1001); await left(r.host, 'pc', pc, 1000);
     phone.close(1001); await left(r.host, 'phone', phone, 2000);
     await tick(r.host, 2000 + IDLE_MS - 1);
-    expect(r.state.meta).toBeDefined();
+    expect(r.state.meta).toHaveProperty('auth');
     expect(await r.join('pc', 'token', 3000)).toBeInstanceOf(FakeSock);   // the PC comes back to the same room
     const pcBack = r.state.all.at(-1)!;
     pcBack.close(1001); await left(r.host, 'pc', pcBack, 4000);
     await tick(r.host, 4000 + IDLE_MS);
-    expect(r.state.meta).toBeUndefined();
+    expect(r.state.meta).toHaveProperty('gone');
   });
 
   it('unpairs from either side: both are told and closed, and the room is wiped', async () => {
@@ -128,10 +128,47 @@ describe('relay room', () => {
         expect(s.texts.at(-1)).toBe('{"t":"unpaired"}');
         expect(s.closed).toBe(CLOSE.unpaired);
       }
-      expect(r.state.meta).toBeUndefined();
+      expect(r.state.meta).toHaveProperty('gone');
+      expect(JSON.stringify(r.state.meta)).not.toContain('token');   // a hash of the token, not the token
       expect(r.state.alarm).toBeUndefined();
       expect(await r.join('phone')).toBe(CLOSE.gone);
     }
+  });
+
+  it('never opens an unpaired or expired room again, whoever asks and with whatever token', async () => {
+    const r = fakeRoom();
+    const pc = await r.join('pc') as FakeSock;
+    await r.join('phone');
+    await frame(r.host, 'pc', pc, '{"t":"unpair"}', 1);
+    expect(await r.join('pc', 'token', 2)).toBe(CLOSE.gone);        // the PC that made it, with the old token
+    expect(await r.join('pc', 'other', 3)).toBe(CLOSE.gone);        // or anyone with a new one
+    expect(await r.join('phone', 'token', 4)).toBe(CLOSE.gone);
+    expect(r.host.socks()).toEqual([]);
+    await tick(r.host, 5 + IDLE_MS);                                // the alarm leaves the mark alone
+    expect(r.state.meta).toHaveProperty('gone');
+
+    const unused = fakeRoom();                                      // a QR nobody scanned in time
+    await unused.join('pc');
+    await tick(unused.host, UNUSED_MS);
+    expect(await unused.join('pc', 'token', UNUSED_MS + 1)).toBe(CLOSE.gone);
+  });
+
+  it('belongs to the first phone: another phone is refused, the same one may come back', async () => {
+    const r = fakeRoom();
+    const pc = await r.join('pc') as FakeSock;
+    expect(await admit(r.host, 'phone', 'token', 0)).toBe(CLOSE.badAuth);   // a phone must name itself
+    const phone = await r.join('phone', 'token', 1, 'phone-1') as FakeSock;
+    expect(await r.join('phone', 'token', 2, 'phone-2')).toBe(CLOSE.taken);   // someone else with the same QR link
+    expect(phone.closed).toBeUndefined();                                     // the paired phone is not pushed out
+    expect(r.host.socks('phone')).toEqual([phone]);
+    const again = await r.join('phone', 'token', 3, 'phone-1') as FakeSock;   // the same phone reloads the page
+    expect(phone.closed).toBe(CLOSE.taken);
+    expect(r.host.socks('phone')).toEqual([again]);
+    phone.close(1001); again.close(1001);
+    await left(r.host, 'phone', again, 4);
+    expect(await r.join('phone', 'token', 5, 'phone-2')).toBe(CLOSE.taken);   // still refused when the phone is away
+    expect(await r.join('phone', 'token', 6, 'phone-1')).toBeInstanceOf(FakeSock);
+    expect(pc.closed).toBeUndefined();
   });
 
   it('caps the size and the rate of frames', async () => {

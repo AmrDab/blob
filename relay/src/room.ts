@@ -3,8 +3,11 @@
 
 export type Role = 'pc' | 'phone';
 export interface Sock { send(data: string | ArrayBuffer): void; close(code?: number, reason?: string): void }
-/** `auth` is the room's access token, set by the PC that creates the room. */
-export interface Meta { auth: string; created: number; paired: boolean; seen: number }
+/** `auth` is the room's access token, set by the PC that creates the room. `phone` is the first phone's device id. */
+export interface Live { auth: string; created: number; paired: boolean; seen: number; phone?: string }
+/** What is left of a room that was unpaired or expired: a hash of its token, so the room is never opened again. */
+export interface Gone { gone: string }
+export type Meta = Live | Gone;
 export interface Host {
   meta(): Promise<Meta | undefined>;
   save(meta: Meta): Promise<void>;
@@ -24,22 +27,36 @@ const say = (s: Sock, msg: object) => { try { s.send(JSON.stringify(msg)); } cat
 const shut = (s: Sock, code: number, reason: string) => { try { s.close(code, reason); } catch { /* closed */ } };
 /** Ends a joined socket: it is told why in a text frame first, so it need not wait for the close to arrive. */
 const drop = (s: Sock, why: 'unpaired' | 'expired' | 'replaced', code: number) => { say(s, { t: why }); shut(s, code, why); };
+const isGone = (m: Meta | undefined): m is Gone => !!m && 'gone' in m;
+
+async function hash(text: string): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+  return Array.from(d, b => b.toString(16).padStart(2, '0')).join('');
+}
 
 /**
- * Decides whether a new socket may join: 0, or the code to close it with. The first PC creates the room.
- * A newcomer takes the place of an older socket in its role (a reload, or a connection that died without closing).
+ * Decides whether a new socket may join: 0, or the code to close it with. The first PC creates the room, once: a room
+ * that was unpaired or expired stays closed. The first phone to join is the room's phone (by its device id, `dev`):
+ * no other phone gets in after it. A newcomer takes the place of an older socket of its own (a reload, or a
+ * connection that died without closing).
  */
-export async function admit(h: Host, role: Role, auth: string, now: number): Promise<number> {
+export async function admit(h: Host, role: Role, auth: string, now: number, dev?: string): Promise<number> {
   let meta = await h.meta();
-  if (meta && !meta.paired && now >= meta.created + UNUSED_MS) { await expire(h); meta = undefined; }
+  if (isGone(meta)) return CLOSE.gone;
+  if (meta && !meta.paired && now >= meta.created + UNUSED_MS) { await expire(h, meta); return CLOSE.gone; }
   if (!meta) {
     if (role !== 'pc') return CLOSE.gone;
     meta = { auth, created: now, paired: false, seen: now };
     await h.alarm(now + UNUSED_MS);
   }
   if (meta.auth !== auth) return CLOSE.badAuth;
+  if (role === 'phone') {
+    if (!dev) return CLOSE.badAuth;
+    if (meta.phone && meta.phone !== dev) return CLOSE.taken;   // another phone: the one that is paired stays
+    meta.phone = dev;
+    meta.paired = true;
+  }
   for (const old of h.socks(role)) drop(old, 'replaced', CLOSE.taken);
-  if (role === 'phone') meta.paired = true;
   meta.seen = now;
   await h.save(meta);
   return 0;
@@ -73,25 +90,32 @@ export async function frame(h: Host, role: Role, sock: Sock, data: string | Arra
 export async function left(h: Host, role: Role, sock: Sock, now: number): Promise<void> {
   if (!h.socks(role).some(s => s !== sock)) for (const p of h.socks(other(role))) say(p, { t: 'peer', on: false });
   const meta = await h.meta();
-  if (meta) await h.save({ ...meta, seen: now });
+  if (meta && !isGone(meta)) await h.save({ ...meta, seen: now });
 }
 
-/** Unpair: both sides are told and closed, and nothing about the room is kept. */
+/** The room is over: nothing about it is kept but the mark that it was, so its id can't be used to make it again. */
+async function bury(h: Host, meta: Live): Promise<void> {
+  await h.wipe();
+  await h.save({ gone: await hash(meta.auth) });
+}
+
+/** Unpair: both sides are told and closed. */
 export async function unpair(h: Host): Promise<void> {
   for (const s of h.socks()) drop(s, 'unpaired', CLOSE.unpaired);
-  await h.wipe();
+  const meta = await h.meta();
+  if (meta && !isGone(meta)) await bury(h, meta);
 }
 
-async function expire(h: Host): Promise<void> {
+async function expire(h: Host, meta: Live): Promise<void> {
   for (const s of h.socks()) drop(s, 'expired', CLOSE.gone);
-  await h.wipe();
+  await bury(h, meta);
 }
 
-/** The alarm: drops a room no phone joined in time, and a paired room nobody used for a long time. */
+/** The alarm: closes a room no phone joined in time, and a paired room nobody used for a long time. */
 export async function tick(h: Host, now: number): Promise<void> {
   const meta = await h.meta();
-  if (!meta) return;
-  if (!meta.paired) return now >= meta.created + UNUSED_MS ? expire(h) : h.alarm(meta.created + UNUSED_MS);
+  if (!meta || isGone(meta)) return;
+  if (!meta.paired) return now >= meta.created + UNUSED_MS ? expire(h, meta) : h.alarm(meta.created + UNUSED_MS);
   if (h.socks().length) return h.alarm(now + IDLE_MS);
-  return now >= meta.seen + IDLE_MS ? h.wipe() : h.alarm(meta.seen + IDLE_MS);
+  return now >= meta.seen + IDLE_MS ? bury(h, meta) : h.alarm(meta.seen + IDLE_MS);
 }

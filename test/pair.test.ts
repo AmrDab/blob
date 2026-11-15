@@ -1,42 +1,65 @@
-import { describe, expect, it } from 'vitest';
-import { channel, parseFragment, unb64url } from '../src/pair-crypto.ts';
-import { createRoom, qrSvg, qrUrl } from '../src/pair.ts';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CLOSE, HELLO_BYTES, pairKeys, parseFragment, unb64url, type Channel, type PhoneMsg } from '../src/pair-crypto.ts';
+import { Pairing, createRoom, loadRoom, qrSvg, qrUrl, saveRoom, type Reply, type Socket } from '../src/pair.ts';
 
 const room = createRoom('https://blob-relay.example.workers.dev/');
 
+/** One connection: both sides say hello and make this connection's keys. */
+async function connection(r = room): Promise<{ pc: Channel; phone: Channel }> {
+  const pc = await pairKeys(r.secret, r.room, 'pc'), phone = await pairKeys(r.secret, r.room, 'phone');
+  const a = pc.hello(), b = phone.hello();
+  return { pc: await pc.channel(b), phone: await phone.channel(a) };
+}
+
 describe('pairing crypto', () => {
   it('round-trips both ways, with a different key per direction', async () => {
-    const pc = await channel(room.secret, room.room, 'pc');
-    const phone = await channel(room.secret, room.room, 'phone');
+    const { pc, phone } = await connection();
     const req = await phone.seal({ t: 'req', id: '1', text: 'open notepad ✓' });
     expect(await pc.open(req)).toEqual({ t: 'req', id: '1', text: 'open notepad ✓' });
     expect(await phone.open(await pc.seal({ t: 'answer', text: 'Done.' }))).toEqual({ t: 'answer', text: 'Done.' });
     expect(new TextDecoder().decode(req)).not.toContain('notepad');
     await expect(phone.open(req)).rejects.toThrow();       // a frame does not open on the side that sent it
-    expect(pc.auth).toBe(phone.auth);
-    expect(pc.auth).toMatch(/^[\w-]{22}$/);
+    const a = await pairKeys(room.secret, room.room, 'pc'), b = await pairKeys(room.secret, room.room, 'phone');
+    expect(a.auth).toBe(b.auth);                            // the relay token is the pairing's, not the connection's
+    expect(a.auth).toMatch(/^[\w-]{22}$/);
+    expect(a.hello().byteLength).toBe(HELLO_BYTES);
   });
 
   it('keeps the order of frames sealed at once', async () => {
-    const pc = await channel(room.secret, room.room, 'pc');
-    const phone = await channel(room.secret, room.room, 'phone');
+    const { pc, phone } = await connection();
     const frames = await Promise.all([1, 2, 3].map(i => phone.seal({ i })));
     expect(await Promise.all(frames.map(f => pc.open(f)))).toEqual([{ i: 1 }, { i: 2 }, { i: 3 }]);
   });
 
   it('fails with a wrong key, a wrong room, a changed frame and a replay', async () => {
-    const phone = await channel(room.secret, room.room, 'phone');
+    const { pc, phone } = await connection();
     const frame = await phone.seal({ t: 'req', id: '1', text: 'hi' });
-    const wrongKey = await channel(createRoom('https://x').secret, room.room, 'pc');
-    await expect(wrongKey.open(frame)).rejects.toThrow();
-    const wrongRoom = await channel(room.secret, createRoom('https://x').room, 'pc');
-    await expect(wrongRoom.open(frame)).rejects.toThrow();
-    const pc = await channel(room.secret, room.room, 'pc');
+    const other = createRoom('https://x');
+    await expect((await connection({ ...room, secret: other.secret })).pc.open(frame)).rejects.toThrow();
+    await expect((await connection({ ...room, room: other.room })).pc.open(frame)).rejects.toThrow();
     const changed = frame.slice(0);
     new Uint8Array(changed)[20] ^= 1;
     await expect(pc.open(changed)).rejects.toThrow();
     await pc.open(frame);
     await expect(pc.open(frame)).rejects.toThrow('replayed');
+  });
+
+  it('makes new keys for every connection: a frame recorded in an old one fails in a new one', async () => {
+    const old = await connection();
+    const recorded = await old.phone.seal({ t: 'req', id: '1', text: 'delete my files' });
+    expect(await old.pc.open(recorded)).toMatchObject({ t: 'req' });   // it was a good frame in its own connection
+    const next = await connection();                                    // same pairing, same secret, a later connection
+    await expect(next.pc.open(recorded)).rejects.toThrow();
+    // Also when only one side is new (the PC restarted, an attacker replays the phone's old hello and frame).
+    const pc = await pairKeys(room.secret, room.room, 'pc'), phone = await pairKeys(room.secret, room.room, 'phone');
+    const phoneHello = phone.hello();
+    const first = await phone.channel(pc.hello());
+    const frame = await first.seal({ t: 'req', id: '2', text: 'again' });
+    pc.hello();                                                         // the PC's next connection: a new nonce
+    await expect((await pc.channel(phoneHello)).open(frame)).rejects.toThrow();
   });
 });
 
@@ -59,10 +82,102 @@ describe('pairing room', () => {
     expect(parseFragment('')).toBeNull();
   });
 
-  it('draws the QR as an SVG string', () => {
+  it('draws the QR as shapes only: no text, title, link or the secret in the SVG', () => {
     const svg = qrSvg(qrUrl(room));
     expect(svg).toMatch(/^<svg[^>]+viewBox=/);
     expect(svg).toContain('#1c1c1e');
     expect(svg.length).toBeLessThan(40_000);
+    expect(svg).not.toMatch(/<(text|title|desc|a)\b|href|aria-label/i);
+    expect(svg).not.toContain(room.secret);
+    expect(svg).not.toContain(room.room);
+  });
+});
+
+/** The relay and the phone, in memory: what the PC's socket sends lands in `sent`; `phone` talks back. */
+class FakeRelay implements Socket {
+  binaryType = '';
+  readyState = 1;
+  onopen: Socket['onopen'] = null; onmessage: Socket['onmessage'] = null; onclose: Socket['onclose'] = null;
+  sent: (string | ArrayBuffer)[] = [];
+  send(d: string | ArrayBuffer) { this.sent.push(d); }
+  close() { this.readyState = 3; }
+  say(data: string | ArrayBuffer) { this.onmessage?.({ data }); }
+}
+const tick = () => new Promise(r => setTimeout(r, 15));
+
+describe('the PC side of a pairing', () => {
+  let dir = '', file = '';
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'blob-pair-')); file = join(dir, 'pair.json'); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  /** A connected Pairing with the phone's hello done; `phone` seals what the phone would send. */
+  async function paired() {
+    saveRoom(file, room);
+    const relay = new FakeRelay();
+    const p = new Pairing(room, { file, open: () => relay });
+    const got = { replies: [] as Reply[], requests: [] as string[], phone: [] as boolean[], over: [] as string[] };
+    p.on('reply', r => got.replies.push(r)).on('request', r => got.requests.push(r.text))
+      .on('phone', on => got.phone.push(on)).on('unpaired', why => got.over.push(why));
+    await p.connect();
+    relay.say('{"t":"peer","on":true}');
+    await tick();
+    const pcHello = relay.sent.find(d => typeof d !== 'string' && d.byteLength === HELLO_BYTES) as ArrayBuffer;
+    const keys = await pairKeys(room.secret, room.room, 'phone');
+    relay.say(keys.hello());
+    const phone = await keys.channel(pcHello);
+    await tick();
+    const from = async (m: PhoneMsg) => { relay.say(await phone.seal(m)); await tick(); };
+    return { p, relay, got, from };
+  }
+
+  it('saves and loads the pairing, and takes nothing that is not one', () => {
+    expect(loadRoom(file)).toBeNull();
+    saveRoom(file, room);
+    expect(loadRoom(file)).toEqual(room);
+    saveRoom(file, { ...room, secret: 'short' });
+    expect(loadRoom(file)).toBeNull();
+  });
+
+  it('takes a request, and a reply only for an ask that is open', async () => {
+    const { p, got, from } = await paired();
+    expect(got.phone).toEqual([true]);
+    await from({ t: 'req', id: 'a', text: 'open notepad' });
+    expect(got.requests).toEqual(['open notepad']);
+
+    await from({ t: 'reply', id: '1', yes: true });            // nothing was asked: dropped
+    expect(got.replies).toEqual([]);
+    p.ask({ id: '1', question: 'Move it to the Recycle Bin?' });
+    await from({ t: 'reply', id: '2', yes: true });            // another id: dropped
+    expect(got.replies).toEqual([]);
+    await from({ t: 'reply', id: '1', yes: true });
+    expect(got.replies).toEqual([{ id: '1', yes: true, choice: undefined, text: undefined }]);
+    await from({ t: 'reply', id: '1', yes: true });            // answered already: dropped
+    expect(got.replies).toHaveLength(1);
+
+    p.ask({ id: '3', question: 'Sure?' });
+    p.askDone('3');                                            // answered on the PC
+    await from({ t: 'reply', id: '3', yes: true });
+    expect(got.replies).toHaveLength(1);
+  });
+
+  it('forgets the saved pairing when the relay says the room is unpaired or gone', async () => {
+    const a = await paired();
+    expect(existsSync(file)).toBe(true);
+    a.relay.say('{"t":"unpaired"}');
+    await tick();
+    expect(a.got.over).toEqual(['unpaired']);
+    expect(existsSync(file)).toBe(false);
+    expect(a.got.phone).toEqual([true, false]);
+
+    const b = await paired();                                  // the room expired or was closed while the PC was away
+    b.relay.onclose?.({ code: CLOSE.gone });
+    expect(b.got.over).toEqual(['expired']);
+    expect(existsSync(file)).toBe(false);
+
+    const c = await paired();                                  // a dropped connection is not the end: the pairing stays
+    c.relay.onclose?.({ code: 1006 });
+    expect(c.got.over).toEqual([]);
+    expect(existsSync(file)).toBe(true);
+    c.p.close();
   });
 });

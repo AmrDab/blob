@@ -1,11 +1,12 @@
 // Blob's phone page: a remote microphone for the Blob on your computer. The room and the secret come from the
-// link's #fragment (never sent to a server); every message is end-to-end encrypted before it reaches the relay.
+// link's #fragment (never sent to a server): it is read once at load, taken out of the address bar and kept in
+// sessionStorage only. Every message is end-to-end encrypted before it reaches the relay.
 import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Liquid } from 'liquid-gooey';
 import { VoiceRing } from 'voice-ring';
 import { ThinkingOrb } from 'thinking-orbs';
-import { CLOSE, channel, parseFragment, randomB64url, type Channel, type PcMsg, type PhoneMsg, type RelayMsg } from '../src/pair-crypto.ts';
+import { CLOSE, HELLO_BYTES, pairKeys, parseFragment, randomB64url, type Channel, type PairKeys, type PcMsg, type PhoneMsg, type RelayMsg } from '../src/pair-crypto.ts';
 
 declare const __RELAY__: string;   // set at build time when the relay is on another host; '' = this page's host
 
@@ -14,6 +15,27 @@ const GOO = { blur: 13.5, contrast: 40, fill: '#e9e9e9', waviness: 8 };
 const HOLD_MS = 350;      // a press longer than this is press-and-hold; shorter is a tap (tap again to finish)
 const ORB = 190;
 const RETRY_MS = [1000, 2000, 5000, 10000];
+const CHOICE_GAP = 82;   // from one choice to the next: far enough apart that each stays its own blob
+
+// Before anything connects: the room and the secret leave the address bar (and the history entry) and live in
+// sessionStorage, so a reload still works and nothing outlasts the tab.
+const KEEP = 'blob-link';
+const LINK = (() => {
+  const hash = location.hash;
+  if (hash) history.replaceState(null, '', location.pathname);
+  try {
+    if (parseFragment(hash)) sessionStorage.setItem(KEEP, hash);
+    return parseFragment(sessionStorage.getItem(KEEP) ?? '');
+  } catch { return parseFragment(hash); }
+})();
+/** This phone's own id (random, kept in this browser): the relay lets only the first phone into a room. */
+function device(): string {
+  try {
+    let d = localStorage.getItem('blob-device') ?? '';
+    if (!/^[\w-]{22}$/.test(d)) localStorage.setItem('blob-device', d = randomB64url(16));
+    return d;
+  } catch { return randomB64url(16); }
+}
 
 type Ask = Extract<PcMsg, { t: 'ask' }>;
 type Mode = 'ready' | 'listening' | 'working' | 'answer';
@@ -21,7 +43,7 @@ type Over = 'unpaired' | 'expired' | 'taken' | 'bad-link';
 const OVER: Record<Over, string> = {
   unpaired: 'Unpaired. To use this phone again, scan a new code from Blob on your computer.',
   expired: 'This code has expired. Show a new one from Blob on your computer.',
-  taken: 'This code is now open on another phone or tab.',
+  taken: 'This code is in use on another phone or tab.',
   'bad-link': 'This link is not a Blob pairing code. Scan the code that Blob shows on your computer.',
 };
 
@@ -43,7 +65,7 @@ const Send = () => <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 
 const Off = () => <svg viewBox="0 0 24 24" width="56" height="56"><path d="M9 15l6-6M10.5 6.5l1-1a4.2 4.2 0 0 1 6 6l-1 1M13.5 17.5l-1 1a4.2 4.2 0 0 1-6-6l1-1M4 4l16 16" /></svg>;
 
 function App() {
-  const [link] = useState(() => parseFragment(location.hash));
+  const link = LINK;
   const [open, setOpen] = useState(false);            // the relay socket is open
   const [pcOn, setPcOn] = useState(false);            // the computer is in the room
   const [over, setOver] = useState<Over | null>(link ? null : 'bad-link');
@@ -57,7 +79,8 @@ function App() {
   const [sure, setSure] = useState(false);            // Unpair was tapped once
   const [speaking, setSpeaking] = useState(false);
   const ws = useRef<WebSocket | null>(null);
-  const ch = useRef<Channel | null>(null);
+  const keys = useRef<PairKeys | null>(null);
+  const ch = useRef<Channel | null>(null);     // this connection's keys; none until both hellos crossed
   const rec = useRef<any>(null);
   const press = useRef(0);
   const level = useRef(0);                            // the ring's level: there is no mic stream to read on a phone
@@ -88,24 +111,29 @@ function App() {
     const end = (why: Over) => {
       done = true;
       setOver(why); setAsk(null); setOpen(false);
-      history.replaceState(null, '', location.pathname);   // the secret leaves the address bar
+      try { sessionStorage.removeItem(KEEP); } catch { /* nothing kept */ }
     };
     async function connect() {
-      ch.current ??= await channel(link!.secret, link!.room, 'phone');
+      const k = keys.current ??= await pairKeys(link!.secret, link!.room, 'phone');
       if (done) return;
       const base = __RELAY__ || location.origin.replace(/^http/, 'ws');
-      const s = ws.current = new WebSocket(`${base}/room/${link!.room}?role=phone&auth=${ch.current.auth}`);
+      const s = ws.current = new WebSocket(`${base}/room/${link!.room}?role=phone&auth=${k.auth}&dev=${device()}`);
       s.binaryType = 'arraybuffer';
       s.onopen = () => { tries = 0; setOpen(true); };
-      s.onmessage = e => {
-        if (typeof e.data === 'string') {
-          const m = JSON.parse(e.data) as RelayMsg;
-          if (m.t === 'peer') { setPcOn(m.on); if (!m.on) { setMode('ready'); setAsk(null); } }
-          else { end(m.t === 'replaced' ? 'taken' : m.t); s.close(); }
-          return;
-        }
-        ch.current!.open(e.data).then(got, () => { /* not from our computer, or a replay: dropped */ });
+      let line: Promise<unknown> = Promise.resolve();    // frames are handled one at a time, in order
+      const frame = async (data: string | ArrayBuffer) => {
+        if (typeof data === 'string') {
+          const m = JSON.parse(data) as RelayMsg;
+          if (m.t !== 'peer') { end(m.t === 'replaced' ? 'taken' : m.t); s.close(); return; }
+          ch.current = null;                             // a new connection: new keys, once the computer's hello is here
+          setPcOn(false); setMode('ready'); setAsk(null);
+          if (m.on) s.send(k.hello());
+        } else if (data.byteLength === HELLO_BYTES) {
+          ch.current = await k.channel(data);
+          setPcOn(true);
+        } else if (ch.current) got(await ch.current.open(data));
       };
+      s.onmessage = e => { line = line.then(() => frame(e.data)).catch(() => { /* not from our computer, or a replay: dropped */ }); };
       s.onclose = e => {
         if (ws.current !== s || done) return;
         ws.current = null;
@@ -217,7 +245,7 @@ function App() {
     : mode === 'working' ? 'Working on your computer…'
     : Recognition ? 'Tap or hold to talk' : 'This browser has no speech recognition. Type your request.';
   const side = live && !ask;                         // the small blobs beside the orb
-  const gooH = 20 + ORB + (yesNo ? 90 : choices.length ? 22 + choices.length * 62 : 30);
+  const gooH = 20 + ORB + (yesNo ? 90 : choices.length ? 34 + choices.length * CHOICE_GAP : 30);
 
   return (
     <div className="page" data-state={state}>
@@ -241,7 +269,7 @@ function App() {
           </Liquid.Item>
         ))}
         {choices.map((c, i) => (
-          <Liquid.Item key={c} className="it-choice" y={ORB / 2 + 46 + i * 62} transition={T} delay={i * 60}>
+          <Liquid.Item key={c} className="it-choice" y={ORB / 2 + 58 + i * CHOICE_GAP} transition={T} delay={i * 60}>
             <button className="blob choice" onClick={() => reply({ choice: c })}>{c}</button>
           </Liquid.Item>
         ))}
