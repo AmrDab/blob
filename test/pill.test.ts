@@ -5,7 +5,7 @@ import { answerLine, parseCommand, pillState, type PillState } from '../src/pill
 import { relay } from '../src/pill-host.ts';
 
 const RUNNING: PillState = { mode: 'running', activity: 'Working' };
-const PAUSED: PillState = { mode: 'paused', message: 'The agent says: Sign in', app: 'Edge', choices: ['Yes', 'No'], input: null, sound: true };
+const PAUSED: PillState = { mode: 'paused', message: 'Sign in', app: 'Edge', choices: ['Yes', 'No'], input: null, sound: true };
 
 describe('the pill from clawdcursor\'s environment', () => {
   it('is running, with the activity it was started with', () => {

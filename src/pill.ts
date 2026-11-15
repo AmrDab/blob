@@ -25,7 +25,7 @@ export function pillState(env: Record<string, string | undefined>): PillState {
     : null;
   return {
     mode: 'paused',
-    message: env.CLAWD_BANNER_MESSAGE ?? '',
+    message: (env.CLAWD_BANNER_MESSAGE ?? '').replace(/^The agent says: /, ''),   // Blob is the one asking
     app: env.CLAWD_BANNER_APP?.trim() ?? '',
     choices: Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string' && c.length > 0).slice(0, MAX_CHOICES) : [],
     input,

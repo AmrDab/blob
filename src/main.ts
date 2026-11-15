@@ -422,7 +422,11 @@ async function setupFix(id: string): Promise<void> {
   try { ok = await fix(id); } finally { busy(false); }
   const still = (await check()).find(c => c.id === id && !c.ok);
   if (still && id === 'mac') watchMac();
-  else if (still) caption(ok ? `${still.label}: not done yet.` : `That didn't work. In a terminal, run: ${still.fix}`);
+  else if (still && ok) caption(`${still.label}: not done yet.`);
+  else if (still) {
+    caption(`That didn't work. Tap ${still.tap ?? 'it'} to try again.`);
+    console.log(`Blob: setup step "${still.id}" failed; in a terminal, run: ${still.fix}`);
+  }
 }
 
 // macOS: while a permission is missing, look every 2 s by itself, with the pane for the missing one open.

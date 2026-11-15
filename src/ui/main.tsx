@@ -390,7 +390,7 @@ function App() {
           <div className="type-row">
             <Liquid.Item observe>
               <div className="card type">
-                <input autoFocus value={text} placeholder="Ask clawdcursor…" onChange={e => setText(e.target.value)}
+                <input autoFocus value={text} placeholder="Ask Blob…" onChange={e => setText(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') send(); }} />
               </div>
             </Liquid.Item>

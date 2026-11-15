@@ -142,8 +142,8 @@ describe('stream-json parsing', () => {
   it('says so when clawdcursor did not connect', () => {
     const p = new StreamParser();
     const init = (servers: unknown[]) => p.feed(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', mcp_servers: servers }));
-    expect(init([{ name: 'clawdcursor', status: 'failed' }])).toContainEqual({ type: 'caption', text: 'clawdcursor is failed.' });
-    expect(init([])).toContainEqual({ type: 'caption', text: 'Claude Code started without clawdcursor.' });
+    expect(init([{ name: 'clawdcursor', status: 'failed' }])).toContainEqual({ type: 'caption', text: "Blob can't use this computer right now (failed)." });
+    expect(init([])).toContainEqual({ type: 'caption', text: "Blob can't use this computer right now." });
   });
 
   it('reports an error result and ignores lines that are not JSON', () => {

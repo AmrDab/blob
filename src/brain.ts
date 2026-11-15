@@ -248,8 +248,8 @@ export class StreamParser {
       const servers: any[] = Array.isArray(e.mcp_servers) ? e.mcp_servers : [];
       const s = servers.find(x => x?.name === 'clawdcursor');
       const f = servers.find(x => x?.name === 'files');
-      if (!s) out.push({ type: 'caption', text: 'Claude Code started without clawdcursor.' });
-      else if (s.status !== 'connected') out.push({ type: 'caption', text: `clawdcursor is ${s.status ?? 'not connected'}.` });
+      if (!s) out.push({ type: 'caption', text: "Blob can't use this computer right now." });
+      else if (s.status !== 'connected') out.push({ type: 'caption', text: `Blob can't use this computer right now (${s.status ?? 'not connected'}).` });
       else if (f && f.status !== 'connected') out.push({ type: 'caption', text: `Blob's file tools are ${f.status ?? 'not connected'}.` });
       return out;
     }

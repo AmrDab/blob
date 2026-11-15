@@ -10,7 +10,7 @@ const REPO = 'https://github.com/AmrDab/blob';
 const LINES = [
   ['A tiny blob on your desktop.', 'Tell it what to do. It does it.'],
   ['Talk or type.', 'Hold it and speak, or type one line.'],
-  ['It does it on your computer.', 'Your own Claude thinks. clawdcursor is its hands.'],
+  ['It does it on your computer.', 'Apps, files, the web: it clicks and types for you.'],
   ['It learns your shortcuts.', 'Do a task three times and it becomes one tap.'],
   ['Just ask it to change.', 'No settings menu. It always asks Yes first.'],
   ['Private by design.', 'It learns from app names, never screenshots. That stays on your computer unless you say Yes.'],
@@ -113,7 +113,7 @@ const Bar = () => (
 const Foot = ({ style }: { style?: CSSProperties }) => (
   <footer className="foot" style={style}>
     <span>Open source, MIT. Windows first.</span>
-    <span><a href={REPO}>GitHub</a><a href="https://github.com/AmrDab/clawdcursor">clawdcursor</a></span>
+    <span><a href={REPO}>GitHub</a></span>
   </footer>
 );
 function Get() {

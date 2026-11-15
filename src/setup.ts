@@ -22,7 +22,7 @@ const shell: Runner = (command, args, timeoutMs = 20_000) => new Promise(res =>
 
 /** What clawdcursor's own consent screen says, in short. Agree runs `clawdcursor consent --accept`. */
 export const CONSENT_TEXT =
-  'clawdcursor is how Blob uses this computer for you: it can click, type, read the screen and the clipboard, and ' +
+  'Blob uses this computer for you: it can click, type, read the screen and the clipboard, and ' +
   'open apps. Use it only on a computer that is yours. You can stop it at any time from the pill at the top of the screen.';
 
 const MAC_TEXT =
@@ -103,13 +103,13 @@ export async function runChecks(platform: string = process.platform, run: Runner
   }
   const installed = (await run(...clawd(['--version']))).ok;
   checks.push({
-    id: 'clawdcursor', ok: installed, label: 'Install clawdcursor', fix: 'npm i -g clawdcursor', tap: 'Install',
-    text: 'clawdcursor is the hands Blob uses on this computer. Installing takes about a minute.',
+    id: 'clawdcursor', ok: installed, label: 'Finish setting up Blob', fix: 'npm i -g clawdcursor', tap: 'Install',
+    text: 'Blob needs one more part to use this computer. Installing takes about a minute.',
   });
   if (!installed) return checks;                    // its OK and its permissions come after it is there
   checks.push({
     id: 'consent', ok: existsSync(join(home, '.clawdcursor', 'consent')),
-    label: 'Give clawdcursor its OK', fix: 'clawdcursor consent --accept', tap: 'Agree', text: CONSENT_TEXT,
+    label: 'Let Blob use this computer', fix: 'clawdcursor consent --accept', tap: 'Agree', text: CONSENT_TEXT,
   });
   if (platform === 'darwin') {
     checks.push({ id: 'mac', ok: (await macNeeds(run)).ok, label: 'Allow Blob to use your Mac', fix: 'clawdcursor grant', tap: 'Allow', text: MAC_TEXT });
