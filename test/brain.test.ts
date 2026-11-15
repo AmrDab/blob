@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { StreamParser, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, outcomeOf, userMessage } from '../src/brain.ts';
+import { StreamParser, callLabel, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
 
 describe('claude command line', () => {
-  it('runs stream-json print mode with clawdcursor as the only tools', () => {
+  it('runs stream-json print mode with clawdcursor, the files server and the read-only built-ins', () => {
     const a = claudeArgs({ mcpConfigPath: '/tmp/mcp.json', model: 'sonnet' });
     const after = (flag: string) => a[a.indexOf(flag) + 1];
     expect(a[0]).toBe('-p');
@@ -11,8 +11,9 @@ describe('claude command line', () => {
     expect(a).toContain('--verbose');
     expect(after('--mcp-config')).toBe('/tmp/mcp.json');
     expect(a).toContain('--strict-mcp-config');
-    expect(after('--tools')).toBe('');
-    expect(after('--allowedTools')).toBe('mcp__clawdcursor__*');
+    expect(after('--tools')).toBe('Read,Glob,Grep');
+    expect(after('--allowedTools')).toBe('mcp__clawdcursor__*,mcp__files__*,Read,Glob,Grep');
+    expect(a.join(' ')).not.toMatch(/Bash|Edit|Write/);
     expect(after('--model')).toBe('sonnet');
     expect(after('--append-system-prompt')).toMatch(/clawdcursor/);
     expect(a).not.toContain('--resume');
@@ -30,7 +31,11 @@ describe('claude command line', () => {
     expect(clawdcursorCommand({}, 'darwin')).toEqual({ command: 'clawdcursor', args: ['mcp', '--compact'] });
     expect(clawdcursorCommand({ PRONTO_CLAWDCURSOR: 'node "C:/dev x/cli.js" mcp --compact' }, 'linux'))
       .toEqual({ command: 'node', args: ['C:/dev x/cli.js', 'mcp', '--compact'] });
-    expect(JSON.parse(mcpConfig({}, 'linux'))).toEqual({ mcpServers: { clawdcursor: { type: 'stdio', command: 'clawdcursor', args: ['mcp', '--compact'] } } });
+    const files = { command: '/usr/bin/node', args: ['/app/dist/files-mcp.mjs'], env: { PRONTO_ASK_URL: 'http://127.0.0.1:1/ask', PRONTO_ASK_TOKEN: 't' } };
+    expect(JSON.parse(mcpConfig(files, {}, 'linux'))).toEqual({ mcpServers: {
+      clawdcursor: { type: 'stdio', command: 'clawdcursor', args: ['mcp', '--compact'] },
+      files: { type: 'stdio', ...files },
+    } });
   });
 
   it('writes one stream-json user message line', () => {
@@ -73,22 +78,42 @@ const RUN = [
   { type: 'user', session_id: 's-1', message: { role: 'user', content: [
     { type: 'tool_result', tool_use_id: 'toolu_3', content: [{ type: 'text', text: '{"elements":[]}' }] },
   ] } },
+  { type: 'assistant', session_id: 's-1', message: { role: 'assistant', content: [
+    { type: 'tool_use', id: 'toolu_4', name: 'mcp__files__move', input: { from: '/a', to: '/b' } },
+    { type: 'tool_use', id: 'toolu_5', name: 'Read', input: { file_path: '/b' } },
+  ] } },
+  { type: 'user', session_id: 's-1', message: { role: 'user', content: [
+    { type: 'tool_result', tool_use_id: 'toolu_4', content: [{ type: 'text', text: 'Moved /a to /b.\n[confirmed]' }] },
+    { type: 'tool_result', tool_use_id: 'toolu_5', content: 'hello' },
+  ] } },
   { type: 'result', subtype: 'success', is_error: false, result: 'Notepad is open.\nIt is empty.', session_id: 's-1', total_cost_usd: 0.01 },
 ].map(e => JSON.stringify(e));
 
 describe('stream-json parsing', () => {
-  it('turns a run into captions (step, then answer) and one log entry per clawdcursor call', () => {
+  it('turns a run into captions (each step), one log entry per call, and the answer', () => {
     const p = new StreamParser();
     const updates = RUN.flatMap(l => p.feed(l));
     expect(updates.filter(u => u.type === 'caption').map(u => (u as { text: string }).text)).toEqual([
-      "I'll open Notepad.", 'system · open_app…', 'accessibility · invoke…', 'accessibility · read_tree…', 'Notepad is open. It is empty.',
+      "I'll open Notepad.", 'system · open_app…', 'accessibility · invoke…', 'accessibility · read_tree…', 'files · move…', 'Read…',
     ]);
+    expect(updates.filter(u => u.type === 'answer')).toEqual([{ type: 'answer', text: 'Notepad is open. It is empty.' }]);
     expect(updates.filter(u => u.type === 'log').map(u => (u as { entry: unknown }).entry)).toEqual([
       { tool: 'system', action: 'open_app', outcome: 'confirmed', line: '[confirmed]' },
       { tool: 'accessibility', action: 'invoke', outcome: 'failed',
         line: '[failed · NOT_FOUND · hint: read the tree first · next: accessibility {"action":"read_tree"}]' },
       { tool: 'accessibility', action: 'read_tree', outcome: 'ok', line: '{"elements":[]}' },
+      { tool: 'files', action: 'move', outcome: 'confirmed', line: '[confirmed]' },
+      { tool: 'Read', outcome: 'ok', line: 'hello' },
     ]);
+    // the calls a shortcut is saved from: server, tool and the full arguments, in order
+    expect(p.calls.map(c => [c.server, c.tool, c.args, c.outcome])).toEqual([
+      ['clawdcursor', 'system', { action: 'open_app', name: 'Notepad' }, 'confirmed'],
+      ['clawdcursor', 'accessibility', { action: 'invoke', name: 'Save' }, 'failed'],
+      ['clawdcursor', 'accessibility', { action: 'read_tree' }, 'ok'],
+      ['files', 'move', { from: '/a', to: '/b' }, 'confirmed'],
+      ['', 'Read', { file_path: '/b' }, 'ok'],
+    ]);
+    expect(p.resultError).toBe(false);
     expect(updates.filter(u => u.type === 'session')).toEqual([{ type: 'session', id: 's-1' }, { type: 'session', id: 's-1' }]);
     expect(p.sawResult).toBe(true);
   });
@@ -104,7 +129,23 @@ describe('stream-json parsing', () => {
     const p = new StreamParser();
     expect(p.feed('not json')).toEqual([]);
     expect(p.feed(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, session_id: 's' })))
-      .toContainEqual({ type: 'caption', text: 'Claude Code stopped (error_during_execution).' });
+      .toContainEqual({ type: 'answer', text: 'Claude Code stopped (error_during_execution).' });
+    expect(p.resultError).toBe(true);
+  });
+
+  it('says so when the files server did not connect', () => {
+    const p = new StreamParser();
+    expect(p.feed(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's',
+      mcp_servers: [{ name: 'clawdcursor', status: 'connected' }, { name: 'files', status: 'failed' }] })))
+      .toContainEqual({ type: 'caption', text: "Pronto's file tools are failed." });
+  });
+
+  it('splits tool names and labels calls', () => {
+    expect(splitToolName('mcp__clawdcursor__accessibility')).toEqual({ server: 'clawdcursor', tool: 'accessibility' });
+    expect(splitToolName('mcp__files__make_folder')).toEqual({ server: 'files', tool: 'make_folder' });
+    expect(splitToolName('Glob')).toEqual({ server: '', tool: 'Glob' });
+    expect(callLabel('clawdcursor', 'window', { action: 'focus' })).toEqual({ tool: 'window', action: 'focus' });
+    expect(callLabel('files', 'trash', { path: '/x' })).toEqual({ tool: 'files', action: 'trash' });
   });
 
   it('reads the outcome from the last line only', () => {

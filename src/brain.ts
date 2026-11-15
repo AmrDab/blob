@@ -1,4 +1,4 @@
-// One run at a time of the user's own `claude -p`, with clawdcursor as its only tools.
+// One run at a time of the user's own `claude -p`, with clawdcursor and Pronto's file tools.
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
@@ -11,17 +11,31 @@ export interface LogEntry {
   line: string;       // clawdcursor's own outcome line, or the first line of the result
 }
 
+/** One finished tool call of a run, in order: what a shortcut is saved from. server '' = a Claude Code built-in. */
+export interface Call {
+  server: string;     // 'clawdcursor' | 'files' | ''
+  tool: string;       // the tool's own name: "accessibility", "move", "Read"
+  args: Record<string, unknown>;
+  outcome: string;
+  line: string;
+}
+
 export type Update =
   | { type: 'caption'; text: string }
+  | { type: 'answer'; text: string }
   | { type: 'log'; entry: LogEntry }
   | { type: 'session'; id: string };
 
-const PREFIX = 'mcp__clawdcursor__';
+export type BrainEvent = Update | { type: 'busy'; busy: boolean } | { type: 'done'; calls: Call[]; ok: boolean };
+
+/** Claude Code's read-only file tools; changes go through Pronto's files server, which asks before trash/overwrite. */
+export const BUILTIN_TOOLS = ['Read', 'Glob', 'Grep'];
 
 export const SYSTEM_PROMPT =
   'You are driven from a small floating bubble on the desktop: the request comes from the user by voice or typing. ' +
-  'Do it on this computer with the clawdcursor tools. Your final reply is shown as a one-line caption: ' +
-  'one or two short plain sentences saying what you did or found, no markdown.';
+  'Do it on this computer with the clawdcursor tools. For files and folders use Read, Glob and Grep to look and the ' +
+  'files tools (list_dir, make_folder, move, trash) to change them, not the desktop. Your final reply is shown as a ' +
+  'one-line caption: one or two short plain sentences saying what you did or found, no markdown.';
 
 /** The clawdcursor MCP server command: `clawdcursor mcp --compact`, or PRONTO_CLAWDCURSOR (e.g. a dev build). */
 export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): { command: string; args: string[] } {
@@ -32,10 +46,15 @@ export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platfor
   return { command: parts[0], args: parts.slice(1) };
 }
 
-/** The --mcp-config file: clawdcursor and nothing else. */
-export function mcpConfig(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
+export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
+
+/** The --mcp-config file: clawdcursor and Pronto's files server, nothing else. */
+export function mcpConfig(files: ServerCommand, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
   const { command, args } = clawdcursorCommand(env, platform);
-  return JSON.stringify({ mcpServers: { clawdcursor: { type: 'stdio', command, args } } }, null, 2);
+  return JSON.stringify({ mcpServers: {
+    clawdcursor: { type: 'stdio', command, args },
+    files: { type: 'stdio', ...files },
+  } }, null, 2);
 }
 
 export function claudeArgs(o: { mcpConfigPath: string; model: Model; resume?: string }): string[] {
@@ -46,8 +65,8 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Model; resume?: st
     '--mcp-config', o.mcpConfigPath,
     '--strict-mcp-config',                  // no other MCP server (not the user's own, not a plugin's)
     '--setting-sources', 'project',         // the cwd is an empty folder: none of the user's hooks, plugins or CLAUDE.md
-    '--tools', '',                          // no built-in tool: the desktop is reached through clawdcursor only
-    '--allowedTools', `${PREFIX}*`,
+    '--tools', BUILTIN_TOOLS.join(','),     // read-only built-ins only: no Bash, no Edit/Write
+    '--allowedTools', ['mcp__clawdcursor__*', 'mcp__files__*', ...BUILTIN_TOOLS].join(','),
     '--disable-slash-commands',
     '--no-chrome',
     '--append-system-prompt', SYSTEM_PROMPT,
@@ -95,10 +114,27 @@ function stepCaption(tool: string, action?: string): string {
   return `${tool}${action ? ' · ' + action : ''}…`;
 }
 
+/** "mcp__files__move" -> { server: 'files', tool: 'move' }; a built-in ("Read") has server ''. */
+export function splitToolName(name: string): { server: string; tool: string } {
+  const parts = name.split('__');
+  if (parts[0] === 'mcp' && parts.length >= 3) return { server: parts[1], tool: parts.slice(2).join('__') };
+  return { server: '', tool: name };
+}
+
+/** How a call reads in the caption and the log: "accessibility · invoke", "files · move", "Read". */
+export function callLabel(server: string, tool: string, args: Record<string, unknown>): { tool: string; action?: string } {
+  if (server === 'clawdcursor') return { tool, action: typeof args.action === 'string' ? args.action : undefined };
+  if (server) return { tool: server, action: tool };
+  return { tool };
+}
+
 /** Turns stream-json events into caption and log updates. One parser per run. */
 export class StreamParser {
-  private calls = new Map<string, { tool: string; action?: string }>();
+  private pending = new Map<string, { server: string; tool: string; args: Record<string, unknown> }>();
+  /** The run's finished tool calls, in order. */
+  readonly calls: Call[] = [];
   sawResult = false;
+  resultError = false;
 
   feed(line: string): Update[] {
     let e: any;
@@ -106,19 +142,23 @@ export class StreamParser {
     const out: Update[] = [];
     if (e?.type === 'system' && e.subtype === 'init') {
       if (typeof e.session_id === 'string') out.push({ type: 'session', id: e.session_id });
-      const s = Array.isArray(e.mcp_servers) ? e.mcp_servers.find((x: any) => x?.name === 'clawdcursor') : undefined;
+      const servers: any[] = Array.isArray(e.mcp_servers) ? e.mcp_servers : [];
+      const s = servers.find(x => x?.name === 'clawdcursor');
+      const f = servers.find(x => x?.name === 'files');
       if (!s) out.push({ type: 'caption', text: 'Claude Code started without clawdcursor.' });
       else if (s.status !== 'connected') out.push({ type: 'caption', text: `clawdcursor is ${s.status ?? 'not connected'}.` });
+      else if (f && f.status !== 'connected') out.push({ type: 'caption', text: `Pronto's file tools are ${f.status ?? 'not connected'}.` });
       return out;
     }
     if (e?.type === 'assistant' && Array.isArray(e.message?.content)) {
       for (const b of e.message.content) {
         if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) out.push({ type: 'caption', text: oneLine(b.text) });
         if (b?.type === 'tool_use' && typeof b.name === 'string') {
-          const tool = b.name.startsWith(PREFIX) ? b.name.slice(PREFIX.length) : b.name;
-          const action = typeof b.input?.action === 'string' ? b.input.action : undefined;
-          this.calls.set(b.id, { tool, action });
-          out.push({ type: 'caption', text: stepCaption(tool, action) });
+          const { server, tool } = splitToolName(b.name);
+          const args = b.input && typeof b.input === 'object' && !Array.isArray(b.input) ? b.input : {};
+          this.pending.set(b.id, { server, tool, args });
+          const l = callLabel(server, tool, args);
+          out.push({ type: 'caption', text: stepCaption(l.tool, l.action) });
         }
       }
       return out;
@@ -126,16 +166,19 @@ export class StreamParser {
     if (e?.type === 'user' && Array.isArray(e.message?.content)) {
       for (const b of e.message.content) {
         if (b?.type !== 'tool_result') continue;
-        const call = this.calls.get(b.tool_use_id) ?? { tool: '?' };
-        out.push({ type: 'log', entry: { ...call, ...outcomeOf(resultText(b.content), b.is_error === true) } });
+        const call = this.pending.get(b.tool_use_id) ?? { server: '', tool: '?', args: {} };
+        const o = outcomeOf(resultText(b.content), b.is_error === true);
+        this.calls.push({ ...call, ...o });
+        out.push({ type: 'log', entry: { ...callLabel(call.server, call.tool, call.args), ...o } });
       }
       return out;
     }
     if (e?.type === 'result') {
       this.sawResult = true;
+      this.resultError = e.is_error === true;
       if (typeof e.session_id === 'string') out.push({ type: 'session', id: e.session_id });
       const text = typeof e.result === 'string' && e.result.trim() ? e.result : e.is_error ? `Claude Code stopped (${e.subtype ?? 'error'}).` : 'Done.';
-      out.push({ type: 'caption', text: oneLine(text, 400) });
+      out.push({ type: 'answer', text: oneLine(text, 400) });
     }
     return out;
   }
@@ -152,7 +195,7 @@ export class Brain {
   private child?: { p: ChildProcessWithoutNullStreams; model: Model; sent: boolean; early: Update[] };
   private session?: string;
 
-  constructor(private o: { mcpConfigPath: string; cwd: string; emit: (u: Update | { type: 'busy'; busy: boolean }) => void }) {}
+  constructor(private o: { mcpConfigPath: string; cwd: string; emit: (e: BrainEvent) => void }) {}
 
   get busy(): boolean { return !!this.child?.sent; }
 
@@ -204,8 +247,9 @@ export class Brain {
       finished = true;
       if (this.child === entry) this.child = undefined;
       if (!entry.sent) return;
-      if (!parser.sawResult) this.o.emit({ type: 'caption', text: oneLine(stderr.trim().split('\n').pop() || why, 400) });
+      if (!parser.sawResult) this.o.emit({ type: 'answer', text: oneLine(stderr.trim().split('\n').pop() || why, 400) });
       this.o.emit({ type: 'busy', busy: false });
+      this.o.emit({ type: 'done', calls: parser.calls, ok: parser.sawResult && !parser.resultError });
     };
     p.on('error', err => done(`Could not start claude: ${err.message}`));
     p.on('close', code => done(`claude exited (${code}).`));
