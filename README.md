@@ -37,7 +37,7 @@ Blob walks you through it on small cards, one at a time:
    Accessibility and Screen Recording, opens the right page of System Settings and notices by itself when you are
    done (Screen Recording may need Blob to be closed and opened again).
 2. **Three questions**, Yes or No: learn from what you do, talk to Blob, make shortcuts for you.
-3. **Pair your phone?** Later, or show the QR code (only when a relay is set, see below).
+3. **Pair your phone?** Later, or show the QR code.
 
 ## Use
 
@@ -67,8 +67,10 @@ show up on the phone, and Stop on the phone stops everything. "Unpair my phone" 
 Messages are end-to-end encrypted between the computer and the phone; the relay in between only passes them on. The
 code works for one phone only, and it is kept out of screenshots and away from the AI.
 
-Pairing needs a relay (`relay/`, a small Cloudflare Worker that also serves the phone page in `phone/`). Until one is
-deployed and named in `BLOB_RELAY`, Blob says plainly that phone pairing isn't set up yet.
+Pairing goes through a relay. By default Blob uses its own public one, at `https://theblob.pages.dev` (the phone page
+is at `/phone/` there). To run your own, deploy `relay/` (a small Cloudflare Worker that also serves the phone page
+in `phone/`) and name it in `BLOB_RELAY`. `BLOB_RELAY=''` turns phones off: Blob then says plainly that phone pairing
+isn't set up.
 
 ## Privacy
 
@@ -83,7 +85,8 @@ deployed and named in `BLOB_RELAY`, Blob says plainly that phone pairing isn't s
 
 ## Environment
 
-- `BLOB_RELAY`: where the phone relay lives, e.g. `https://blob-relay.<you>.workers.dev`. Not set: no phone pairing.
+- `BLOB_RELAY`: where the phone relay lives (default `https://theblob.pages.dev`), e.g. your own
+  `https://blob-relay.<you>.workers.dev`. Set to `''`: no phone pairing.
 - `BLOB_CLAWDCURSOR`: the clawdcursor command (default `clawdcursor mcp --compact`), e.g. a dev build:
   `node C:/path/to/clawdcursor/dist/surface/cli.js mcp --compact`.
 - `BLOB_HOME`: where Blob keeps its state (default `~/.blob`).

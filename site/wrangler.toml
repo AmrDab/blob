@@ -1,0 +1,10 @@
+# The theblob website on Cloudflare Pages (direct upload). Build first (npm run build:site), then from site/:
+#   npx wrangler pages deploy --branch main
+# functions/room passes /room/<id> to the relay Worker (relay/) through the RELAY binding.
+name = "theblob"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-06-01"
+
+[[services]]
+binding = "RELAY"
+service = "blob-relay"

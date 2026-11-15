@@ -1,11 +1,12 @@
-// Builds the phone page into phone/dist (static files: the Worker in relay/ serves them, or Cloudflare Pages).
+// Builds the phone page into phone/dist/phone: it is served at /phone/ (by the Worker in relay/, or by the site on
+// Cloudflare Pages, which copies it in `npm run build:site`).
 // BLOB_RELAY=wss://host sets the relay when it is not on the page's own host.
 import { build } from 'esbuild';
 import { cpSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const here = import.meta.dirname;
-const out = join(here, 'dist');
+const out = join(here, 'dist', 'phone');
 mkdirSync(join(out, 'fonts'), { recursive: true });
 await build({
   entryPoints: [join(here, 'main.tsx')],

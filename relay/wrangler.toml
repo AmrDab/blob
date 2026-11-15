@@ -1,5 +1,5 @@
 # Blob's phone relay. Placeholder name: it deploys to https://blob-relay.<your-subdomain>.workers.dev
-# Build the phone page first (npm run build:phone): the Worker serves phone/dist and relays /room/<id>.
+# Build the phone page first (npm run build:phone): the Worker serves it at /phone/ and relays /room/<id>.
 name = "blob-relay"
 main = "src/index.ts"
 compatibility_date = "2025-06-01"
