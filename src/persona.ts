@@ -15,8 +15,8 @@ export function persona(s: Settings, o: { memory?: string; now?: Date; platform?
   const now = o.now ?? new Date(), platform = o.platform ?? process.platform;
   const win = platform === 'win32';
   const looks = win
-    ? 'Get-ChildItem, Get-Content, Select-String, Get-Process, Get-Command, Test-Path, git status, git log, winget list, winget search, --version'
-    : 'ls, cat, grep, ps, which, git status, git log, --version';
+    ? 'Get-ChildItem, Get-Content, Select-String, Get-Process, Get-Command, Test-Path, winget list, winget search, --version'
+    : 'ls, cat, grep, ps, which, --version';
   return [
     `Blob is an assistant on this computer (${SYSTEM[platform] ?? platform}). It carries out any task the user gives ` +
       'it here: apps, files, the web, system settings, commands. Local time now: ' +
