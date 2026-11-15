@@ -398,7 +398,7 @@ async function post(path: string, body: any): Promise<void> {
     case '/model': {                                // a click on the chip: the user's own choice, no question
       const m = parseValue('model', body.model);
       if (m !== undefined) settings.set('model', m as Model);
-      focus.restore();
+      if (body.stay !== true) focus.restore();     // from the open Type box: keep typing there
       return;
     }
     case '/cancel': brain.cancel(); return;

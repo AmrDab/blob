@@ -140,6 +140,14 @@ function App() {
     return () => { removeEventListener('keydown', esc); removeEventListener('pointermove', moved); };
   }, []);
   useEffect(() => { if (!shortcuts.length) setBrowsing(false); }, [shortcuts]);
+  // The Type box goes away by itself: when another window is clicked, or soon after the pointer leaves an empty box.
+  const typeLeave = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    if (!typeOpen) return;
+    const blur = () => setTypeOpen(false);
+    addEventListener('blur', blur);
+    return () => { removeEventListener('blur', blur); clearTimeout(typeLeave.current); };
+  }, [typeOpen]);
 
   // ── Speak: a still press talks (hold, or tap and tap again), a moving press drags the window ──
   async function begin(): Promise<boolean> {
@@ -280,6 +288,8 @@ function App() {
   const shown = !busy && (caption || phase === 'ask' || phase === 'downloading');
   return (
     <div className="root" data-webview-drag-region="deep"
+      onMouseLeave={() => { if (typeOpen && !text.trim()) typeLeave.current = setTimeout(() => { setTypeOpen(false); back(); }, 1500); }}
+      onMouseEnter={() => clearTimeout(typeLeave.current)}
       onPointerDown={e => { if (!(e.target as Element).closest('button, input, .log')) dragging.current = true; }}>
       <Liquid {...GOO} className="cards" ref={cardsRef}>
         {logOpen && (
@@ -358,7 +368,7 @@ function App() {
               </div>
             </Liquid.Item>
             <Liquid.Item observe>
-              <button className="card chip" title="Model" onClick={() => void post('/model', { model: MODELS[(MODELS.indexOf(model) + 1) % MODELS.length] })}>{LABEL[model]}</button>
+              <button className="card chip" title="Model" onClick={() => void post('/model', { model: MODELS[(MODELS.indexOf(model) + 1) % MODELS.length], stay: true })}>{LABEL[model]}</button>
             </Liquid.Item>
           </div>
         )}
