@@ -62,9 +62,9 @@ const server = createServer(async (req, res) => {
   }
   const file = normalize(join(DIST, url.pathname === '/' ? 'index.html' : url.pathname));
   if (!file.startsWith(DIST)) { res.writeHead(404).end(); return; }
-  try {
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' }).end(readFileSync(file));
-  } catch { res.writeHead(404).end(); }
+  let data: Buffer;
+  try { data = readFileSync(file); } catch { res.writeHead(404).end(); return; }
+  res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' }).end(data);
 });
 await new Promise<void>(ok => {
   server.once('error', () => server.listen(0, '127.0.0.1', ok));

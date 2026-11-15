@@ -135,10 +135,10 @@ function App() {
       <div className="goo-box" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
         <Liquid blur={13.5} contrast={40} fill="#e9e9e9" waviness={8} className="goo">
           <Liquid.Item x={open ? -54 : 0} y={open ? -34 : 0} transition={T}>
-            <button className="blob small" aria-label="Type" onClick={() => setTypeOpen(v => !v)}><Keys /></button>
+            <button className={`blob small${open ? "" : " shut"}`} aria-label="Type" onClick={() => setTypeOpen(v => !v)}><Keys /></button>
           </Liquid.Item>
           <Liquid.Item x={0} y={open ? -64 : 0} transition={T} delay={40}>
-            <button className="blob small" aria-label="Log" onClick={() => setLogOpen(v => !v)}><List /></button>
+            <button className={`blob small${open ? "" : " shut"}`} aria-label="Log" onClick={() => setLogOpen(v => !v)}><List /></button>
           </Liquid.Item>
           <Liquid.Item>
             <button className={`blob main ${phase} ${busy ? 'busy' : ''}`} aria-label="Speak"
