@@ -45,13 +45,14 @@ const VERSION_FLAGS: Record<string, string[]> = {
 };
 /** A network or device path (\\server\share, //server, \\?\, a URL) anywhere in an argument: reading one can send the
  *  user's Windows sign-in to that server, so it is never "only looking". */
-const REMOTE = /\\\\|\/\//;
+const REMOTE = /[\\/]{2}|::/;   // any two separators of either kind (\\, //, \/, /\), or a provider path (FileSystem::)
 
 // Anything that chains, redirects, substitutes or groups, quoted or not; and curly quotes, which PowerShell reads as quotes.
 const WIN_UNSAFE = /[;&<>(){}`$\r\n\u2018-\u201f]/;
 const UNIX_UNSAFE = /[;&<>(){}`$\r\n\\\u2018-\u201f]/;     // and the backslash, which can hide a quote from this file
 /** Characters that do not show, or that change the order text is shown in. */
-const HIDDEN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0085\u00a0\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
+/** Characters that don't show on screen (controls, zero-width, bidi): text with them is never shown on a Yes card. */
+export const HIDDEN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0085\u00a0\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
 
 /** Splits on unquoted `|` into commands, and each command on unquoted spaces. Null: a quote never closes. */
 function pipeline(command: string): { text: string; quoted: boolean }[][] | null {

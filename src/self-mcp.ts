@@ -6,7 +6,7 @@
 import { ASK_TIMEOUT_MS, MAX_DETAIL, askUser } from './ask.ts';
 import type { ToolResult } from './files-mcp.ts';
 import { frequentTasks, habitsFile } from './habits.ts';
-import { SECRET, facts, forget, matching, memoryBrief, memoryFile, remember } from './memory.ts';
+import { MAX_FACT, SECRET, UNSAFE_FACT, facts, forget, matching, memoryBrief, memoryFile, normalFact, remember } from './memory.ts';
 import { persona } from './persona.ts';
 import { MAX_TEXT, addEntry, describe, loadSchedule, nextDue, parseWhen, removeEntry, scheduleFile, stamp } from './schedule.ts';
 import { CHANGEABLE, DEFAULTS, MODELS, SettingsStore, WHAT, parseValue, type Key, type Settings } from './settings.ts';
@@ -136,12 +136,17 @@ export function selfTools(d: SelfDeps) {
     /** Asked first, with the fact shown: whatever is saved goes into every later request, so a page that tricked the
      *  AI must not be able to plant it. */
     async remember(a: { fact?: unknown }): Promise<ToolResult> {
-      const fact = typeof a.fact === 'string' ? a.fact.trim() : '';
-      if (fact && facts(d.memoryFile).some(f => f.toLowerCase() === fact.toLowerCase())) return ok('That is remembered already.');
-      if (fact && !SECRET.test(fact) && !(await d.ask('Remember this?', fact))) return NO();   // a secret is refused below, unasked
+      // One string throughout: the card shows exactly what is checked and saved.
+      const fact = normalFact(a.fact);
+      if (!fact) return failed('NO_FACT', 'pass the fact to remember, one short sentence');
+      if (fact.length > MAX_FACT) return failed('TOO_LONG', `one short sentence, ${MAX_FACT} characters at most`);
+      if (UNSAFE_FACT.test(fact)) return failed('PLAIN_TEXT', 'one plain sentence: no hidden characters and no < or >');
+      if (SECRET.test(fact)) return refused('SECRET', 'Blob does not keep passwords, codes or keys; tell the user so');
+      if (facts(d.memoryFile).some(f => f.replace(/\s+/g, ' ').toLowerCase() === fact.toLowerCase())) return ok('That is remembered already.');
+      if (!(await d.ask('Remember this?', fact))) return NO();
       let r;
-      try { r = remember(d.memoryFile, a.fact); } catch (e) { return failed('CANT_SAVE', (e as Error).message); }
-      if (r === 'empty') return failed('NO_FACT', 'pass the fact to remember, one short sentence');
+      try { r = remember(d.memoryFile, fact); } catch (e) { return failed('CANT_SAVE', (e as Error).message); }
+      if (r === 'empty' || r === 'long' || r === 'unsafe') return failed('NO_FACT', 'pass the fact to remember, one short sentence');
       if (r === 'secret') return refused('SECRET', 'Blob does not keep passwords, codes or keys; tell the user so');
       if (r === 'full') return failed('FULL', 'the memory file is full; ask the user what to forget');
       return ok(r === 'known' ? 'That is remembered already.' : 'Remembered.');

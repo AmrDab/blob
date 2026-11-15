@@ -202,6 +202,9 @@ describe('classify: review fixes', () => {
     for (const c of [String.raw`Get-Content \\evil\share\x`, 'ls //evil/share', String.raw`Test-Path \\?\C:\x`,
       String.raw`type \\.\pipe\x`, String.raw`Get-ChildItem -Path \\evil\s`, String.raw`Select-String -Path \\evil\s\a -Pattern x`])
       expect(classify(c, 'win32'), c).toBe('ask');
+    for (const c of [String.raw`Get-Content \/evil\s\x`, String.raw`Get-Content /\evil\s\x`,
+      String.raw`Get-Content Microsoft.PowerShell.Core\FileSystem::C:\x`])
+      expect(classify(c, 'win32'), c).toBe('ask');
     expect(classify('ls //evil/share', 'darwin')).toBe('ask');
     expect(classify(String.raw`Get-Content C:\Users\me\notes.txt`, 'win32')).toBe('read');
   });

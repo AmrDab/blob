@@ -3,6 +3,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { blobHome } from './settings.ts';
+import { HIDDEN } from './shell.ts';
 
 export const MAX_FACT = 300;        // characters in one fact
 export const MAX_FILE = 16_000;     // characters in the file: remember() refuses past this
@@ -33,10 +34,22 @@ export function facts(file: string): string[] {
   return readMemory(file).split(/\r?\n/).filter(isFact).map(factOf);
 }
 
-/** Adds one fact at the end. 'known': it is there already. 'secret': it reads like a password or key. */
-export function remember(file: string, fact: unknown): 'saved' | 'known' | 'secret' | 'empty' | 'full' {
-  const f = typeof fact === 'string' ? fact.replace(/\s+/g, ' ').trim().replace(/^[-*]\s+/, '').slice(0, MAX_FACT) : '';
+/** Hidden characters (they could make the Yes card show something other than what is saved) or < > (they could
+ *  close the brief's <saved_facts> fence): such a fact is refused. */
+export const UNSAFE_FACT = new RegExp(`${HIDDEN.source}|[<>]`);
+
+/** A fact exactly as it would be saved: one line, no bullet. The question card shows this same string. */
+export function normalFact(fact: unknown): string {
+  return typeof fact === 'string' ? fact.replace(/\s+/g, ' ').trim().replace(/^[-*]\s+/, '') : '';
+}
+
+/** Adds one fact at the end. 'known': it is there already. 'secret': it reads like a password or key. 'long': over
+ *  MAX_FACT (refused, never cut, so what was asked about is exactly what is saved). */
+export function remember(file: string, fact: unknown): 'saved' | 'known' | 'secret' | 'empty' | 'full' | 'long' | 'unsafe' {
+  const f = normalFact(fact);
   if (!f) return 'empty';
+  if (UNSAFE_FACT.test(f)) return 'unsafe';
+  if (f.length > MAX_FACT) return 'long';
   if (SECRET.test(f)) return 'secret';
   const text = readMemory(file);
   if (facts(file).some(x => same(x) === same(f))) return 'known';
@@ -64,7 +77,8 @@ export function forget(file: string, gone: string[]): number {
 export function memoryBrief(file: string, max: number = MAX_BRIEF): string {
   const out: string[] = [];
   let size = 0;
-  for (const f of facts(file).reverse()) {
+  // A hand-edited line can hold anything: < > and hidden characters are dropped, so no line can leave the fence.
+  for (const f of facts(file).map(x => x.replace(new RegExp(UNSAFE_FACT.source, 'g'), '')).reverse()) {
     size += f.length + 3;
     if (size > max) break;
     out.unshift(`- ${f}`);

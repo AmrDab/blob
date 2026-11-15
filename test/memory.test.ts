@@ -31,8 +31,9 @@ describe('memory', () => {
     expect(remember(file, '   ')).toBe('empty');
     expect(remember(file, 42)).toBe('empty');
     expect(facts(file)).toHaveLength(1);
-    remember(file, 'x'.repeat(1000));
-    expect(facts(file)[1]).toHaveLength(MAX_FACT);
+    expect(remember(file, 'x'.repeat(MAX_FACT + 1))).toBe('long');      // refused, never cut: what was asked is what is saved
+    expect(remember(file, 'Likes <b>tea</b>')).toBe('unsafe');
+    expect(facts(file)).toHaveLength(1);
     writeFileSync(file, '- ' + 'y'.repeat(MAX_FILE) + '\n');
     expect(remember(file, 'one more')).toBe('full');
   });
