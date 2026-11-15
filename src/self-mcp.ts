@@ -9,7 +9,8 @@ import { frequentTasks, habitsFile } from './habits.ts';
 import { MAX_FACT, SECRET, UNSAFE_FACT, facts, forget, matching, memoryBrief, memoryFile, normalFact, remember } from './memory.ts';
 import { persona } from './persona.ts';
 import { MAX_TEXT, addEntry, describe, loadSchedule, nextDue, parseWhen, removeEntry, scheduleFile, stamp } from './schedule.ts';
-import { CHANGEABLE, DEFAULTS, MODELS, SettingsStore, WHAT, parseValue, type Key, type Settings } from './settings.ts';
+import { BRAINS, BRAIN_NAME, CHANGEABLE, DEFAULTS, MODELS, SettingsStore, WHAT, parseValue, type BrainName, type Key, type Settings } from './settings.ts';
+import { brains } from './setup.ts';
 import { activityFile, forgetActivity, topActivity } from './watch.ts';
 
 /** What only the host can do. The host answers with a line for the model. */
@@ -23,6 +24,8 @@ export interface SelfDeps {
   host: Host;
   /** Whether a phone relay is set up (BLOB_RELAY). Without one, pairing is not offered. */
   relay: boolean;
+  /** Whether that brain is installed and signed in on this computer. */
+  brainReady: (brain: BrainName) => Promise<boolean>;
   activityFile: string;
   habitsFile: string;
   memoryFile: string;
@@ -37,6 +40,7 @@ const NO = () => refused('USER_SAID_NO', 'the user said No (or did not answer); 
 
 /** The card's question for a change. */
 export function question(key: typeof CHANGEABLE[number], value: Settings[Key]): string {
+  if (key === 'brain') return `Switch to ${BRAIN_NAME[value as BrainName]}? This starts a new conversation.`;
   if (key === 'model') return value === 'default' ? "Switch to Claude Code's default model?" : `Switch to ${String(value)[0].toUpperCase()}${String(value).slice(1)}?`;
   if (key === 'watching') {
     return value
@@ -88,11 +92,16 @@ export function selfTools(d: SelfDeps) {
       if (!Object.hasOwn(DEFAULTS, key)) return failed('UNKNOWN_KEY', `the settings are ${CHANGEABLE.join(', ')}`);
       if (!(CHANGEABLE as readonly string[]).includes(key)) return refused('READ_ONLY', `${key} is a status, not something to change`);
       const value = parseValue(key, a.value);
-      if (value === undefined) return failed('BAD_VALUE', key === 'model' ? `model is one of ${MODELS.join(', ')}` : `${key} is true or false`);
+      if (value === undefined) return failed('BAD_VALUE', key === 'model' ? `model is one of ${MODELS.join(', ')}` : key === 'brain' ? `brain is one of ${BRAINS.join(', ')}` : `${key} is true or false`);
       if (d.settings.get()[key] === value) return ok(`${key} is already ${String(value)}. Nothing to change.`);
+      if (key === 'brain' && !(await d.brainReady(value as BrainName))) {
+        return failed('NOT_READY', value === 'codex'
+          ? 'Codex is not installed or not signed in on this computer. Tell the user to run, in a terminal: npm i -g @openai/codex, then: codex login'
+          : 'Claude Code is not installed or not signed in on this computer. Tell the user to install it, then run in a terminal: claude auth login');
+      }
       if (!(await d.ask(question(key as typeof CHANGEABLE[number], value)))) return NO();
       try { d.settings.set(key, value); } catch (e) { return failed('CANT_SAVE', (e as Error).message); }
-      return ok(`${key} is now ${String(value)}.${key === 'model' ? ' It applies from the next request, not this one.' : ''}`);
+      return ok(`${key} is now ${String(value)}.${key === 'model' || key === 'brain' ? ' It applies from the next request, not this one.' : ''}`);
     },
 
     /**
@@ -219,6 +228,7 @@ export async function serve(): Promise<void> {
     ask: (q, detail) => askUser(q, { detail }),
     host: hostCall,
     relay: !!process.env.BLOB_RELAY,
+    brainReady: async b => (await brains()).ready.includes(b),
     activityFile: activityFile(),
     habitsFile: habitsFile(),
     memoryFile: memoryFile(),
@@ -235,10 +245,10 @@ export async function serve(): Promise<void> {
   }, async () => reply(tools.get_settings()));
   server.registerTool('change_setting', {
     description: `Change one of Blob's settings (${CHANGEABLE.join(', ')}) when the user asks for it. The user is ` +
-      'always asked Yes or No first; it changes only on Yes. A model change applies from the next request.',
+      'always asked Yes or No first; it changes only on Yes. A brain or model change applies from the next request.',
     inputSchema: {
       key: z.string().describe(CHANGEABLE.join(' | ')),
-      value: z.union([z.string(), z.boolean()]).describe(`model: ${MODELS.join(' | ')}; the others: true or false`),
+      value: z.union([z.string(), z.boolean()]).describe(`brain: ${BRAINS.join(' | ')}; model: ${MODELS.join(' | ')}; the others: true or false`),
       reason: z.string().optional().describe('What the user asked for, in a few words.'),
     },
   }, async a => reply(await tools.change_setting(a)));

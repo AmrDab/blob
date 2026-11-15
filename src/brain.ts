@@ -1,8 +1,11 @@
-// One run at a time of the user's own `claude -p`, with clawdcursor, Blob's files and shell tools and its self tools.
+// One run at a time of the user's own `claude -p` or `codex exec`, with clawdcursor, Blob's files and shell tools
+// and its self tools.
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { delimiter, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import type { Model } from './settings.ts';
+import { BRAIN_NAME, type BrainName, type Model } from './settings.ts';
 
 export type { Model };
 
@@ -15,7 +18,7 @@ export interface LogEntry {
 
 /** One finished tool call of a run, in order: what a shortcut is saved from. server '' = a Claude Code built-in. */
 export interface Call {
-  server: string;     // 'clawdcursor' | 'files' | ''
+  server: string;     // 'clawdcursor' | 'files' | 'blob' | '' ('codex': one of Codex's own MCP helpers)
   tool: string;       // the tool's own name: "accessibility", "move", "Read"
   args: Record<string, unknown>;
   outcome: string;
@@ -63,13 +66,15 @@ export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platfor
 
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
 
-/** The --mcp-config file: clawdcursor, Blob's files server and Blob's self server ("blob"), nothing else. */
+/** The servers every brain gets: clawdcursor, Blob's files server and Blob's self server ("blob"), nothing else. */
+export function mcpServers(own: { files: ServerCommand; blob: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): Record<string, ServerCommand> {
+  return { clawdcursor: clawdcursorCommand(env, platform), files: own.files, blob: own.blob };
+}
+
+/** Claude Code's --mcp-config file. */
 export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
-  return JSON.stringify({ mcpServers: {
-    clawdcursor: { type: 'stdio', ...clawdcursorCommand(env, platform) },
-    files: { type: 'stdio', ...own.files },
-    blob: { type: 'stdio', ...own.blob },
-  } }, null, 2);
+  const servers = Object.entries(mcpServers(own, env, platform)).map(([name, s]) => [name, { type: 'stdio', ...s }]);
+  return JSON.stringify({ mcpServers: Object.fromEntries(servers) }, null, 2);
 }
 
 /** `persona`: what Blob knows about itself (persona.ts), as the settings are when the child starts. */
@@ -89,6 +94,86 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Model; resume?: st
     ...(o.model === 'default' ? [] : ['--model', o.model]),
     ...(o.resume ? ['--resume', o.resume] : []),
   ];
+}
+
+// ── Codex ────────────────────────────────────────────────────────────────────
+
+/**
+ * How to start Codex with no shell in between (the brief and the servers' tokens are arguments). On Windows npm
+ * installs it as codex.cmd, which only cmd can start: Blob runs the script that shim names with this same Node.
+ */
+export function codexCommand(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env,
+  fs: { exists(p: string): boolean; read(p: string): string } = { exists: existsSync, read: p => readFileSync(p, 'utf8') }): ServerCommand {
+  if (platform !== 'win32') return { command: 'codex', args: [] };
+  for (const dir of (env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean)) {
+    const exe = join(dir, 'codex.exe'), cmd = join(dir, 'codex.cmd');
+    if (fs.exists(exe)) return { command: exe, args: [] };
+    if (!fs.exists(cmd)) continue;
+    let js: string | undefined;
+    try { js = fs.read(cmd).match(/"%dp0%\\([^"]+\.js)"/)?.[1]; } catch { /* unreadable: not this one */ }
+    if (js) return { command: process.execPath, args: [join(dirname(cmd), js)] };
+  }
+  return { command: 'codex', args: [] };            // not found: starting it fails, and the first-run check says so
+}
+
+/**
+ * Codex's own tools that are switched off, so Blob's servers are the only way to act: its shell (both kinds), image
+ * reading, sub-agents, the account's apps and plugins, the user's hooks, its own browser and computer control, and
+ * the small extras. A name this Codex does not know stops it at the start: it fails closed.
+ */
+export const CODEX_OFF = [
+  'shell_tool', 'unified_exec', 'view_image', 'multi_agent', 'multi_agent_v2', 'apps', 'plugins', 'hooks',
+  'browser_use', 'computer_use', 'image_generation', 'skill_mcp_dependency_install', 'goals', 'sleep_tool', 'tool_suggest',
+];
+
+/** A TOML string: JSON's escapes are TOML's, bar the DEL character. */
+const toml = (s: string) => JSON.stringify(s).replace(/\x7f/g, '\\u007F');
+
+/**
+ * `codex exec` for one request, read from stdin. Nothing of the user's ~/.codex/config.toml is read or written:
+ * the servers, the sandbox and the brief are -c overrides of this one run.
+ */
+export function codexArgs(o: { servers: Record<string, ServerCommand>; model?: string; resume?: string; persona?: string; env?: NodeJS.ProcessEnv }): string[] {
+  const home = (o.env ?? process.env).BLOB_HOME;
+  const c = (key: string, value: string) => ['-c', `${key}=${value}`];
+  return [
+    'exec', ...(o.resume ? ['resume', o.resume] : []),
+    '--json',                               // events as JSON lines
+    '--skip-git-repo-check',                // the cwd is an empty folder, not a repository
+    '--ignore-user-config',                 // none of the user's MCP servers, profiles or settings (the sign-in is still theirs)
+    '--ignore-rules',                       // nor their command rules
+    '--strict-config',                      // an override this Codex does not know is an error, never a silent no-op
+    ...c('sandbox_mode', '"read-only"'),    // what is left of Codex's own tools (apply_patch) cannot write...
+    ...c('approval_policy', '"never"'),     // ...and nothing can ask its way out: a blocked call is just refused
+    ...CODEX_OFF.flatMap(f => ['--disable', f]),
+    ...c('agents.enabled', 'false'),
+    ...c('web_search', '"disabled"'),
+    ...Object.entries(o.servers).flatMap(([name, s]) => {
+      // Codex hands a server only a few system variables: Blob's folder goes along when it is not the usual one.
+      const env = { ...(home && { BLOB_HOME: home }), ...s.env };
+      const k = `mcp_servers.${name}`;
+      return [
+        ...c(`${k}.command`, toml(s.command)),
+        ...c(`${k}.args`, `[${s.args.map(toml).join(',')}]`),
+        ...(Object.keys(env).length ? c(`${k}.env`, `{${Object.entries(env).map(([n, v]) => `${n}=${toml(v)}`).join(',')}}`) : []),
+        ...c(`${k}.default_tools_approval_mode`, '"approve"'),   // the Yes gates are the servers' own; Codex has nobody to ask
+        ...c(`${k}.required`, 'true'),                           // without one of them Codex does not start, and says which
+        ...c(`${k}.startup_timeout_sec`, '30'),
+        ...c(`${k}.tool_timeout_sec`, '1800'),                   // a call may wait for the user's Yes, or for a pause to end
+      ];
+    }),
+    ...c('developer_instructions', toml(o.persona ? `${SYSTEM_PROMPT}\n${o.persona}` : SYSTEM_PROMPT)),
+    ...(o.model && o.model !== 'default' ? ['-m', o.model] : []),
+    '-',
+  ];
+}
+
+/**
+ * What goes to Codex's stdin. A resumed session keeps the brief it started with, so the brief as it is now (the
+ * time, the settings, the saved facts) goes in front of the request.
+ */
+export function codexInput(text: string, brief?: string): string {
+  return brief ? `<brief_now>\n${brief}\n</brief_now>\n${text}` : text;
 }
 
 /** The child's env: no API key or host-session variables, so `claude` signs in with the user's own plan login. */
@@ -130,10 +215,12 @@ function stepCaption(tool: string, action?: string): string {
   return `${tool}${action ? ' · ' + action : ''}…`;
 }
 
-/** "mcp__files__move" -> { server: 'files', tool: 'move' }; a built-in ("Read") has server ''. */
+/** "mcp__files__move" or "files.move" -> { server: 'files', tool: 'move' }; a built-in ("Read") has server ''. */
 export function splitToolName(name: string): { server: string; tool: string } {
   const parts = name.split('__');
   if (parts[0] === 'mcp' && parts.length >= 3) return { server: parts[1], tool: parts.slice(2).join('__') };
+  const dot = name.match(/^([\w-]+)\.(.+)$/);
+  if (dot) return { server: dot[1], tool: dot[2] };
   return { server: '', tool: name };
 }
 
@@ -200,25 +287,71 @@ export class StreamParser {
   }
 }
 
+/** Turns `codex exec --json` events into the same updates. One parser per run. */
+export class CodexParser {
+  readonly calls: Call[] = [];
+  sawResult = false;
+  resultError = false;
+  private last = '';                                 // the latest message: the answer when the turn ends
+
+  feed(line: string): Update[] {
+    let e: any;
+    try { e = JSON.parse(line); } catch { return []; }
+    const item = e?.item;
+    if (e?.type === 'thread.started') return typeof e.thread_id === 'string' ? [{ type: 'session', id: e.thread_id }] : [];
+    if (e?.type === 'error' || (e?.type === 'item.completed' && item?.type === 'error')) {
+      const text = e.type === 'error' ? e.message : item.message;
+      return typeof text === 'string' && text.trim() ? [{ type: 'caption', text: oneLine(text) }] : [];
+    }
+    if (e?.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim()) {
+      this.last = item.text;
+      return [{ type: 'caption', text: oneLine(item.text) }];
+    }
+    if ((e?.type === 'item.started' || e?.type === 'item.completed') && item?.type === 'mcp_tool_call' && typeof item.tool === 'string') {
+      // Codex names the server and the tool apart; a name that carries both ("mcp__files__move", "files.move") is split.
+      const { server, tool } = typeof item.server === 'string' && item.server ? { server: item.server, tool: item.tool } : splitToolName(item.tool);
+      const args = item.arguments && typeof item.arguments === 'object' && !Array.isArray(item.arguments) ? item.arguments : {};
+      const l = callLabel(server, tool, args);
+      if (e.type === 'item.started') return [{ type: 'caption', text: stepCaption(l.tool, l.action) }];
+      const failed = item.status === 'failed' || !!item.error;
+      const o = outcomeOf(item.result ? resultText(item.result.content) : String(item.error?.message ?? ''), failed);
+      this.calls.push({ server, tool, args, ...o });
+      return [{ type: 'log', entry: { ...l, ...o } }];
+    }
+    if (e?.type === 'turn.completed' || e?.type === 'turn.failed') {
+      this.sawResult = true;
+      this.resultError = e.type === 'turn.failed';
+      const text = this.resultError ? (typeof e.error?.message === 'string' && e.error.message.trim() ? e.error.message : 'Codex stopped.') : this.last || 'Done.';
+      return [{ type: 'answer', text: oneLine(text, 400) }];
+    }
+    return [];
+  }
+}
+
 function killTree(p: ChildProcessWithoutNullStreams): void {
   if (p.exitCode !== null || p.pid === undefined) return;
   if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
   else try { process.kill(-p.pid, 'SIGTERM'); } catch { /* already gone */ }
 }
 
-/** One `claude -p` at a time. prewarm() starts it early (when Speak is pressed); run() sends the request. */
+/** One `claude -p` or `codex exec` at a time. prewarm() starts it early (when Speak is pressed); run() sends the request. */
 export class Brain {
-  private child?: { p: ChildProcessWithoutNullStreams; model: Model; sent: boolean; halted: boolean; early: Update[] };
-  private session?: string;
+  private child?: { p: ChildProcessWithoutNullStreams; brain: BrainName; model: Model; sent: boolean; halted: boolean; early: Update[]; input: (text: string) => string };
+  private session?: { id: string; brain: BrainName };
 
-  constructor(private o: { mcpConfigPath: string; cwd: string; emit: (e: BrainEvent) => void; persona?: () => string }) {}
+  constructor(private o: {
+    mcpConfigPath: string; servers: Record<string, ServerCommand>; cwd: string; emit: (e: BrainEvent) => void;
+    persona?: (brain: BrainName) => string;
+  }) {}
 
   get busy(): boolean { return !!this.child?.sent; }
 
-  prewarm(model: Model): void {
-    if (this.child && (this.child.sent || this.child.model === model)) return;
+  private same(model: Model, brain: BrainName): boolean { return this.child?.model === model && this.child.brain === brain; }
+
+  prewarm(model: Model, brain: BrainName = 'claude'): void {
+    if (this.child && (this.child.sent || this.same(model, brain))) return;
     this.cancel();
-    this.child = this.start(model);
+    this.child = this.start(model, brain);
   }
 
   /** Kills a prewarmed child that never got a request (nothing was said). */
@@ -226,15 +359,15 @@ export class Brain {
     if (this.child && !this.child.sent) { killTree(this.child.p); this.child = undefined; }
   }
 
-  run(text: string, model: Model): boolean {
+  run(text: string, model: Model, brain: BrainName = 'claude'): boolean {
     if (this.busy) return false;
-    if (this.child?.model !== model) { this.cancel(); this.child = this.start(model); }
+    if (!this.same(model, brain)) { this.cancel(); this.child = this.start(model, brain); }
     const c = this.child!;
     c.sent = true;
     this.o.emit({ type: 'busy', busy: true });
     this.o.emit({ type: 'caption', text: 'Thinking…' });
     for (const u of c.early.splice(0)) this.o.emit(u);   // e.g. "clawdcursor is failed." from a prewarmed start
-    c.p.stdin.end(userMessage(text));
+    c.p.stdin.end(c.input(text));
     return true;
   }
 
@@ -247,19 +380,30 @@ export class Brain {
 
   stop(): void { if (this.child) killTree(this.child.p); this.child = undefined; }
 
-  private start(model: Model) {
-    const p = spawn('claude', claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model, resume: this.session, persona: this.o.persona?.() }), {
+  private start(model: Model, brain: BrainName) {
+    // A session cannot move between brains: the other one starts a new conversation, and says so.
+    const moved = !!this.session && this.session.brain !== brain;
+    if (moved) this.session = undefined;
+    const resume = this.session?.id, persona = this.o.persona?.(brain), codex = brain === 'codex', name = BRAIN_NAME[brain];
+    const cmd = codex ? codexCommand() : { command: 'claude', args: [] };
+    const args = codex ? codexArgs({ servers: this.o.servers, resume, persona })      // Codex runs its own default model
+      : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model, resume, persona });
+    const p = spawn(cmd.command, [...cmd.args, ...args], {
       cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: process.platform !== 'win32',
     });
-    const entry = { p, model, sent: false, halted: false, early: [] as Update[] };
-    const parser = new StreamParser();
+    const entry = {
+      p, brain, model, sent: false, halted: false,
+      early: (moved ? [{ type: 'caption', text: `Now using ${name}: this is a new conversation.` }] : []) as Update[],
+      input: codex ? (text: string) => codexInput(text, resume && persona) : userMessage,
+    };
+    const parser = codex ? new CodexParser() : new StreamParser();
     let stderr = '';
     p.stdout.setEncoding('utf8');
     p.stdin.on('error', () => { /* it exited before reading; the close handler reports it */ });
     p.stderr.on('data', d => { stderr = (stderr + d).slice(-2000); });
     createInterface({ input: p.stdout }).on('line', line => {
       for (const u of parser.feed(line)) {
-        if (u.type === 'session') this.session = u.id;
+        if (u.type === 'session') this.session = { id: u.id, brain };
         else if (entry.sent) this.o.emit(u);
         else entry.early.push(u);
       }
@@ -274,8 +418,8 @@ export class Brain {
       this.o.emit({ type: 'busy', busy: false });
       this.o.emit({ type: 'done', calls: parser.calls, ok: parser.sawResult && !parser.resultError });
     };
-    p.on('error', err => done(`Could not start claude: ${err.message}`));
-    p.on('close', code => done(`claude exited (${code}).`));
+    p.on('error', err => done(`Could not start ${name}: ${err.message}`));
+    p.on('close', code => done(`${name} exited (${code}).`));
     return entry;
   }
 }

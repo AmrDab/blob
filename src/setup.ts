@@ -1,14 +1,18 @@
 // The first-run check: what Blob needs before it can work. What Blob can fix itself is one tap (install clawdcursor,
-// give it its OK, ask macOS for its permissions); Claude Code's install and sign-in need the user's own login, so
-// they stay a command to copy. The microphone is checked by the page, the first time Speak is used.
+// give it its OK, ask macOS for its permissions); the install and sign-in of Claude Code or Codex need the user's
+// own login, so they stay commands to copy. The microphone is checked by the page, the first time Speak is used.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { cleanEnv, clawdcursorCommand } from './brain.ts';
+import { cleanEnv, clawdcursorCommand, codexCommand, type ServerCommand } from './brain.ts';
+import { BRAINS, type BrainName } from './settings.ts';
 
-/** `tap`: the button that fixes it in one tap (fix()). Without one, `fix` is a command to copy. `text`: what the card says. */
-export interface Check { id: string; ok: boolean; label: string; fix: string; tap?: string; text?: string }
+/**
+ * `tap`: the button that fixes it in one tap (fix()). Without one, `fix` is a command to copy, and `alt` a second
+ * one (the other brain's). `text`: what the card says. `ready` (on the 'brain' check): the brains installed and signed in.
+ */
+export interface Check { id: string; ok: boolean; label: string; fix: string; alt?: string; tap?: string; text?: string; ready?: BrainName[] }
 
 /** Runs a command and gives its output. Tests pass a fake one. */
 export type Runner = (command: string, args: string[], timeoutMs?: number) => Promise<{ ok: boolean; out: string }>;
@@ -60,19 +64,41 @@ export async function macNeeds(run: Runner = shell): Promise<{ ok: boolean; pane
   return { ok: true };
 }
 
-export async function runChecks(platform: string = process.platform, run: Runner = shell, home: string = homedir()): Promise<Check[]> {
+/** The brain to use: the one the user picked when it is ready, else the one that is. */
+export function pickBrain(wanted: BrainName, ready: readonly BrainName[]): BrainName {
+  return ready.includes(wanted) || !ready.length ? wanted : ready[0];
+}
+
+/**
+ * Which brains are installed, and which of those are signed in. Each is started the same way the Brain starts it,
+ * so this says whether Blob can start it. `codex login status` exits 0 only when signed in.
+ */
+export async function brains(platform: string = process.platform, run: Runner = shell, codex: ServerCommand = codexCommand(platform)): Promise<{ has: Record<BrainName, boolean>; ready: BrainName[] }> {
+  const cx = (args: string[]) => run(codex.command, [...codex.args, ...args]);
+  const has = { claude: (await run('claude', ['--version'])).ok, codex: (await cx(['--version'])).ok };
+  const signedIn = {
+    claude: has.claude && parseAuthStatus((await run('claude', ['auth', 'status', '--json'])).out),
+    codex: has.codex && (await cx(['login', 'status'])).ok,
+  };
+  return { has, ready: BRAINS.filter(b => signedIn[b]) };
+}
+
+export async function runChecks(platform: string = process.platform, run: Runner = shell, home: string = homedir(), codex: ServerCommand = codexCommand(platform)): Promise<Check[]> {
   const checks: Check[] = [];
-  // `claude` is started the same way the Brain starts it, so this says whether Blob can start it.
-  const claude = await run('claude', ['--version']);
+  const { has, ready } = await brains(platform, run, codex);
+  // Blob needs one of the two. With none installed both installs are offered; with one installed, its sign-in.
   checks.push({
-    id: 'claude', ok: claude.ok, label: 'Install Claude Code',
+    id: 'brain', ok: has.claude || has.codex, label: 'Install Claude Code or Codex', ready,
     fix: platform === 'win32' ? 'irm https://claude.ai/install.ps1 | iex' : 'curl -fsSL https://claude.ai/install.sh | bash',
-    text: 'Blob thinks with your own Claude Code. Copy this, run it in a terminal, then come back.',
+    alt: 'npm i -g @openai/codex',
+    text: 'Blob thinks with your own Claude Code or Codex. Copy one of these, run it in a terminal, then come back.',
   });
-  if (claude.ok) {
+  if (has.claude || has.codex) {
+    const both = has.claude && has.codex;
     checks.push({
-      id: 'signin', ok: parseAuthStatus((await run('claude', ['auth', 'status', '--json'])).out), label: 'Sign in to Claude Code',
-      fix: 'claude auth login', text: 'Copy this, run it in a terminal and sign in, then come back.',
+      id: 'signin', ok: ready.length > 0, label: both ? 'Sign in to Claude Code or Codex' : has.claude ? 'Sign in to Claude Code' : 'Sign in to Codex',
+      fix: has.claude ? 'claude auth login' : 'codex login', ...(both && { alt: 'codex login' }),
+      text: `Copy ${both ? 'one of these' : 'this'}, run it in a terminal and sign in, then come back.`,
     });
   }
   const installed = (await run(...clawd(['--version']))).ok;

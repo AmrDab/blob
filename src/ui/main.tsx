@@ -39,7 +39,7 @@ const BOX = [{ w: 150, h: 140 }, { w: 192, h: 186 }, { w: 240, h: 234 }];
 
 type Phase = 'idle' | 'ask' | 'downloading' | 'recording' | 'transcribing';
 type ShortcutInfo = { id: string; name: string; icon: string; pinned: boolean };
-type Check = { id: string; ok: boolean; label: string; fix: string; tap?: string; text?: string };
+type Check = { id: string; ok: boolean; label: string; fix: string; alt?: string; tap?: string; text?: string };
 type FirstRun = { key: string; title: string; text: string };
 const PAIR_CARD: FirstRun = { key: 'pair', title: 'Pair your phone?', text: 'Talk to Blob from your phone. You scan a code once.' };
 
@@ -73,6 +73,7 @@ function App() {
   const [logOpen, setLogOpen] = useState(false);
   const [browsing, setBrowsing] = useState(false);            // the + view: every saved shortcut, to pin or remove
   const [model, setModel] = useState<Model>('sonnet');        // the settings' model: a click on the chip changes it
+  const [codex, setCodex] = useState(false);                  // the brain is Codex: it runs its own default model, so the chip only says so
   const [voice, setVoice] = useState(true);
   const [first, setFirst] = useState<{ onboarded: boolean; cards: FirstRun[] }>({ onboarded: true, cards: [] });
   const [step, setStep] = useState(0);                         // the first-run card that is up
@@ -99,7 +100,7 @@ function App() {
       if (e.type === 'reminder-done') setReminders(r => r.filter(x => x.id !== e.id));
       if (e.type === 'ask-done') setAsks(a => a.filter(x => x.id !== e.id));
       if (e.type === 'settings') {
-        setModel(e.model); setVoice(e.voice);
+        setModel(e.model); setCodex(e.brain === 'codex'); setVoice(e.voice);
         setFirst({ onboarded: e.onboarded, cards: [...e.firstRun, ...(e.canPair ? [PAIR_CARD] : [])] });
       }
       if (e.type === 'qr') setQr(e.svg);
@@ -328,8 +329,10 @@ function App() {
                     <button className="btn strong" disabled={busy} onClick={() => { if (settled()) void post('/setup/fix', { id: need.id }); }}>{busy ? 'Working…' : need.tap}</button>
                   </div>
                 ) : <>
-                  <div className="check"><button className="cmd" title="Click to copy, then run it in a terminal"
-                    onClick={() => void copyText(need.fix).then(ok => { if (ok) setCaption(`Copied: ${need.fix}`); back(); })}>{need.fix}</button></div>
+                  {[need.fix, ...(need.alt ? [need.alt] : [])].map(cmd => (
+                    <div className="check" key={cmd}><button className="cmd" title="Click to copy, then run it in a terminal"
+                      onClick={() => void copyText(cmd).then(ok => { if (ok) setCaption(`Copied: ${cmd}`); back(); })}>{cmd}</button></div>
+                  ))}
                   <div className="row"><button className="btn" onClick={() => void post('/setup/check')}>Check again</button></div>
                 </>}
               </>}
@@ -392,7 +395,7 @@ function App() {
               </div>
             </Liquid.Item>
             <Liquid.Item observe>
-              <button className="card chip" title="Model" onClick={() => void post('/model', { model: MODELS[(MODELS.indexOf(model) + 1) % MODELS.length], stay: true })}>{LABEL[model]}</button>
+              <button className="card chip" title="Model" onClick={() => { if (!codex) void post('/model', { model: MODELS[(MODELS.indexOf(model) + 1) % MODELS.length], stay: true }); }}>{codex ? 'Codex' : LABEL[model]}</button>
             </Liquid.Item>
           </div>
         )}

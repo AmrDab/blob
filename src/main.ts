@@ -10,7 +10,7 @@ import { homedir, tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Application } from '@webviewjs/webview';
-import { Brain, callLabel, mcpConfig, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
+import { Brain, callLabel, mcpConfig, mcpServers, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
 import { MAX_DETAIL, Questions } from './ask.ts';
 import { setAutostart, supported as autostartSupported, systemAutostart } from './autostart.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
@@ -24,17 +24,17 @@ import { persona } from './persona.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
 import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } from './schedule.ts';
-import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, parseValue, type Model } from './settings.ts';
+import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, parseValue, type BrainName, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
-import { fix, macNeeds, openPane, runChecks, type Check } from './setup.ts';
+import { fix, macNeeds, openPane, pickBrain, runChecks, type Check } from './setup.ts';
 import { Watcher, activityFile, clawdcursorReader, windowsFront } from './watch.ts';
 
 const HOME = blobHome();
 // Blob was called Pronto: move its shortcuts and logs over once
 const OLD = join(homedir(), '.pronto');
 if (existsSync(OLD) && !existsSync(HOME)) try { renameSync(OLD, HOME); } catch { /* keep the old folder */ }
-const WORK = join(HOME, 'work');                     // claude's cwd: empty, and the same every time so --resume finds the session
+const WORK = join(HOME, 'work');                     // the brain's cwd: empty, and the same every time so --resume finds the session
 const LOGS = join(HOME, 'logs');
 const SHORTCUTS = join(HOME, 'shortcuts.json');
 const PAIR = pairFile();
@@ -79,11 +79,15 @@ const caption = (text: string) => send({ type: 'caption', text });
 const answer = (text: string) => { caption(text); row({ kind: 'answer', text }); pairing?.answer(text); };
 /** Blob (a run or a shortcut) started or stopped working: the page and the phone show it. */
 const busy = (on: boolean) => { send({ type: 'busy', busy: on }); pairing?.status(on ? 'working' : 'ready'); };
-/** What the page needs of the settings: the model on the chip, whether Speak listens, and the first-run questions. */
+/** The brains that are installed and signed in, as of the last check. */
+let ready: BrainName[] = [];
+/** The brain in use: the setting's, or the other one when only that one is ready. */
+const brainNow = () => pickBrain(settings.get().brain, ready);
+/** What the page needs of the settings: the brain and model on the chip, whether Speak listens, and the first-run questions. */
 function sendSettings(): void {
   const s = settings.get();
   send({
-    type: 'settings', model: s.model, voice: s.voice, onboarded: s.onboarded, canPair: !!RELAY,
+    type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, canPair: !!RELAY,
     firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || autostartSupported()).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
   });
 }
@@ -246,7 +250,7 @@ function onBrain(e: BrainEvent): void {
 /** Starts a request: typed, spoken, or from the phone. Returns why not, when it can't. */
 function run(text: string): string | null {
   if (replaying) return 'A shortcut is still running.';
-  if (!brain.run(text, settings.get().model)) return 'Still working on the last request.';
+  if (!brain.run(text, settings.get().model, brainNow())) return 'Still working on the last request.';
   request = text;
   row({ kind: 'request', text });
   return null;
@@ -403,6 +407,9 @@ async function runShortcut(s: Shortcut): Promise<void> {
 async function check(): Promise<Check[]> {
   try {
     const checks = await runChecks();
+    const was = brainNow();
+    ready = checks.find(c => c.id === 'brain')?.ready ?? [];
+    if (brainNow() !== was) sendSettings();           // only the other brain is ready: the chip shows it
     send({ type: 'setup', checks });
     return checks;
   } catch { return []; }                            // checks are best effort
@@ -442,7 +449,7 @@ const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
 async function post(path: string, body: any): Promise<void> {
   switch (path) {
-    case '/prewarm': brain.prewarm(settings.get().model); return;
+    case '/prewarm': brain.prewarm(settings.get().model, brainNow()); return;
     case '/model': {                                // a click on the chip: the user's own choice, no question
       const m = parseValue('model', body.model);
       if (m !== undefined) settings.set('model', m as Model);
@@ -579,7 +586,10 @@ process.env.BLOB_PILL_TOKEN = pillToken;
 process.env.BLOB_OWN_UI_FILE = join(tmp, 'own-ui-pids');
 const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, processLister());
 writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer }), { mode: 0o600 });
-brain = new Brain({ mcpConfigPath, cwd: WORK, emit: onBrain, persona: () => persona(settings.get(), { memory: memoryBrief(memoryFile()) }) });
+brain = new Brain({
+  mcpConfigPath, servers: mcpServers({ files: filesServer, blob: selfServer }), cwd: WORK, emit: onBrain,
+  persona: b => persona(settings.get(), { memory: memoryBrief(memoryFile()), brain: b }),
+});
 sendShortcuts();
 sendSettings();
 
@@ -593,6 +603,7 @@ if (settings.get().watching) watcher.start();
 settings.onChange((now, changed) => {
   if (changed.includes('watching')) { if (now.watching) watcher?.start(); else watcher?.stop(); }
   if (changed.includes('startAtLogin')) void applyAutostart(now.startAtLogin);
+  if (changed.includes('brain')) void check();      // it may have been installed or signed in since the last look
   sendSettings();
 });
 settings.watch();

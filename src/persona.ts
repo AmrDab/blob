@@ -1,6 +1,7 @@
-// Blob's brief: the text added to Claude's system prompt (--append-system-prompt) at each start. What Blob can do,
-// the order to try it in, and its settings and memory as they are now. Plain facts: Blob has no character to play.
-import type { Settings } from './settings.ts';
+// Blob's brief: the text added to the brain's instructions at each start (Claude Code: --append-system-prompt;
+// Codex: developer_instructions). What Blob can do, the order to try it in, and its settings and memory as they are
+// now. Plain facts: Blob has no character to play.
+import { BRAIN_NAME, type BrainName, type Settings } from './settings.ts';
 
 const MODEL_NAME: Record<Settings['model'], string> = {
   default: "Claude Code's default model", sonnet: 'Sonnet', haiku: 'Haiku', opus: 'Opus',
@@ -10,9 +11,9 @@ const DAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
 const onOff = (b: boolean) => (b ? 'on' : 'off');
 const two = (n: number) => String(n).padStart(2, '0');
 
-/** `memory`: the saved facts (memory.ts). `now` and `platform` are for tests. */
-export function persona(s: Settings, o: { memory?: string; now?: Date; platform?: string } = {}): string {
-  const now = o.now ?? new Date(), platform = o.platform ?? process.platform;
+/** `memory`: the saved facts (memory.ts). `brain`: the one in use, when it is not the setting's. `now` and `platform` are for tests. */
+export function persona(s: Settings, o: { memory?: string; brain?: BrainName; now?: Date; platform?: string } = {}): string {
+  const now = o.now ?? new Date(), platform = o.platform ?? process.platform, brain = o.brain ?? s.brain;
   const win = platform === 'win32';
   const looks = win
     ? 'Get-ChildItem, Get-Content, Select-String, Get-Process, Get-Command, Test-Path, winget list, winget search, --version'
@@ -32,7 +33,9 @@ export function persona(s: Settings, o: { memory?: string; now?: Date; platform?
       'and anything with ; & > < $( ) or a pipe into a command that changes something, is shown to the user word ' +
       'for word with Yes and No first: keep it short (500 characters at most) and to one purpose. Never put a ' +
       'password, key or token in a command.\n' +
-      '3. Files: Read, Glob and Grep to look; the files tools list_dir, make_folder, move and trash to change.\n' +
+      (brain === 'codex'
+        ? '3. Files: the files tool run with a command that only looks, to read; the files tools list_dir, make_folder, move and trash to change.\n'
+        : '3. Files: Read, Glob and Grep to look; the files tools list_dir, make_folder, move and trash to change.\n') +
       '4. clawdcursor, only when a window is the only way: element names from the accessibility tree before ' +
       'coordinates, keyboard shortcuts before menus, batch for several steps in one call, and a read of the tree ' +
       'or the text, never a screenshot, when that shows what is needed. Check each step\'s outcome line before ' +
@@ -43,13 +46,14 @@ export function persona(s: Settings, o: { memory?: string; now?: Date; platform?
       'weekday:"mon", time:"HH:MM"} or {repeat:"every", minutes:N}. Local time, 24-hour. schedule_list shows ' +
       'them; schedule_remove takes one out (asked first). They fire only while Blob is open: Blob ' +
       (s.startAtLogin ? 'starts when the user signs in.' : 'does not start at sign-in now (change_setting startAtLogin=true).'),
-    `Settings now: model ${MODEL_NAME[s.model]}; watching ${onOff(s.watching)}; auto-shortcuts ` +
+    `Settings now: brain ${BRAIN_NAME[brain]}; model ${brain === 'codex' ? "Codex's default model" : MODEL_NAME[s.model]}; watching ${onOff(s.watching)}; auto-shortcuts ` +
       `${onOff(s.autoShortcuts)}; voice ${onOff(s.voice)}; start at sign-in ${onOff(s.startAtLogin)}; phone ` +
       `${s.phonePaired ? 'paired' : 'not paired'}. ` +
-      'There is no settings menu. When the user asks for a change ("use Haiku", "stop watching", "start when I ' +
+      'There is no settings menu. When the user asks for a change ("use Codex", "use Claude", "use Haiku", "stop watching", "start when I ' +
       'sign in"), call the blob tool change_setting: it asks the user Yes or No and applies the change only on ' +
       'Yes. Never change a setting any other way, and never say a setting changed unless the tool confirmed it. ' +
-      'A model change applies from the next request. For "pair my phone" call pair_phone: the user is asked first, ' +
+      'A model change applies from the next request; so does a brain change (brain=claude or brain=codex), which ' +
+      'also starts a new conversation. The model names are Claude Code\'s; Codex runs its own default model. For "pair my phone" call pair_phone: the user is asked first, ' +
       'then a QR code for their phone shows on the bubble (you cannot see it). unpair_phone undoes it. ' +
       'If the user asks what Blob is or what it can do, call about and answer from it in a sentence or two.',
     s.watching

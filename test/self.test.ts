@@ -16,12 +16,14 @@ let clock = new Date(2026, 10, 16, 8, 0).getTime();   // a Monday, 08:00 local
 let answer = false;
 let hosted: [HostAction, unknown][] = [];
 let relay = true;
+let ready: string[] = ['claude', 'codex'];
 const outcome = (r: { text: string; isError: boolean }) => outcomeOf(r.text, r.isError).outcome;
 const tools = (store = new SettingsStore(file)) => selfTools({
   settings: store,
   ask: async (q, detail) => { asked.push(q); details.push(detail); return answer; },
   host: async (action, body) => { hosted.push([action, body]); return { ok: true, text: `did ${action}` }; },
   relay,
+  brainReady: async b => ready.includes(b),
   activityFile: join(dir, 'activity.jsonl'),
   habitsFile: join(dir, 'habits.json'),
   memoryFile: join(dir, 'memory.md'),
@@ -32,14 +34,14 @@ const tools = (store = new SettingsStore(file)) => selfTools({
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'blob-self-'));
   file = join(dir, 'settings.json');
-  asked = []; details = []; hosted = []; answer = false; relay = true;
+  asked = []; details = []; hosted = []; answer = false; relay = true; ready = ['claude', 'codex'];
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('settings', () => {
   it('starts with the defaults: nothing that learns is on, not onboarded', () => {
     expect(loadSettings(file)).toEqual(DEFAULTS);
-    expect(DEFAULTS).toEqual({ model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false });
+    expect(DEFAULTS).toEqual({ brain: 'claude', model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false });
   });
 
   it('tolerates junk: a broken file, wrong types and unknown keys fall back to the defaults', () => {
@@ -88,6 +90,33 @@ describe('change_setting', () => {
     expect(outcome(r)).toBe('confirmed');
     expect(r.text).toMatch(/next request/);
     expect(loadSettings(file).model).toBe('haiku');
+  });
+
+  it('switches the brain by talk: asked first, applied on Yes, from the next request', async () => {
+    expect(question('brain', 'codex')).toBe('Switch to Codex? This starts a new conversation.');
+    expect(question('brain', 'claude')).toBe('Switch to Claude Code? This starts a new conversation.');
+    expect(outcome(await tools().change_setting({ key: 'brain', value: 'codex' }))).toBe('refused');   // No
+    expect(existsSync(file)).toBe(false);
+    answer = true;
+    const r = await tools().change_setting({ key: 'brain', value: ' Codex ' });
+    expect(asked).toEqual(['Switch to Codex? This starts a new conversation.', 'Switch to Codex? This starts a new conversation.']);
+    expect(outcome(r)).toBe('confirmed');
+    expect(r.text).toMatch(/brain is now codex\. It applies from the next request/);
+    expect(loadSettings(file).brain).toBe('codex');
+    expect(loadSettings(file).model).toBe('sonnet');                    // the model setting is Claude Code's, and stays
+    expect(outcome(await tools().change_setting({ key: 'brain', value: 'claude' }))).toBe('confirmed');
+    expect(loadSettings(file).brain).toBe('claude');
+  });
+
+  it('does not offer a brain that is not installed and signed in, and takes no other name', async () => {
+    answer = true; ready = ['claude'];
+    const r = await tools().change_setting({ key: 'brain', value: 'codex' });
+    expect(r.text).toMatch(/NOT_READY.*npm i -g @openai\/codex.*codex login/);
+    expect((await tools().change_setting({ key: 'brain', value: 'gpt' })).text).toMatch(/BAD_VALUE.*claude, codex/);
+    expect(asked).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+    expect(parseValue('brain', 'CLAUDE')).toBe('claude');
+    expect(parseValue('brain', true)).toBeUndefined();
   });
 
   it('changes nothing on No', async () => {

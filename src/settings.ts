@@ -6,9 +6,14 @@ import { dirname, join } from 'node:path';
 
 export const MODELS = ['default', 'sonnet', 'haiku', 'opus'] as const;
 export type Model = typeof MODELS[number];
+/** The program that does the thinking: the user's own Claude Code or Codex. */
+export const BRAINS = ['claude', 'codex'] as const;
+export type BrainName = typeof BRAINS[number];
+export const BRAIN_NAME: Record<BrainName, string> = { claude: 'Claude Code', codex: 'Codex' };
 
 export interface Settings {
-  model: Model;
+  brain: BrainName;
+  model: Model;             // for Claude Code; Codex runs its own default model
   watching: boolean;        // learn from what the user does (watch.ts)
   autoShortcuts: boolean;   // build a shortcut from a task done about 3 times (habits.ts)
   voice: boolean;           // hold the blob and talk
@@ -20,16 +25,19 @@ export type Key = keyof Settings;
 
 /** Before the first-run questions: nothing that learns about the user is on until they say Yes. */
 export const DEFAULTS: Settings = {
-  model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false,
+  brain: 'claude', model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false,
 };
 
 /** What the user can change by asking. The rest is set by the host. */
-export const CHANGEABLE = ['model', 'watching', 'autoShortcuts', 'voice', 'startAtLogin'] as const;
+export const CHANGEABLE = ['brain', 'model', 'watching', 'autoShortcuts', 'voice', 'startAtLogin'] as const;
 /** What the first run asks about (phone pairing is its own step: the QR). */
 export const FIRST_RUN = ['watching', 'voice', 'autoShortcuts', 'startAtLogin'] as const;
 
 export const WHAT: Record<Key, string> = {
-  model: 'Which Claude model does the work: default, sonnet, haiku or opus. A change applies from the next request.',
+  brain: 'Which program does the thinking: claude (Claude Code) or codex (Codex). Each needs its own install and ' +
+    'sign-in. A change applies from the next request and starts a new conversation.',
+  model: 'Which Claude model does the work: default, sonnet, haiku or opus. A change applies from the next request. ' +
+    'Codex runs its own default model.',
   watching: 'Learn only: Blob notes which app, window title and website are in front. No screenshots, no page text. ' +
     'The notes stay on this computer. A short list of the apps and sites you use most goes to Blob\'s AI only when ' +
     'you say Yes to it, asked each time.',
@@ -51,9 +59,9 @@ export const settingsFile = (env: NodeJS.ProcessEnv = process.env) => join(blobH
 
 /** A value of the key's type, or undefined when it isn't one. "on"/"off" and "yes"/"no" count for the switches. */
 export function parseValue(key: Key, v: unknown): Settings[Key] | undefined {
-  if (key === 'model') {
+  if (key === 'model' || key === 'brain') {
     const m = typeof v === 'string' ? v.trim().toLowerCase() : '';
-    return (MODELS as readonly string[]).includes(m) ? m as Model : undefined;
+    return ((key === 'model' ? MODELS : BRAINS) as readonly string[]).includes(m) ? m as Model | BrainName : undefined;
   }
   if (typeof v === 'boolean') return v;
   const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
