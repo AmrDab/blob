@@ -135,9 +135,9 @@ describe('the other self tools', () => {
   });
 
   it('hands shortcuts and pairing to the host; unpair asks first', async () => {
-    expect(outcome(await tools().save_last_as_shortcut({ name: ' Inbox ' }))).toBe('confirmed');
+    expect(outcome(await tools().save_last_as_shortcut())).toBe('confirmed');   // the host asks the user, in its own words
     expect(outcome(await tools().pair_phone())).toBe('confirmed');
-    expect(hosted).toEqual([['save_shortcut', { name: 'Inbox' }], ['pair', undefined]]);
+    expect(hosted).toEqual([['save_shortcut', undefined], ['pair', undefined]]);
     expect(asked).toEqual([]);
     expect((await tools().unpair_phone()).text).toMatch(/No phone is paired/);
     new SettingsStore(file).set('phonePaired', true);

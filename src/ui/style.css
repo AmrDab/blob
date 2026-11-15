@@ -47,6 +47,7 @@ button { font: inherit; color: inherit; }
 .btn { border: 0; border-radius: 999px; padding: 3px 12px; font-weight: 500; background: rgba(28, 28, 30, .08); cursor: pointer; }
 .btn:hover { background: rgba(28, 28, 30, .14); }
 .btn.strong { font-weight: 650; background: rgba(28, 28, 30, .16); }
+.btn:disabled { opacity: .5; cursor: default; }
 .link { border: 0; padding: 0; background: none; text-decoration: underline; cursor: pointer; font-weight: 600; }
 
 .caption { text-align: right; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

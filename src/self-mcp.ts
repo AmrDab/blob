@@ -1,7 +1,7 @@
 // Blob's self server (stdio MCP, named "blob"): how the model learns what Blob is and changes Blob's own settings.
 // Every change asks the user first on the bubble, with words written here (never the model's), and happens only on Yes.
 // Claude Code starts it from the --mcp-config Blob writes, like the files server.
-import { askUser } from './ask.ts';
+import { ASK_TIMEOUT_MS, askUser } from './ask.ts';
 import type { ToolResult } from './files-mcp.ts';
 import { frequentTasks, habitsFile } from './habits.ts';
 import { persona } from './persona.ts';
@@ -47,7 +47,7 @@ export const hostCall: Host = async (action, body = {}) => {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-self-token': token },
       body: JSON.stringify({ ...body, action }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(ASK_TIMEOUT_MS + 10_000),   // the host may ask the user first
     });
     if (!res.ok) return down;
     const r = await res.json() as { ok?: unknown; text?: unknown };
@@ -101,10 +101,8 @@ export function selfTools(d: SelfDeps) {
       return ok(`Forgot it.${d.settings.get().watching ? ' Watching is still on.' : ''}`);
     },
 
-    save_last_as_shortcut(a: { name?: unknown }): Promise<ToolResult> {
-      const name = typeof a.name === 'string' ? a.name.trim().slice(0, 60) : '';
-      return viaHost('save_shortcut', name ? { name } : {});
-    },
+    /** The host asks the user first, with the request's own words and the steps: never a name from the model. */
+    save_last_as_shortcut(): Promise<ToolResult> { return viaHost('save_shortcut'); },
 
     /** The QR is the question: nothing is paired until the user scans it. */
     pair_phone(): Promise<ToolResult> { return viaHost('pair'); },
@@ -159,9 +157,9 @@ export async function serve(): Promise<void> {
     inputSchema: {}, annotations: { destructiveHint: true },
   }, async () => reply(await tools.forget_watching()));
   server.registerTool('save_last_as_shortcut', {
-    description: 'Save the last finished task as a shortcut on the bubble ("save that as a shortcut").',
-    inputSchema: { name: z.string().optional().describe('A short name; left out, the request\'s own words are used.') },
-  }, async a => reply(await tools.save_last_as_shortcut(a)));
+    description: 'Save the last finished task as a shortcut on the bubble ("save that as a shortcut"). The user is asked first.',
+    inputSchema: {},
+  }, async () => reply(await tools.save_last_as_shortcut()));
   server.registerTool('pair_phone', {
     description: 'Show the QR code that pairs the user\'s phone with Blob.', inputSchema: {},
   }, async () => reply(await tools.pair_phone()));

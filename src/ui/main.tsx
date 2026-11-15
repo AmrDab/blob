@@ -8,6 +8,7 @@ import type { Model } from '../brain.ts';
 import { formatLog, type LogRow } from '../log.ts';
 import { GOO, MAX_PINNED } from '../shared.ts';
 import { Icon } from './icons.tsx';
+import { useSettled } from './settle.ts';
 import { DOWNLOAD_MB, Recorder, isDownloaded, load, transcribe } from './speech.ts';
 
 declare global { interface Window { webviewjs?: { startDragging(): void } } }
@@ -37,7 +38,9 @@ const BOX = [{ w: 150, h: 140 }, { w: 192, h: 186 }, { w: 240, h: 234 }];
 
 type Phase = 'idle' | 'ask' | 'downloading' | 'recording' | 'transcribing';
 type ShortcutInfo = { id: string; name: string; icon: string; pinned: boolean };
-type Check = { id: string; ok: boolean; label: string; fix: string };
+type Check = { id: string; ok: boolean; label: string; fix: string; tap?: string; text?: string };
+type FirstRun = { key: string; title: string; text: string };
+const PAIR_CARD: FirstRun = { key: 'pair', title: 'Pair your phone?', text: 'Talk to Blob from your phone. You scan a code once.' };
 
 const Keys = () => <svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="6" width="18" height="12" rx="2.5" fill="none" /><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8" fill="none" /></svg>;
 const List = () => <svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 7h11M8 12h11M8 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01" fill="none" /></svg>;
@@ -69,6 +72,8 @@ function App() {
   const [browsing, setBrowsing] = useState(false);            // the + view: every saved shortcut, to pin or remove
   const [model, setModel] = useState<Model>('sonnet');        // the settings' model: a click on the chip changes it
   const [voice, setVoice] = useState(true);
+  const [first, setFirst] = useState<{ onboarded: boolean; cards: FirstRun[] }>({ onboarded: true, cards: [] });
+  const [step, setStep] = useState(0);                         // the first-run card that is up
   const [phase, setPhase] = useState<Phase>('idle');
   const [percent, setPercent] = useState(0);
   const [text, setText] = useState('');
@@ -89,14 +94,23 @@ function App() {
       if (e.type === 'setup') setChecks(e.checks);
       if (e.type === 'ask') setAsks(a => [...a, { id: e.id, question: e.question }]);
       if (e.type === 'ask-done') setAsks(a => a.filter(x => x.id !== e.id));
-      if (e.type === 'settings') { setModel(e.model); setVoice(e.voice); }
+      if (e.type === 'settings') {
+        setModel(e.model); setVoice(e.voice);
+        setFirst({ onboarded: e.onboarded, cards: [...e.firstRun, ...(e.canPair ? [PAIR_CARD] : [])] });
+      }
       if (e.type === 'qr') setQr(e.svg);
     };
     return () => es.close();
   }, []);
 
-  const failing = checks.filter(c => !c.ok);
-  const big = typeOpen || logOpen || !!qr || asks.length > 0 || failing.length > 0 || !!micProblem;
+  // Setup comes first, one card at a time; then the first-run questions, one at a time.
+  const need = checks.find(c => !c.ok);
+  const ready = !first.onboarded && checks.length > 0 && !need;
+  const asking = ready ? first.cards[step] : undefined;
+  useEffect(() => { if (ready && step >= first.cards.length) void post('/firstrun', { done: true }); }, [ready, step, first.cards.length]);
+  // What can be tapped on the cards: when it changes, taps wait a moment (settle.ts).
+  const settled = useSettled(`${need?.id}|${asks[0]?.id}|${asking?.key}|${!!qr}`);
+  const big = typeOpen || logOpen || !!qr || asks.length > 0 || !!need || !!asking || !!micProblem;
   const arcs = browsing ? (shortcuts.length > MAX_PINNED ? 2 : 1) : shortcuts.some(s => s.pinned) ? 1 : 0;
   const box = BOX[arcs];
   // The window is as tall as the cards need (at least room for a three-line caption) plus the bubble's box.
@@ -240,6 +254,15 @@ function App() {
     setTypeOpen(false);
   }
 
+  /** A first-run card's answer: a feature on or off, or the phone's QR now or later. */
+  function pick(card: FirstRun, yes: boolean) {
+    if (!settled()) return;
+    if (card.key !== 'pair') void post('/firstrun', { key: card.key, value: yes });
+    else if (yes) void post('/pair/show');
+    else back();
+    setStep(s => s + 1);
+  }
+
   async function copyLog() {
     setCaption((await copyText(formatLog(rows))) ? 'Log copied.' : 'Could not copy the log.');
     back();
@@ -271,30 +294,47 @@ function App() {
             </div>
           </Liquid.Item>
         )}
-        {(failing.length > 0 || micProblem) && (
+        {(need || micProblem) && (
           <Liquid.Item observe>
             <div className="card setup">
-              <div className="title">Before Blob can work</div>
-              {failing.map(c => (
-                <div key={c.id} className="check">
-                  {c.label}: <button className="cmd" title="Click to copy, then run it in a terminal"
-                    onClick={() => void copyText(c.fix).then(ok => { if (ok) setCaption(`Copied: ${c.fix}`); back(); })}>{c.fix}</button>
-                </div>
-              ))}
+              {need && <>
+                <div className="title">{need.label}</div>
+                {need.text && <div>{need.text}</div>}
+                {need.tap ? (
+                  <div className="row">
+                    <button className="btn strong" disabled={busy} onClick={() => { if (settled()) void post('/setup/fix', { id: need.id }); }}>{busy ? 'Working…' : need.tap}</button>
+                  </div>
+                ) : <>
+                  <div className="check"><button className="cmd" title="Click to copy, then run it in a terminal"
+                    onClick={() => void copyText(need.fix).then(ok => { if (ok) setCaption(`Copied: ${need.fix}`); back(); })}>{need.fix}</button></div>
+                  <div className="row"><button className="btn" onClick={() => void post('/setup/check')}>Check again</button></div>
+                </>}
+              </>}
               {micProblem && (
                 <div className="check">{micProblem} <button className="btn" onClick={() => { setMicProblem(null); void post('/setup/mic'); }}>Microphone settings</button></div>
               )}
-              {failing.length > 0 && <div className="row"><button className="btn" onClick={() => void post('/setup/check')}>Check again</button></div>}
             </div>
           </Liquid.Item>
         )}
-        {asks.slice(-1).map(a => (   // the newest question first: an older one comes back after it
+        {asking && (
+          <Liquid.Item observe>
+            <div className="card ask">
+              <div className="title">{asking.title}</div>
+              <div>{asking.text}</div>
+              <div className="row">
+                <button className="btn" onClick={() => pick(asking, false)}>{asking.key === 'pair' ? 'Later' : 'No'}</button>
+                <button className="btn strong" onClick={() => pick(asking, true)}>{asking.key === 'pair' ? 'Show QR' : 'Yes'}</button>
+              </div>
+            </div>
+          </Liquid.Item>
+        )}
+        {asks.slice(0, 1).map(a => (   // the oldest open question: a new one never takes its place under a click
           <Liquid.Item observe key={a.id}>
             <div className="card ask">
               <div>{a.question}</div>
               <div className="row">
-                <button className="btn" onClick={() => void post('/answer', { id: a.id, yes: false })}>No</button>
-                <button className="btn strong" onClick={() => void post('/answer', { id: a.id, yes: true })}>Yes</button>
+                <button className="btn" onClick={() => { if (settled()) void post('/answer', { id: a.id, yes: false }); }}>No</button>
+                <button className="btn strong" onClick={() => { if (settled()) void post('/answer', { id: a.id, yes: true }); }}>Yes</button>
               </div>
             </div>
           </Liquid.Item>

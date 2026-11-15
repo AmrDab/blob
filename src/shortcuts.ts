@@ -72,7 +72,14 @@ export function saveOffer(calls: Call[]): { steps: Step[] } | { why: string } | 
   return steps.length ? { steps } : null;
 }
 
-/** The name a save offer starts with: the request, trimmed to fit. */
+/** The question before a shortcut is saved on request: Blob's own words, the user's request and what the steps are. */
+export function saveQuestion(name: string, steps: Step[]): string {
+  const say = (s: Step) => (s.server === 'clawdcursor' ? `${s.tool}${typeof s.args.action === 'string' ? ' ' + s.args.action : ''}` : `files ${s.tool}`);
+  const list = steps.slice(0, 6).map(say).join(', ') + (steps.length > 6 ? ', …' : '');
+  return `Save "${name}" as a shortcut? It has ${steps.length} step${steps.length === 1 ? '' : 's'}: ${list}.`;
+}
+
+/** The name a shortcut starts with: the request, trimmed to fit. */
 export function nameFrom(request: string): string {
   const t = request.replace(/\s+/g, ' ').trim();
   return t.length > 40 ? t.slice(0, 39).trimEnd() + '…' : t;

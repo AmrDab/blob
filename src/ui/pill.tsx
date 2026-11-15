@@ -6,11 +6,12 @@ import { Liquid } from 'liquid-gooey';
 import { ThinkingOrb } from 'thinking-orbs';
 import type { PillAnswer, PillState } from '../pill.ts';
 import { GOO } from '../shared.ts';
+import { useSettled } from './settle.ts';
 
 const TOKEN = new URLSearchParams(location.search).get('t') ?? '';
 const post = (path: string, body: unknown = {}) =>
   fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-talk-token': TOKEN }, body: JSON.stringify(body) });
-const answer = (a: PillAnswer) => void post('/pill/answer', a);
+const send = (a: PillAnswer) => void post('/pill/answer', a);
 const keyboard = (on: boolean) => void post('/pill/keyboard', { on });
 const PAD = 10;          // .pill-root's padding: room for the liquid's edge
 const MORPH_MS = 600;    // the window shrinks only after the liquid has
@@ -52,12 +53,15 @@ function Pill() {
     return () => ro.disconnect();
   }, [!state]);
 
+  // The card that just took the pill's place takes no click for a moment: one meant for Stop must not pick a choice.
+  const settled = useSettled(state?.mode === 'paused' ? state.message : state?.mode);
+  const answer = (a: PillAnswer) => { if (settled()) send(a); };
   if (!state) return null;
   const paused = state.mode === 'paused' ? state : null;
   const input = paused?.input ?? null;
-  const send = () => { if (text.trim()) answer({ kind: 'reply', text }); };
+  const reply = () => { if (text.trim()) answer({ kind: 'reply', text }); };
   function keys(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (!input?.multiline || e.ctrlKey)) { e.preventDefault(); send(); }   // a longer answer: Enter adds a line
+    if (e.key === 'Enter' && (!input?.multiline || e.ctrlKey)) { e.preventDefault(); reply(); }   // a longer answer: Enter adds a line
     if (e.key !== 'Escape') return;
     if (!input) { setText(''); setTyping(false); }   // "Something else" closes; a card's own box stays, with what was typed
     (e.target as HTMLElement).blur();
@@ -105,7 +109,7 @@ function Pill() {
                   {input?.multiline
                     ? <textarea {...box} onChange={e => setText(e.target.value)} />
                     : <input {...box} autoFocus={typing} onChange={e => setText(e.target.value)} />}
-                  <button className="btn strong" onClick={send}>Send</button>
+                  <button className="btn strong" onClick={reply}>Send</button>
                 </div>
               )}
               {input && <div className="note">Don't type passwords here.{input.multiline ? ' Ctrl+Enter sends.' : ''}</div>}

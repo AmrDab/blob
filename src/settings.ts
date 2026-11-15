@@ -37,6 +37,11 @@ export const WHAT: Record<Key, string> = {
   onboarded: 'Whether the first-run questions were answered (status only).',
 };
 
+/** The first-run cards' questions, one per FIRST_RUN key. The card's text is WHAT. */
+export const ASK: Record<typeof FIRST_RUN[number], string> = {
+  watching: 'Learn from what you do?', voice: 'Talk to Blob?', autoShortcuts: 'Make shortcuts for you?',
+};
+
 export const blobHome = (env: NodeJS.ProcessEnv = process.env) => env.BLOB_HOME || join(homedir(), '.blob');
 export const settingsFile = (env: NodeJS.ProcessEnv = process.env) => join(blobHome(env), 'settings.json');
 

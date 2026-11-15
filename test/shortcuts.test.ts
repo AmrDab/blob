@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Call } from '../src/brain.ts';
-import { fragileReason, loadShortcuts, nameFrom, saveOffer, saveShortcuts, type Shortcut } from '../src/shortcuts.ts';
+import { fragileReason, loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from '../src/shortcuts.ts';
 import { replay, type Caller } from '../src/replay.ts';
 
 const cc = (tool: string, args: Record<string, unknown>, outcome = 'confirmed'): Call =>
@@ -128,5 +128,19 @@ describe('replay', () => {
     const end = await replay(steps, f.call);
     expect(end).toMatchObject({ ok: false, at: 1 });
     expect((end as { line: string }).line).toMatch(/^\[failed · CALL_FAILED · hint: no reply\]$/);
+  });
+});
+
+describe('the question before a shortcut is saved on request', () => {
+  it("is Blob's own: the request's words, how many steps, and what they are", () => {
+    const steps = [
+      { server: 'clawdcursor' as const, tool: 'system', args: { action: 'open_app', name: 'Notepad' } },
+      { server: 'files' as const, tool: 'move', args: { from: 'a', to: 'b' } },
+    ];
+    expect(saveQuestion('open notepad', steps)).toBe('Save "open notepad" as a shortcut? It has 2 steps: system open_app, files move.');
+    expect(saveQuestion('one', steps.slice(0, 1))).toMatch(/It has 1 step: system open_app\.$/);
+    const many = Array.from({ length: 9 }, () => steps[0]);
+    expect(saveQuestion('long', many)).toMatch(/It has 9 steps: (system open_app, ){6}…\.$/);
+    expect(saveQuestion('x', steps)).not.toMatch(/Notepad/);   // tool names only: no text from the screen or the model
   });
 });

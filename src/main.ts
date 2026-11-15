@@ -19,10 +19,10 @@ import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type R
 import { persona } from './persona.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
-import { SettingsStore, blobHome, parseValue, type Model } from './settings.ts';
+import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, parseValue, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
-import { loadShortcuts, nameFrom, saveOffer, saveShortcuts, type Shortcut } from './shortcuts.ts';
-import { runChecks } from './setup.ts';
+import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
+import { fix, macNeeds, openPane, runChecks, type Check } from './setup.ts';
 import { Watcher, activityFile, clawdcursorReader, windowsFront } from './watch.ts';
 
 const HOME = blobHome();
@@ -72,10 +72,13 @@ const caption = (text: string) => send({ type: 'caption', text });
 const answer = (text: string) => { caption(text); row({ kind: 'answer', text }); pairing?.answer(text); };
 /** Blob (a run or a shortcut) started or stopped working: the page and the phone show it. */
 const busy = (on: boolean) => { send({ type: 'busy', busy: on }); pairing?.status(on ? 'working' : 'ready'); };
-/** What the page needs of the settings: the model on the chip, and whether Speak listens. */
+/** What the page needs of the settings: the model on the chip, whether Speak listens, and the first-run questions. */
 function sendSettings(): void {
   const s = settings.get();
-  send({ type: 'settings', model: s.model, voice: s.voice });
+  send({
+    type: 'settings', model: s.model, voice: s.voice, onboarded: s.onboarded, canPair: !!RELAY,
+    firstRun: FIRST_RUN.map(key => ({ key, title: ASK[key], text: WHAT[key] })),
+  });
 }
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -184,11 +187,17 @@ function addShortcut(name: string, icon: string, steps: Shortcut['steps']): Shor
   return s;
 }
 
-/** "Save that as a shortcut" (the self server): the last finished run, when every step of it confirmed. */
-function saveLast(name: string): { ok: boolean; text: string } {
+/**
+ * "Save that as a shortcut" (the self server): the last finished run, when every step of it confirmed. A shortcut
+ * runs later with no model looking, so the user says Yes to it first: the question is Blob's, with the request's
+ * own words and the steps, never the model's.
+ */
+async function saveLast(): Promise<{ ok: boolean; text: string }> {
   if (!last) return { ok: false, text: 'the last task cannot be a shortcut: it did nothing on screen, or a step did not confirm' };
   if ('why' in last) return { ok: false, text: `the last task cannot be a shortcut: ${last.why}` };
-  const s = addShortcut(name.slice(0, 60) || lastName, 'star', last.steps);
+  const { steps } = last, name = lastName;
+  if (!(await questions.ask(saveQuestion(name, steps)))) return { ok: false, text: 'the user said No (or did not answer); nothing was saved' };
+  const s = addShortcut(name, 'star', steps);
   if (!s) return { ok: false, text: `there are ${MAX_SHORTCUTS} shortcuts already: the user removes one first (the + blob)` };
   return { ok: true, text: `Saved "${s.name}"${s.pinned ? ' on the bubble' : '; it can be pinned from the + blob'}.` };
 }
@@ -278,8 +287,8 @@ function connectPhone(info: RoomInfo, paired: boolean): void {
 
 /** "Pair my phone": a new room, and its QR on the bubble until a phone joins, the card is closed or 2 minutes pass. */
 function showQr(): { ok: boolean; text: string } {
-  if (!RELAY) return { ok: false, text: "phone pairing isn't set up yet on this computer. Say so plainly" };
-  if (pairing) return { ok: false, text: settings.get().phonePaired ? 'a phone is paired already. Unpair it first' : 'the QR code is on the bubble already' };
+  if (!RELAY) return { ok: false, text: "Phone pairing isn't set up yet." };
+  if (pairing) return { ok: false, text: settings.get().phonePaired ? 'A phone is paired already. Unpair it first.' : 'The QR code is on the bubble already.' };
   const info = createRoom(RELAY);
   connectPhone(info, false);
   send({ type: 'qr', svg: qrSvg(qrUrl(info)) });
@@ -300,8 +309,8 @@ function closeQr(say?: string): void {
 }
 
 /** What only the host can do for the self server (self-mcp.ts). */
-function selfAction(body: any): { ok: boolean; text: string } {
-  if (body.action === 'save_shortcut') return saveLast(str(body.name));
+async function selfAction(body: any): Promise<{ ok: boolean; text: string }> {
+  if (body.action === 'save_shortcut') return saveLast();
   if (body.action === 'pair') return showQr();
   if (body.action === 'unpair') {
     if (!pairing || !settings.get().phonePaired) return { ok: true, text: 'No phone is paired.' };
@@ -338,8 +347,36 @@ async function runShortcut(s: Shortcut): Promise<void> {
   }
 }
 
-async function check(): Promise<void> {
-  try { send({ type: 'setup', checks: await runChecks() }); } catch { /* checks are best effort */ }
+async function check(): Promise<Check[]> {
+  try {
+    const checks = await runChecks();
+    send({ type: 'setup', checks });
+    return checks;
+  } catch { return []; }                            // checks are best effort
+}
+
+/** One tap on a setup card: Blob runs the fix (the orb turns while it does) and checks again. */
+async function setupFix(id: string): Promise<void> {
+  busy(true);
+  let ok = false;
+  try { ok = await fix(id); } finally { busy(false); }
+  const still = (await check()).find(c => c.id === id && !c.ok);
+  if (still && id === 'mac') watchMac();
+  else if (still) caption(ok ? `${still.label}: not done yet.` : `That didn't work. In a terminal, run: ${still.fix}`);
+}
+
+// macOS: while a permission is missing, look every 2 s by itself, with the pane for the missing one open.
+let macTimer: ReturnType<typeof setTimeout> | undefined;
+let macPane = '';
+function watchMac(): void {
+  clearTimeout(macTimer);
+  macTimer = setTimeout(async () => {
+    const m = await macNeeds().catch(() => ({ ok: false, pane: undefined }));
+    if (m.ok) { macPane = ''; await check(); return; }
+    if (m.pane && m.pane !== macPane) openPane(macPane = m.pane);   // Accessibility first, Screen Recording once that is on
+    watchMac();
+  }, 2000);
+  macTimer.unref();
 }
 
 function openMicSettings(): void {
@@ -388,6 +425,15 @@ async function post(path: string, body: any): Promise<void> {
     }
     case '/shortcut/delete': store(shortcuts.filter(s => s.id !== body.id)); return;
     case '/setup/check': focus.restore(); await check(); return;
+    case '/setup/fix': focus.restore(); await setupFix(str(body.id)); return;
+    case '/firstrun': {                             // a first-run card: the user's own tap, no question
+      focus.restore();
+      const key = FIRST_RUN.find(k => k === body.key);
+      if (body.done === true) settings.set('onboarded', true);
+      else if (key && typeof body.value === 'boolean') settings.set(key, body.value);
+      return;
+    }
+    case '/pair/show': { focus.restore(); const r = showQr(); if (!r.ok) caption(r.text); return; }
     case '/setup/mic': openMicSettings(); return;
     case '/pill/answer': answerPill(body); return;
     case '/pill/size': placePill(Number(body.w), Number(body.h)); return;
@@ -434,7 +480,7 @@ const server = createServer(async (req, res) => {
     let body: any = {};
     try { let s = ''; for await (const c of req) s += c; body = JSON.parse(s || '{}'); } catch { /* empty body */ }
     if (self) {
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(selfAction(body)));
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(await selfAction(body)));
       return;
     }
     if (asking) {
