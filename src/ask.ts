@@ -30,10 +30,11 @@ export class Questions {
 
   constructor(private o: { show: (id: string, question: string) => void; hide: (id: string) => void; timeoutMs?: number }) {}
 
-  ask(question: string): Promise<boolean> {
+  /** `timeoutMs`: how long this one waits before it counts as No (the usual 60 s when left out). */
+  ask(question: string, timeoutMs: number = this.o.timeoutMs ?? ASK_TIMEOUT_MS): Promise<boolean> {
     const id = String(this.next++);
     return new Promise(resolve => {
-      const timer = setTimeout(() => this.answer(id, false), this.o.timeoutMs ?? ASK_TIMEOUT_MS);
+      const timer = setTimeout(() => this.answer(id, false), timeoutMs);
       this.open.set(id, { resolve, timer });
       this.o.show(id, question);
     });

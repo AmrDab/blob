@@ -3,7 +3,7 @@ import { isAbsolute } from 'node:path';
 import { PILL_HOST, StreamParser, callLabel, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
 
 describe('claude command line', () => {
-  it('runs stream-json print mode with clawdcursor, the files server and the read-only built-ins', () => {
+  it('runs stream-json print mode with clawdcursor, the files and self servers and the read-only built-ins', () => {
     const a = claudeArgs({ mcpConfigPath: '/tmp/mcp.json', model: 'sonnet' });
     const after = (flag: string) => a[a.indexOf(flag) + 1];
     expect(a[0]).toBe('-p');
@@ -13,11 +13,17 @@ describe('claude command line', () => {
     expect(after('--mcp-config')).toBe('/tmp/mcp.json');
     expect(a).toContain('--strict-mcp-config');
     expect(after('--tools')).toBe('Read,Glob,Grep');
-    expect(after('--allowedTools')).toBe('mcp__clawdcursor__*,mcp__files__*,Read,Glob,Grep');
+    expect(after('--allowedTools')).toBe('mcp__clawdcursor__*,mcp__files__*,mcp__blob__*,Read,Glob,Grep');
     expect(a.join(' ')).not.toMatch(/Bash|Edit|Write/);
     expect(after('--model')).toBe('sonnet');
     expect(after('--append-system-prompt')).toMatch(/clawdcursor/);
     expect(a).not.toContain('--resume');
+  });
+
+  it('adds what Blob knows about itself to the system prompt, and takes Opus', () => {
+    const a = claudeArgs({ mcpConfigPath: 'm.json', model: 'opus', persona: 'You are Blob.' });
+    expect(a[a.indexOf('--append-system-prompt') + 1]).toMatch(/clawdcursor[^]*\nYou are Blob\.$/);
+    expect(a[a.indexOf('--model') + 1]).toBe('opus');
   });
 
   it('leaves the model to Claude Code for Default, and resumes a session', () => {
@@ -43,9 +49,10 @@ describe('claude command line', () => {
     expect(clawdcursorCommand(host, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'], env });
     expect(clawdcursorCommand({ ...host, BLOB_CLAWDCURSOR: 'node cli.js mcp' }, 'linux')).toEqual({ command: 'node', args: ['cli.js', 'mcp'], env });
     const files = { command: '/usr/bin/node', args: ['/app/dist/files-mcp.mjs'], env: { BLOB_ASK_URL: 'http://127.0.0.1:1/ask', BLOB_ASK_TOKEN: 't' } };
-    expect(JSON.parse(mcpConfig(files, host, 'linux'))).toEqual({ mcpServers: {
+    expect(JSON.parse(mcpConfig({ files, blob: { command: 'node', args: ['self.mjs'] } }, host, 'linux'))).toEqual({ mcpServers: {
       clawdcursor: { type: 'stdio', command: 'clawdcursor', args: ['mcp', '--compact'], env },
       files: { type: 'stdio', ...files },
+      blob: { type: 'stdio', command: 'node', args: ['self.mjs'] },
     } });
   });
 

@@ -1,5 +1,5 @@
 // Builds into dist/: the UI (the React bundles, the pages, onnxruntime-web's wasm, served locally, not from a CDN),
-// the files MCP server that Claude Code starts with Node, and the pill relay that clawdcursor starts with Node.
+// the files and self MCP servers that Claude Code starts with Node, and the pill relay that clawdcursor starts with Node.
 import { build } from 'esbuild';
 import { cpSync, mkdirSync } from 'node:fs';
 
@@ -20,6 +20,17 @@ await build({
   outfile: 'dist/files-mcp.mjs',
   bundle: true,
   packages: 'external',     // the SDK and koffi load from node_modules
+  format: 'esm',
+  platform: 'node',
+  target: 'node20',
+  logLevel: 'warning',
+});
+// Blob's self server ("blob"): Claude Code starts it with Node, like the files server.
+await build({
+  stdin: { contents: "import { serve } from './src/self-mcp.ts'; void serve();", resolveDir: import.meta.dirname, loader: 'ts' },
+  outfile: 'dist/self-mcp.mjs',
+  bundle: true,
+  packages: 'external',
   format: 'esm',
   platform: 'node',
   target: 'node20',

@@ -1,5 +1,6 @@
 // The host: a 127.0.0.1 server for the built UI and its event stream, the bubble window, the Brain, shortcuts,
-// the files server's questions, clawdcursor's pill, focus hand-back, the log file and the first-run check.
+// the settings (changed by asking Blob, never by a menu), the files and self servers' questions, clawdcursor's pill,
+// the paired phone, the learn-only watcher, focus hand-back, the log file and the first-run check.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -8,24 +9,34 @@ import { homedir, tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Application } from '@webviewjs/webview';
-import { Brain, callLabel, mcpConfig, type BrainEvent, type Model, type ServerCommand } from './brain.ts';
+import { Brain, callLabel, mcpConfig, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
 import { Questions } from './ask.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
+import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
 import { overlay, type Overlay } from './overlay.ts';
+import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type Reply, type RoomInfo } from './pair.ts';
+import { persona } from './persona.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
-import { ICONS, MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
-import { loadShortcuts, nameFrom, saveOffer, saveShortcuts, type Shortcut, type Step } from './shortcuts.ts';
+import { SettingsStore, blobHome, parseValue, type Model } from './settings.ts';
+import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
+import { loadShortcuts, nameFrom, saveOffer, saveShortcuts, type Shortcut } from './shortcuts.ts';
 import { runChecks } from './setup.ts';
+import { Watcher, activityFile, clawdcursorReader, windowsFront } from './watch.ts';
 
-const HOME = join(homedir(), '.blob');
+const HOME = blobHome();
 // Blob was called Pronto: move its shortcuts and logs over once
 const OLD = join(homedir(), '.pronto');
 if (existsSync(OLD) && !existsSync(HOME)) try { renameSync(OLD, HOME); } catch { /* keep the old folder */ }
 const WORK = join(HOME, 'work');                     // claude's cwd: empty, and the same every time so --resume finds the session
 const LOGS = join(HOME, 'logs');
 const SHORTCUTS = join(HOME, 'shortcuts.json');
+const PAIR = pairFile();
+// Where the phone relay and the phone page live (https://… or wss://…). Not set: phone pairing isn't set up.
+const RELAY = (process.env.BLOB_RELAY ?? '').trim().replace(/^ws/, 'http').replace(/\/+$/, '');
+const QR_MS = 2 * 60_000;                           // how long an unscanned QR stays up
+const KEEP_MS = 10 * 60_000;                        // "Keep it?" waits longer than the other questions
 const DIST = resolve(import.meta.dirname, '..', 'dist');
 // A fixed port keeps the page's origin, and so the cached Whisper model, the same across starts; any free port if taken.
 const PORT = 47615;
@@ -38,6 +49,8 @@ const mcpConfigPath = join(tmp, 'mcp.json');
 const token = randomBytes(24).toString('hex');      // the page's
 const askToken = randomBytes(24).toString('hex');   // the files server's: it can only ask a question
 const pillToken = randomBytes(24).toString('hex');  // the pill relay's: it can only show clawdcursor's pill
+const selfToken = randomBytes(24).toString('hex');  // the self server's: save a shortcut, pair or unpair the phone
+const settings = new SettingsStore();
 
 // ── events to the page ───────────────────────────────────────────────────────
 const clients = new Set<ServerResponse>();
@@ -56,20 +69,33 @@ function row(r: LogBody): void {
   try { mkdirSync(LOGS, { recursive: true }); appendFileSync(join(LOGS, logFileName(full.t)), formatRow(full) + '\n'); } catch { /* the log file is a convenience */ }
 }
 const caption = (text: string) => send({ type: 'caption', text });
-const answer = (text: string) => { caption(text); row({ kind: 'answer', text }); };
+const answer = (text: string) => { caption(text); row({ kind: 'answer', text }); pairing?.answer(text); };
+/** Blob (a run or a shortcut) started or stopped working: the page and the phone show it. */
+const busy = (on: boolean) => { send({ type: 'busy', busy: on }); pairing?.status(on ? 'working' : 'ready'); };
+/** What the page needs of the settings: the model on the chip, and whether Speak listens. */
+function sendSettings(): void {
+  const s = settings.get();
+  send({ type: 'settings', model: s.model, voice: s.voice });
+}
 
 // ── state ────────────────────────────────────────────────────────────────────
 let brain!: Brain;
 let focus: FocusKeeper = { restore() {}, stop() {} };
 let filesServer!: ServerCommand;
-let request = '';                                   // the current run's request, for the save offer's name
-let offer: { name: string; steps: Step[] } | null = null;
+let request = '';                                   // the current run's request
+let last: ReturnType<typeof saveOffer> = null;      // what the last finished run can be saved as ("save that as a shortcut")
+let lastName = '';
 let replaying = false;
+let replayMcp: ReturnType<typeof mcpCaller> | null = null;
 let shortcuts: Shortcut[] = loadShortcuts(SHORTCUTS);
+let pairing: Pairing | null = null;                 // the phone: paired, or a QR waiting to be scanned
+let qrTimer: ReturnType<typeof setTimeout> | undefined;
+let watcher: Watcher | undefined;
 
+// A question shows on the bubble and on the paired phone; the first answer counts.
 const questions = new Questions({
-  show: (id, question) => send({ type: 'ask', id, question }),
-  hide: id => send({ type: 'ask-done', id }),
+  show: (id, question) => { send({ type: 'ask', id, question }); pairing?.ask({ id: `q${id}`, question }); },
+  hide: id => { send({ type: 'ask-done', id }); pairing?.askDone(`q${id}`); },
 });
 
 // ── clawdcursor's pill ───────────────────────────────────────────────────────
@@ -87,6 +113,7 @@ function sendPill(): void { for (const c of pillClients) c.write(pillEvent()); }
 
 function closePill(linger = false): void {
   pill = null;
+  pairing?.askDone('pill');
   clearTimeout(pillBack);
   clearTimeout(pillGone);
   const gone = () => { sendPill(); pillUi.keyboard(false); pillUi.hide(); };
@@ -109,7 +136,11 @@ function servePill(req: IncomingMessage, res: ServerResponse): void {
       clearTimeout(pillBack);
       sendPill();
       pillUi.show();
-      if (state.mode === 'paused' && state.sound) pillUi.beep();
+      if (state.mode === 'paused') {
+        if (state.sound) pillUi.beep();
+        // The pause shows on the phone too: its choices, a typed reply, or Yes (Resume) / No (End task).
+        pairing?.ask({ id: 'pill', question: state.message, ...(state.choices.length && { choices: state.choices }), ...(state.input && { input: true }) });
+      }
       return;
     }
     if (pill !== mine) return;
@@ -144,28 +175,148 @@ function store(list: Shortcut[]): void {
   try { saveShortcuts(SHORTCUTS, list); } catch (e) { caption(`Could not save shortcuts: ${(e as Error).message}`); }
   sendShortcuts();
 }
-function setOffer(o: typeof offer, why?: string): void {
-  offer = o;
-  send({ type: 'offer', offer: o ? { name: o.name } : why ? { why } : null });
+
+/** A new shortcut, pinned while the inner arc has room. Null when the list is full. */
+function addShortcut(name: string, icon: string, steps: Shortcut['steps']): Shortcut | null {
+  if (shortcuts.length >= MAX_SHORTCUTS) return null;
+  const s = { id: randomUUID(), name, icon, pinned: shortcuts.filter(x => x.pinned).length < MAX_PINNED, steps };
+  store([...shortcuts, s]);
+  return s;
+}
+
+/** "Save that as a shortcut" (the self server): the last finished run, when every step of it confirmed. */
+function saveLast(name: string): { ok: boolean; text: string } {
+  if (!last) return { ok: false, text: 'the last task cannot be a shortcut: it did nothing on screen, or a step did not confirm' };
+  if ('why' in last) return { ok: false, text: `the last task cannot be a shortcut: ${last.why}` };
+  const s = addShortcut(name.slice(0, 60) || lastName, 'star', last.steps);
+  if (!s) return { ok: false, text: `there are ${MAX_SHORTCUTS} shortcuts already: the user removes one first (the + blob)` };
+  return { ok: true, text: `Saved "${s.name}"${s.pinned ? ' on the bubble' : '; it can be pinned from the + blob'}.` };
+}
+
+/** The same task worked 3 times (habits.ts): the shortcut is made, and the user is asked once whether to keep it. */
+async function propose(p: Proposal): Promise<void> {
+  const s = addShortcut(p.name, p.icon, p.steps);
+  if (!s) return;
+  if (!(await questions.ask(`I made a shortcut for "${p.name}". Keep it?`, KEEP_MS))) store(shortcuts.filter(x => x.id !== s.id));
+}
+
+/** A run ended. Only runs are noted, never a shortcut's replay (it does not come through here). */
+function finished(calls: Call[], ok: boolean): void {
+  last = ok ? saveOffer(calls) : null;
+  lastName = nameFrom(request);
+  if (!settings.get().autoShortcuts) return;
+  let p: Proposal | null = null;
+  try { p = record(habitsFile(), { request, calls, ok }, shortcuts); } catch { /* habits are a convenience */ }
+  if (p) void propose(p);
 }
 
 function onBrain(e: BrainEvent): void {
   if (e.type === 'log') row({ kind: 'call', ...e.entry });
   else if (e.type === 'answer') answer(e.text);
-  else if (e.type === 'done') {
-    const o = e.ok ? saveOffer(e.calls) : null;
-    if (o && 'steps' in o) setOffer({ name: nameFrom(request), steps: o.steps });
-    else if (o) setOffer(null, `Can't save this as a shortcut: ${o.why}.`);
-  } else if (e.type !== 'session') send(e);
+  else if (e.type === 'busy') busy(e.busy);
+  else if (e.type === 'done') finished(e.calls, e.ok);
+  else if (e.type !== 'session') send(e);
+}
+
+/** Starts a request: typed, spoken, or from the phone. Returns why not, when it can't. */
+function run(text: string): string | null {
+  if (replaying) return 'A shortcut is still running.';
+  if (!brain.run(text, settings.get().model)) return 'Still working on the last request.';
+  request = text;
+  row({ kind: 'request', text });
+  return null;
+}
+
+/** The phone's Stop: what the pill's Stop does, and the request (or the shortcut) ends even when no pill is up. */
+function stopAll(): void {
+  if (pill) answerPill({ kind: pill.state.mode === 'running' ? 'stop' : 'end' });
+  brain.halt();
+  void replayMcp?.close();
+}
+
+// ── the phone ────────────────────────────────────────────────────────────────
+function setPaired(on: boolean): void {
+  try { settings.set('phonePaired', on); } catch { /* a status only */ }
+}
+
+/** The phone's answer to an ask that is open (pair.ts drops any other): a bubble question, or the pill's pause. */
+function phoneReply(r: Reply): void {
+  if (r.id !== 'pill') { questions.answer(r.id.slice(1), r.yes === true); return; }
+  const s = pill?.state;
+  if (s?.mode !== 'paused') return;
+  if (typeof r.choice === 'string') answerPill({ kind: 'choice', index: s.choices.indexOf(r.choice) });
+  else if (typeof r.text === 'string') answerPill({ kind: 'reply', text: r.text });
+  else answerPill({ kind: r.yes === true ? 'resume' : 'end' });
+}
+
+/** Connects to the room. `paired`: a phone joined it before; otherwise its QR is on the bubble now. */
+function connectPhone(info: RoomInfo, paired: boolean): void {
+  const p = pairing = new Pairing(info, { file: PAIR });
+  p.on('phone', on => {
+    if (!on) return;
+    if (!paired) {                                  // the QR was scanned: this is the paired phone from now on
+      paired = true;
+      clearTimeout(qrTimer);
+      send({ type: 'qr', svg: null });
+      try { saveRoom(PAIR, info); } catch { /* paired until Blob closes */ }
+      setPaired(true);
+      caption('Your phone is paired.');
+    }
+    p.status(brain.busy || replaying ? 'working' : 'ready');
+  });
+  p.on('request', r => { const why = run(r.text); if (why) p.answer(why); });
+  p.on('reply', phoneReply);
+  p.on('stop', stopAll);
+  p.on('unpaired', () => {                          // unpaired, expired, or the room is gone: pair.ts forgot it
+    if (pairing === p) pairing = null;
+    if (!paired) return;
+    setPaired(false);
+    caption('Your phone is unpaired.');
+  });
+  void p.connect().catch(() => { /* an address that can't be used: nothing connects */ });
+}
+
+/** "Pair my phone": a new room, and its QR on the bubble until a phone joins, the card is closed or 2 minutes pass. */
+function showQr(): { ok: boolean; text: string } {
+  if (!RELAY) return { ok: false, text: "phone pairing isn't set up yet on this computer. Say so plainly" };
+  if (pairing) return { ok: false, text: settings.get().phonePaired ? 'a phone is paired already. Unpair it first' : 'the QR code is on the bubble already' };
+  const info = createRoom(RELAY);
+  connectPhone(info, false);
+  send({ type: 'qr', svg: qrSvg(qrUrl(info)) });
+  clearTimeout(qrTimer);
+  qrTimer = setTimeout(() => closeQr('The code expired. Ask me to pair your phone again.'), QR_MS);
+  return { ok: true, text: 'The QR code is on the bubble for 2 minutes. The user scans it with their phone\'s camera.' };
+}
+
+/** The QR goes away unscanned (closed, or timed out): its room is ended, so the code can never be used. */
+function closeQr(say?: string): void {
+  clearTimeout(qrTimer);
+  send({ type: 'qr', svg: null });
+  if (!pairing || settings.get().phonePaired) return;
+  const p = pairing;
+  pairing = null;
+  p.unpair();
+  if (say) caption(say);
+}
+
+/** What only the host can do for the self server (self-mcp.ts). */
+function selfAction(body: any): { ok: boolean; text: string } {
+  if (body.action === 'save_shortcut') return saveLast(str(body.name));
+  if (body.action === 'pair') return showQr();
+  if (body.action === 'unpair') {
+    if (!pairing || !settings.get().phonePaired) return { ok: true, text: 'No phone is paired.' };
+    pairing.unpair();
+    return { ok: true, text: 'The phone is unpaired.' };
+  }
+  return { ok: false, text: 'Blob does not know that' };
 }
 
 async function runShortcut(s: Shortcut): Promise<void> {
   replaying = true;
-  send({ type: 'busy', busy: true });
-  setOffer(null);
+  busy(true);
   row({ kind: 'request', text: `Shortcut: ${s.name}` });
   const n = s.steps.length;
-  const mcp = mcpCaller(filesServer);
+  const mcp = replayMcp = mcpCaller(filesServer);
   try {
     const end = await replay(s.steps, mcp.call, {
       start: (i, st) => {
@@ -181,8 +332,9 @@ async function runShortcut(s: Shortcut): Promise<void> {
     }
   } finally {
     await mcp.close();
+    replayMcp = null;
     replaying = false;
-    send({ type: 'busy', busy: false });
+    busy(false);
   }
 }
 
@@ -196,13 +348,17 @@ function openMicSettings(): void {
   else if (process.platform === 'darwin') spawn('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'], o).unref();
 }
 
-const isModel = (m: unknown): m is Model => m === 'sonnet' || m === 'haiku' || m === 'default';
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
 async function post(path: string, body: any): Promise<void> {
-  const model = isModel(body.model) ? body.model : 'sonnet';
   switch (path) {
-    case '/prewarm': brain.prewarm(model); return;
+    case '/prewarm': brain.prewarm(settings.get().model); return;
+    case '/model': {                                // a click on the chip: the user's own choice, no question
+      const m = parseValue('model', body.model);
+      if (m !== undefined) settings.set('model', m as Model);
+      focus.restore();
+      return;
+    }
     case '/cancel': brain.cancel(); return;
     case '/size': resize(Number(body.w), Number(body.h)); return;
     case '/focus-back': focus.restore(); return;
@@ -210,24 +366,12 @@ async function post(path: string, body: any): Promise<void> {
       const text = str(body.text);
       if (!text) return;
       focus.restore();
-      if (replaying) { caption('A shortcut is still running.'); return; }
-      if (brain.run(text, model)) { request = text; setOffer(null); row({ kind: 'request', text }); }
+      const why = run(text);
+      if (why) caption(why);
       return;
     }
     case '/answer': questions.answer(str(body.id), body.yes === true); focus.restore(); return;
-    case '/offer/dismiss': setOffer(null); focus.restore(); return;
-    case '/offer/save': {
-      focus.restore();
-      if (!offer) return;
-      if (shortcuts.length >= MAX_SHORTCUTS) { caption(`You have ${MAX_SHORTCUTS} shortcuts: remove one first (the + blob).`); return; }
-      const name = str(body.name).slice(0, 60) || offer.name;
-      const icon = (ICONS as readonly string[]).includes(body.icon) ? body.icon : ICONS[0];
-      const pinned = shortcuts.filter(s => s.pinned).length < MAX_PINNED;
-      store([...shortcuts, { id: randomUUID(), name, icon, pinned, steps: offer.steps }]);
-      setOffer(null);
-      caption(pinned ? `Saved "${name}" on the bubble.` : `Saved "${name}". Pin it from the + blob.`);
-      return;
-    }
+    case '/pair/close': closeQr(); focus.restore(); return;
     case '/shortcut/run': {
       const s = shortcuts.find(x => x.id === body.id);
       focus.restore();
@@ -284,10 +428,15 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (req.method === 'POST') {
-    const asking = url.pathname === '/ask';
-    if (asking ? req.headers['x-ask-token'] !== askToken : req.headers['x-talk-token'] !== token) { res.writeHead(403).end(); return; }
+    const asking = url.pathname === '/ask', self = url.pathname === '/self';
+    const allowed = asking ? req.headers['x-ask-token'] === askToken : self ? req.headers['x-self-token'] === selfToken : req.headers['x-talk-token'] === token;
+    if (!allowed) { res.writeHead(403).end(); return; }
     let body: any = {};
     try { let s = ''; for await (const c of req) s += c; body = JSON.parse(s || '{}'); } catch { /* empty body */ }
+    if (self) {
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(selfAction(body)));
+      return;
+    }
     if (asking) {
       const question = str(body.question);
       const yes = question ? await questions.ask(question.slice(0, 400)) : false;
@@ -311,18 +460,39 @@ await new Promise<void>(ok => {
 });
 port = (server.address() as { port: number }).port;
 
-// The files server is built by build.mjs into dist/ and run with this same Node.
-filesServer = {
+// The files and self servers are built by build.mjs into dist/ and run with this same Node.
+const asks = { BLOB_ASK_URL: `http://127.0.0.1:${port}/ask`, BLOB_ASK_TOKEN: askToken };
+filesServer = { command: process.execPath, args: [join(DIST, 'files-mcp.mjs')], env: asks };
+const selfServer: ServerCommand = {
   command: process.execPath,
-  args: [join(DIST, 'files-mcp.mjs')],
-  env: { BLOB_ASK_URL: `http://127.0.0.1:${port}/ask`, BLOB_ASK_TOKEN: askToken },
+  args: [join(DIST, 'self-mcp.mjs')],
+  env: { ...asks, BLOB_SELF_URL: `http://127.0.0.1:${port}/self`, BLOB_SELF_TOKEN: selfToken, ...(RELAY && { BLOB_RELAY: RELAY }) },
 };
 // Where the pill relay finds Blob: brain.ts hands these to clawdcursor, which passes its own env on to the relay.
 process.env.BLOB_PILL_URL = `http://127.0.0.1:${port}/pill`;
 process.env.BLOB_PILL_TOKEN = pillToken;
-writeFileSync(mcpConfigPath, mcpConfig(filesServer), { mode: 0o600 });
-brain = new Brain({ mcpConfigPath, cwd: WORK, emit: onBrain });
+writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer }), { mode: 0o600 });
+brain = new Brain({ mcpConfigPath, cwd: WORK, emit: onBrain, persona: () => persona(settings.get()) });
 sendShortcuts();
+sendSettings();
+
+// Watching (learn only): on while the setting is, quiet while Blob itself works. It reads through its own clawdcursor.
+watcher = new Watcher({
+  file: activityFile(), reader: clawdcursorReader(mcpCaller(filesServer)),
+  busy: () => brain.busy || replaying, front: windowsFront(),
+});
+if (settings.get().watching) watcher.start();
+// The self server writes the settings file after the user's Yes: follow it.
+settings.onChange((now, changed) => {
+  if (changed.includes('watching')) { if (now.watching) watcher?.start(); else watcher?.stop(); }
+  sendSettings();
+});
+settings.watch();
+
+// The phone paired before, if any.
+const savedRoom = loadRoom(PAIR);
+if (savedRoom) connectPhone(savedRoom, true);
+if (settings.get().phonePaired !== !!savedRoom) setPaired(!!savedRoom);
 
 // ── window ───────────────────────────────────────────────────────────────────
 const app = new Application();
@@ -412,6 +582,9 @@ function quit(): void {
   if (exiting) return;
   exiting = true;
   brain.stop();
+  watcher?.stop();
+  pairing?.close();
+  settings.unwatch();
   focus.stop();
   rmSync(tmp, { recursive: true, force: true });
   try { app.exit(); } catch { /* already closed */ }

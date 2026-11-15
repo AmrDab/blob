@@ -6,7 +6,7 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { BorderBeam } from 'border-beam';
 import type { Model } from '../brain.ts';
 import { formatLog, type LogRow } from '../log.ts';
-import { GOO, ICONS, MAX_PINNED } from '../shared.ts';
+import { GOO, MAX_PINNED } from '../shared.ts';
 import { Icon } from './icons.tsx';
 import { DOWNLOAD_MB, Recorder, isDownloaded, load, transcribe } from './speech.ts';
 
@@ -18,8 +18,8 @@ const post = (path: string, body: unknown = {}) =>
 /** Gives the keyboard back to the window the user was in before clicking the bubble. */
 const back = () => void post('/focus-back');
 
-const MODELS: Model[] = ['sonnet', 'haiku', 'default'];
-const LABEL: Record<Model, string> = { sonnet: 'Sonnet', haiku: 'Haiku', default: 'Default' };
+const MODELS: Model[] = ['sonnet', 'haiku', 'opus', 'default'];
+const LABEL: Record<Model, string> = { sonnet: 'Sonnet', haiku: 'Haiku', opus: 'Opus', default: 'Default' };
 const T = { duration: 550, ease: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
 const HOLD_MS = 350;   // a press longer than this is press-and-hold; shorter is a tap (tap again to finish)
 const STILL_MS = 150;  // a press that stays still this long starts the mic
@@ -37,7 +37,6 @@ const BOX = [{ w: 150, h: 140 }, { w: 192, h: 186 }, { w: 240, h: 234 }];
 
 type Phase = 'idle' | 'ask' | 'downloading' | 'recording' | 'transcribing';
 type ShortcutInfo = { id: string; name: string; icon: string; pinned: boolean };
-type Offer = { name: string } | { why: string } | null;
 type Check = { id: string; ok: boolean; label: string; fix: string };
 
 const Keys = () => <svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="6" width="18" height="12" rx="2.5" fill="none" /><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8" fill="none" /></svg>;
@@ -61,16 +60,15 @@ function App() {
   const [hint, setHint] = useState<string | null>(null);     // a shortcut blob's name, while hovered
   const [rows, setRows] = useState<LogRow[]>([]);
   const [shortcuts, setShortcuts] = useState<ShortcutInfo[]>([]);
-  const [offer, setOffer] = useState<Offer>(null);
-  const [offerName, setOfferName] = useState('');
-  const [offerIcon, setOfferIcon] = useState<string>(ICONS[0]);
+  const [qr, setQr] = useState<string | null>(null);         // the phone pairing code, as an SVG
   const [asks, setAsks] = useState<{ id: string; question: string }[]>([]);
   const [checks, setChecks] = useState<Check[]>([]);
   const [micProblem, setMicProblem] = useState<string | null>(null);
   const [typeOpen, setTypeOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [browsing, setBrowsing] = useState(false);            // the + view: every saved shortcut, to pin or remove
-  const [model, setModel] = useState<Model>('sonnet');
+  const [model, setModel] = useState<Model>('sonnet');        // the settings' model: a click on the chip changes it
+  const [voice, setVoice] = useState(true);
   const [phase, setPhase] = useState<Phase>('idle');
   const [percent, setPercent] = useState(0);
   const [text, setText] = useState('');
@@ -91,16 +89,14 @@ function App() {
       if (e.type === 'setup') setChecks(e.checks);
       if (e.type === 'ask') setAsks(a => [...a, { id: e.id, question: e.question }]);
       if (e.type === 'ask-done') setAsks(a => a.filter(x => x.id !== e.id));
-      if (e.type === 'offer') {
-        setOffer(e.offer);
-        if (e.offer?.name) { setOfferName(e.offer.name); setOfferIcon(ICONS[0]); }
-      }
+      if (e.type === 'settings') { setModel(e.model); setVoice(e.voice); }
+      if (e.type === 'qr') setQr(e.svg);
     };
     return () => es.close();
   }, []);
 
   const failing = checks.filter(c => !c.ok);
-  const big = typeOpen || logOpen || !!offer || asks.length > 0 || failing.length > 0 || !!micProblem;
+  const big = typeOpen || logOpen || !!qr || asks.length > 0 || failing.length > 0 || !!micProblem;
   const arcs = browsing ? (shortcuts.length > MAX_PINNED ? 2 : 1) : shortcuts.some(s => s.pinned) ? 1 : 0;
   const box = BOX[arcs];
   // The window is as tall as the cards need (at least room for a three-line caption) plus the bubble's box.
@@ -133,6 +129,7 @@ function App() {
 
   // ── Speak: a still press talks (hold, or tap and tap again), a moving press drags the window ──
   async function begin(): Promise<boolean> {
+    if (!voice) { setTypeOpen(true); setCaption('Voice is off. Type here, or ask me to turn voice on.'); return false; }
     if (!(await isDownloaded())) { setPhase('ask'); return false; }
     const recorder = new Recorder();
     try { await recorder.start(); } catch (err) {
@@ -145,7 +142,7 @@ function App() {
     setMicStream(recorder.stream ?? null);
     setPhase('recording');
     setCaption('Listening…');
-    void post('/prewarm', { model });               // Claude starts while the user is still talking
+    void post('/prewarm');                          // Claude starts while the user is still talking
     void load(() => {});                            // and Whisper loads from the cache
     return true;
   }
@@ -173,7 +170,7 @@ function App() {
       const audio = await r.recorder.stop();
       const said = audio.length > 16000 * 0.3 ? await transcribe(audio) : '';
       if (!said) { setCaption("Didn't catch that."); void post('/cancel'); }
-      else { setCaption(said); void post('/run', { text: said, model }); }
+      else { setCaption(said); void post('/run', { text: said }); }
     } catch (err) {
       setCaption(`Speech: ${(err as Error).message}`);
       void post('/cancel');
@@ -238,7 +235,7 @@ function App() {
     const t = text.trim();
     if (!t) return;
     if (busy) { setCaption('Still working on the last request.'); return; }
-    void post('/run', { text: t, model });          // the host hands the keyboard back
+    void post('/run', { text: t });                 // the host hands the keyboard back
     setText('');
     setTypeOpen(false);
   }
@@ -291,7 +288,7 @@ function App() {
             </div>
           </Liquid.Item>
         )}
-        {asks.slice(0, 1).map(a => (
+        {asks.slice(-1).map(a => (   // the newest question first: an older one comes back after it
           <Liquid.Item observe key={a.id}>
             <div className="card ask">
               <div>{a.question}</div>
@@ -302,29 +299,14 @@ function App() {
             </div>
           </Liquid.Item>
         ))}
-        {offer && (
+        {qr && (
           <Liquid.Item observe>
-            {'why' in offer ? (
-              <div className="card offer">
-                <div>{offer.why}</div>
-                <div className="row"><button className="btn" onClick={() => void post('/offer/dismiss')}>OK</button></div>
-              </div>
-            ) : (
-              <div className="card offer">
-                <div className="title">Save as a shortcut?</div>
-                <input value={offerName} maxLength={60} onChange={e => setOfferName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') void post('/offer/save', { name: offerName, icon: offerIcon }); }} />
-                <div className="icons">
-                  {ICONS.map(i => (
-                    <button key={i} className={`pick${i === offerIcon ? ' on' : ''}`} aria-label={i} onClick={() => setOfferIcon(i)}><Icon name={i} size={16} /></button>
-                  ))}
-                </div>
-                <div className="row">
-                  <button className="btn" onClick={() => void post('/offer/dismiss')}>Not now</button>
-                  <button className="btn strong" onClick={() => void post('/offer/save', { name: offerName, icon: offerIcon })}>Save</button>
-                </div>
-              </div>
-            )}
+            <div className="card qr">
+              <div className="title">Scan with your phone</div>
+              {/* shapes only, hidden from accessibility: the code is for a camera, never for a program reading the screen */}
+              <div className="code" aria-hidden="true" dangerouslySetInnerHTML={{ __html: qr }} />
+              <div className="row"><button className="btn" onClick={() => void post('/pair/close')}>Close</button></div>
+            </div>
           </Liquid.Item>
         )}
         {typeOpen && (
@@ -336,7 +318,7 @@ function App() {
               </div>
             </Liquid.Item>
             <Liquid.Item observe>
-              <button className="card chip" title="Model" onClick={() => setModel(MODELS[(MODELS.indexOf(model) + 1) % MODELS.length])}>{LABEL[model]}</button>
+              <button className="card chip" title="Model" onClick={() => void post('/model', { model: MODELS[(MODELS.indexOf(model) + 1) % MODELS.length] })}>{LABEL[model]}</button>
             </Liquid.Item>
           </div>
         )}
@@ -363,7 +345,7 @@ function App() {
           </Liquid.Item>
           <Liquid.Item className="it-small" x={open ? -64 : 0} y={0} transition={T} delay={80}>
             <button className={`blob small${open ? '' : ' shut'}`} aria-label="Shortcuts" onClick={() => {
-              if (!shortcuts.length) setCaption('No shortcuts yet. When every step of a task confirms, Blob offers to save it.');
+              if (!shortcuts.length) setCaption('No shortcuts yet. After a task, say "save that as a shortcut".');
               else setBrowsing(v => !v);
               back();
             }}><Icon name={browsing ? 'x' : 'plus'} /></button>

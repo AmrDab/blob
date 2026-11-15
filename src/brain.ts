@@ -2,8 +2,9 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import type { Model } from './settings.ts';
 
-export type Model = 'sonnet' | 'haiku' | 'default';
+export type { Model };
 
 export interface LogEntry {
   tool: string;       // "computer", "accessibility", ... (the mcp__clawdcursor__ prefix dropped)
@@ -61,15 +62,17 @@ export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platfor
 
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
 
-/** The --mcp-config file: clawdcursor and Blob's files server, nothing else. */
-export function mcpConfig(files: ServerCommand, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
+/** The --mcp-config file: clawdcursor, Blob's files server and Blob's self server ("blob"), nothing else. */
+export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
   return JSON.stringify({ mcpServers: {
     clawdcursor: { type: 'stdio', ...clawdcursorCommand(env, platform) },
-    files: { type: 'stdio', ...files },
+    files: { type: 'stdio', ...own.files },
+    blob: { type: 'stdio', ...own.blob },
   } }, null, 2);
 }
 
-export function claudeArgs(o: { mcpConfigPath: string; model: Model; resume?: string }): string[] {
+/** `persona`: what Blob knows about itself (persona.ts), as the settings are when the child starts. */
+export function claudeArgs(o: { mcpConfigPath: string; model: Model; resume?: string; persona?: string }): string[] {
   return [
     '-p',
     '--input-format', 'stream-json',
@@ -78,10 +81,10 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Model; resume?: st
     '--strict-mcp-config',                  // no other MCP server (not the user's own, not a plugin's)
     '--setting-sources', 'project',         // the cwd is an empty folder: none of the user's hooks, plugins or CLAUDE.md
     '--tools', BUILTIN_TOOLS.join(','),     // read-only built-ins only: no Bash, no Edit/Write
-    '--allowedTools', ['mcp__clawdcursor__*', 'mcp__files__*', ...BUILTIN_TOOLS].join(','),
+    '--allowedTools', ['mcp__clawdcursor__*', 'mcp__files__*', 'mcp__blob__*', ...BUILTIN_TOOLS].join(','),
     '--disable-slash-commands',
     '--no-chrome',
-    '--append-system-prompt', SYSTEM_PROMPT,
+    '--append-system-prompt', o.persona ? `${SYSTEM_PROMPT}\n${o.persona}` : SYSTEM_PROMPT,
     ...(o.model === 'default' ? [] : ['--model', o.model]),
     ...(o.resume ? ['--resume', o.resume] : []),
   ];
@@ -204,10 +207,10 @@ function killTree(p: ChildProcessWithoutNullStreams): void {
 
 /** One `claude -p` at a time. prewarm() starts it early (when Speak is pressed); run() sends the request. */
 export class Brain {
-  private child?: { p: ChildProcessWithoutNullStreams; model: Model; sent: boolean; early: Update[] };
+  private child?: { p: ChildProcessWithoutNullStreams; model: Model; sent: boolean; halted: boolean; early: Update[] };
   private session?: string;
 
-  constructor(private o: { mcpConfigPath: string; cwd: string; emit: (e: BrainEvent) => void }) {}
+  constructor(private o: { mcpConfigPath: string; cwd: string; emit: (e: BrainEvent) => void; persona?: () => string }) {}
 
   get busy(): boolean { return !!this.child?.sent; }
 
@@ -234,13 +237,20 @@ export class Brain {
     return true;
   }
 
+  /** Stops the request that is running (the phone's Stop): it ends with "Stopped." */
+  halt(): void {
+    if (!this.child?.sent) return;
+    this.child.halted = true;
+    killTree(this.child.p);
+  }
+
   stop(): void { if (this.child) killTree(this.child.p); this.child = undefined; }
 
   private start(model: Model) {
-    const p = spawn('claude', claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model, resume: this.session }), {
+    const p = spawn('claude', claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model, resume: this.session, persona: this.o.persona?.() }), {
       cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: process.platform !== 'win32',
     });
-    const entry = { p, model, sent: false, early: [] as Update[] };
+    const entry = { p, model, sent: false, halted: false, early: [] as Update[] };
     const parser = new StreamParser();
     let stderr = '';
     p.stdout.setEncoding('utf8');
@@ -259,7 +269,7 @@ export class Brain {
       finished = true;
       if (this.child === entry) this.child = undefined;
       if (!entry.sent) return;
-      if (!parser.sawResult) this.o.emit({ type: 'answer', text: oneLine(stderr.trim().split('\n').pop() || why, 400) });
+      if (!parser.sawResult) this.o.emit({ type: 'answer', text: entry.halted ? 'Stopped.' : oneLine(stderr.trim().split('\n').pop() || why, 400) });
       this.o.emit({ type: 'busy', busy: false });
       this.o.emit({ type: 'done', calls: parser.calls, ok: parser.sawResult && !parser.resultError });
     };
