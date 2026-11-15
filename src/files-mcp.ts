@@ -1,5 +1,5 @@
-// Blob's files server (stdio MCP): list_dir, make_folder, move (also renames) and trash. Claude Code starts it from
-// the --mcp-config Blob writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
+// Blob's files server (stdio MCP): list_dir, make_folder, move (also renames), trash, and run (a shell command,
+// shell.ts). Claude Code starts it from the --mcp-config Blob writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
 // onto an existing file ask the user on the bubble first (No, or no answer in 60 s, refuses).
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { execFile } from 'node:child_process';
@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { askUser } from './ask.ts';
+import { MAX_COMMAND, runTool, systemExec } from './shell.ts';
 
 export interface FileDeps {
   ask: (question: string) => Promise<boolean>;
@@ -170,5 +171,15 @@ export async function serve(): Promise<void> {
     description: 'Move a file or folder to the Recycle Bin / Trash (never a permanent delete). The user is asked first.',
     inputSchema: { path }, annotations: { destructiveHint: true },
   }, async a => reply(await tools.trash(a)));
+  const shell = process.platform === 'win32' ? 'PowerShell' : 'shell';
+  server.registerTool('run', {
+    description: `Run one ${shell} command in the home folder and get its output. A command that only looks ` +
+      '(list, read, search, status, version) runs at once. Anything else is shown to the user word for word with ' +
+      `Yes and No first, and runs only on Yes. At most ${MAX_COMMAND} characters. Never put a password, key or token in it.`,
+    inputSchema: {
+      command: z.string().describe(`The ${shell} command, exactly as it should run.`),
+      timeout_s: z.number().optional().describe('Seconds before it is stopped (default 60, at most 600).'),
+    },
+  }, async a => reply(await runTool(a, { ask: (q, detail) => askUser(q, { detail }), exec: systemExec })));
   await server.connect(new StdioServerTransport());
 }
