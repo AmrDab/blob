@@ -28,7 +28,7 @@ describe('claude command line', () => {
   it('starts clawdcursor mcp --compact, through cmd on Windows, or the override', () => {
     expect(clawdcursorCommand({}, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'] });
     expect(clawdcursorCommand({}, 'darwin')).toEqual({ command: 'clawdcursor', args: ['mcp', '--compact'] });
-    expect(clawdcursorCommand({ CLAWD_TALK_CLAWDCURSOR: 'node "C:/dev x/cli.js" mcp --compact' }, 'linux'))
+    expect(clawdcursorCommand({ PRONTO_CLAWDCURSOR: 'node "C:/dev x/cli.js" mcp --compact' }, 'linux'))
       .toEqual({ command: 'node', args: ['C:/dev x/cli.js', 'mcp', '--compact'] });
     expect(JSON.parse(mcpConfig({}, 'linux'))).toEqual({ mcpServers: { clawdcursor: { type: 'stdio', command: 'clawdcursor', args: ['mcp', '--compact'] } } });
   });
@@ -44,9 +44,9 @@ describe('env', () => {
   it('drops API keys and host-session variables, keeps the rest', () => {
     const env = cleanEnv({
       PATH: '/bin', HOME: '/home/u', ANTHROPIC_API_KEY: 'k', ANTHROPIC_BASE_URL: 'u', CLAUDECODE: '1',
-      CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_OAUTH_TOKEN: 't', CLAUDE_CONFIG_DIR: '/c', CLAWD_TALK_CLAWDCURSOR: 'x',
+      CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_OAUTH_TOKEN: 't', CLAUDE_CONFIG_DIR: '/c', PRONTO_CLAWDCURSOR: 'x',
     });
-    expect(env).toEqual({ PATH: '/bin', HOME: '/home/u', CLAUDE_CONFIG_DIR: '/c', CLAWD_TALK_CLAWDCURSOR: 'x' });
+    expect(env).toEqual({ PATH: '/bin', HOME: '/home/u', CLAUDE_CONFIG_DIR: '/c', PRONTO_CLAWDCURSOR: 'x' });
   });
 });
 

@@ -23,9 +23,9 @@ export const SYSTEM_PROMPT =
   'Do it on this computer with the clawdcursor tools. Your final reply is shown as a one-line caption: ' +
   'one or two short plain sentences saying what you did or found, no markdown.';
 
-/** The clawdcursor MCP server command: `clawdcursor mcp --compact`, or CLAWD_TALK_CLAWDCURSOR (e.g. a dev build). */
+/** The clawdcursor MCP server command: `clawdcursor mcp --compact`, or PRONTO_CLAWDCURSOR (e.g. a dev build). */
 export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): { command: string; args: string[] } {
-  const raw = env.CLAWD_TALK_CLAWDCURSOR?.trim() || 'clawdcursor mcp --compact';
+  const raw = env.PRONTO_CLAWDCURSOR?.trim() || 'clawdcursor mcp --compact';
   const parts = (raw.match(/"[^"]*"|\S+/g) ?? []).map(p => p.replace(/^"|"$/g, ''));
   // npm installs clawdcursor as a .cmd shim on Windows, which only cmd can start.
   if (platform === 'win32') return { command: 'cmd', args: ['/c', ...parts] };

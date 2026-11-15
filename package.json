@@ -1,10 +1,10 @@
 {
-  "name": "clawdcursor-talk",
+  "name": "pronto",
   "version": "0.1.0",
   "private": true,
-  "description": "A floating bubble for testing clawdcursor by talking to it (local only).",
+  "description": "A tiny floating bubble: tell your computer what to do, by voice or text. Runs your own Claude Code with clawdcursor as its hands.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "build": "node build.mjs",
     "start": "node build.mjs && tsx src/main.ts",

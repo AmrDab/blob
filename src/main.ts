@@ -7,7 +7,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { Application } from '@webviewjs/webview';
 import { Brain, mcpConfig, type Model } from './brain.ts';
 
-const HOME = join(homedir(), '.clawdcursor-talk');
+const HOME = join(homedir(), '.pronto');
 const WORK = join(HOME, 'work');                     // claude's cwd: empty, and the same every time so --resume finds the session
 const DIST = resolve(import.meta.dirname, '..', 'dist');
 // A fixed port keeps the page's origin, and so the cached Whisper model, the same across starts; any free port if taken.
@@ -16,7 +16,7 @@ const SIZE = { closed: { w: 320, h: 230 }, open: { w: 360, h: 440 } };
 const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm' };
 
 mkdirSync(WORK, { recursive: true });
-const tmp = mkdtempSync(join(tmpdir(), 'clawdcursor-talk-'));
+const tmp = mkdtempSync(join(tmpdir(), 'pronto-'));
 const mcpConfigPath = join(tmp, 'mcp.json');
 writeFileSync(mcpConfigPath, mcpConfig(), { mode: 0o600 });
 const token = randomBytes(24).toString('hex');
@@ -75,7 +75,7 @@ port = (server.address() as { port: number }).port;
 // ── window ───────────────────────────────────────────────────────────────────
 const app = new Application();
 const win = app.createBrowserWindow({
-  title: 'clawdcursor talk',
+  title: 'Pronto',
   width: SIZE.closed.w, height: SIZE.closed.h, logical: true,
   transparent: true, decorations: false, alwaysOnTop: true,
   resizable: false, maximizable: false, minimizable: false,
@@ -112,7 +112,7 @@ const view = win.createWebview({
   url: `http://127.0.0.1:${port}/?t=${token}`,
   transparent: true,
   webContext,
-  enableDevtools: !!process.env.CLAWD_TALK_DEVTOOLS,
+  enableDevtools: !!process.env.PRONTO_DEVTOOLS,
   navigationHandler: u => u.startsWith(`http://127.0.0.1:${port}/`),
   newWindowHandler: () => false,
 });
@@ -136,4 +136,4 @@ process.on('SIGINT', quit);
 process.on('SIGTERM', quit);
 process.on('exit', () => brain.stop());
 app.run();
-console.log(`clawdcursor talk: http://127.0.0.1:${port} (close the bubble from the taskbar, or Ctrl+C here)`);
+console.log(`Pronto: http://127.0.0.1:${port} (close the bubble from the taskbar, or Ctrl+C here)`);
