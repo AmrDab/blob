@@ -50,7 +50,8 @@ export async function transcribe(audio: Float32Array): Promise<string> {
 
 /** Records from the microphone; stop() gives 16 kHz mono samples. */
 export class Recorder {
-  private stream?: MediaStream;
+  /** The live microphone stream while recording (the voice ring reads its level). */
+  stream?: MediaStream;
   private rec?: MediaRecorder;
   private chunks: Blob[] = [];
 
