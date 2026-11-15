@@ -56,6 +56,10 @@ button { font: inherit; color: inherit; }
 .type input { background: transparent; }
 .chip { flex: none; border: 0; padding: 0 14px; font-weight: 500; font-size: 11.5px; cursor: pointer; }
 .ask, .setup { width: 100%; }
+.ask .said { overflow-wrap: anywhere; user-select: text; }
+/* a command or a task under a question: every character shows (it wraps; no clipping, no scrolling) */
+.ask .detail { margin: 6px 0 0; padding: 6px 8px; border-radius: 10px; background: rgba(28, 28, 30, .07);
+  font: 11.5px/16px ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; user-select: text; }
 .qr { text-align: center; }
 .qr .code { width: 200px; height: 200px; margin: 4px auto 0; }
 .qr .code svg { display: block; width: 100%; height: 100%; }

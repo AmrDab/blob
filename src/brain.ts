@@ -1,4 +1,4 @@
-// One run at a time of the user's own `claude -p`, with clawdcursor and Blob's file tools.
+// One run at a time of the user's own `claude -p`, with clawdcursor, Blob's files and shell tools and its self tools.
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -30,14 +30,13 @@ export type Update =
 
 export type BrainEvent = Update | { type: 'busy'; busy: boolean } | { type: 'done'; calls: Call[]; ok: boolean };
 
-/** Claude Code's read-only file tools; changes go through Blob's files server, which asks before trash/overwrite. */
+/** Claude Code's read-only file tools; changes go through Blob's files server, which asks before trash/overwrite and before a command that changes something. */
 export const BUILTIN_TOOLS = ['Read', 'Glob', 'Grep'];
 
 export const SYSTEM_PROMPT =
-  'You are driven from a small floating bubble on the desktop: the request comes from the user by voice or typing. ' +
-  'Do it on this computer with the clawdcursor tools. For files and folders use Read, Glob and Grep to look and the ' +
-  'files tools (list_dir, make_folder, move, trash) to change them, not the desktop. Your final reply is shown as a ' +
-  'one-line caption: one or two short plain sentences saying what you did or found, no markdown.';
+  'The request comes from the user by voice or typing, through a small floating bubble on the desktop. Carry it out ' +
+  'on this computer. Your final reply is shown as a one-line caption and may be read aloud: one short plain sentence ' +
+  'saying what was done, or the information asked for. No markdown.';
 
 /** Blob's relay (built by build.mjs): clawdcursor starts it in place of its own pill, and Blob draws the pill. */
 export const PILL_HOST = fileURLToPath(new URL('../dist/pill-host.mjs', import.meta.url));
@@ -82,7 +81,7 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Model; resume?: st
     '--mcp-config', o.mcpConfigPath,
     '--strict-mcp-config',                  // no other MCP server (not the user's own, not a plugin's)
     '--setting-sources', 'project',         // the cwd is an empty folder: none of the user's hooks, plugins or CLAUDE.md
-    '--tools', BUILTIN_TOOLS.join(','),     // read-only built-ins only: no Bash, no Edit/Write
+    '--tools', BUILTIN_TOOLS.join(','),     // read-only built-ins only: no Bash, no Edit/Write (the shell is files `run`, which asks)
     '--allowedTools', ['mcp__clawdcursor__*', 'mcp__files__*', 'mcp__blob__*', ...BUILTIN_TOOLS].join(','),
     '--disable-slash-commands',
     '--no-chrome',

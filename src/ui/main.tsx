@@ -65,7 +65,8 @@ function App() {
   const [rows, setRows] = useState<LogRow[]>([]);
   const [shortcuts, setShortcuts] = useState<ShortcutInfo[]>([]);
   const [qr, setQr] = useState<string | null>(null);         // the phone pairing code, as an SVG
-  const [asks, setAsks] = useState<{ id: string; question: string }[]>([]);
+  const [asks, setAsks] = useState<{ id: string; question: string; detail?: string }[]>([]);
+  const [reminders, setReminders] = useState<{ id: string; text: string; at: string }[]>([]);   // each stays until dismissed
   const [checks, setChecks] = useState<Check[]>([]);
   const [micProblem, setMicProblem] = useState<string | null>(null);
   const [typeOpen, setTypeOpen] = useState(false);
@@ -93,7 +94,9 @@ function App() {
       if (e.type === 'row') setRows(r => [...r, e.row]);
       if (e.type === 'shortcuts') setShortcuts(e.list);
       if (e.type === 'setup') setChecks(e.checks);
-      if (e.type === 'ask') setAsks(a => [...a, { id: e.id, question: e.question }]);
+      if (e.type === 'ask') setAsks(a => [...a, { id: e.id, question: e.question, detail: e.detail }]);
+      if (e.type === 'reminder') setReminders(r => [...r, { id: e.id, text: e.text, at: e.at }]);
+      if (e.type === 'reminder-done') setReminders(r => r.filter(x => x.id !== e.id));
       if (e.type === 'ask-done') setAsks(a => a.filter(x => x.id !== e.id));
       if (e.type === 'settings') {
         setModel(e.model); setVoice(e.voice);
@@ -111,7 +114,7 @@ function App() {
   useEffect(() => { if (ready && step >= first.cards.length) void post('/firstrun', { done: true }); }, [ready, step, first.cards.length]);
   // What can be tapped on the cards: when it changes, taps wait a moment (settle.ts).
   const settled = useSettled(`${need?.id}|${asks[0]?.id}|${asking?.key}|${!!qr}`);
-  const big = typeOpen || logOpen || !!qr || asks.length > 0 || !!need || !!asking || !!micProblem;
+  const big = typeOpen || logOpen || !!qr || asks.length > 0 || reminders.length > 0 || !!need || !!asking || !!micProblem;
   const arcs = browsing ? (shortcuts.length > MAX_PINNED ? 2 : 1) : shortcuts.some(s => s.pinned) ? 1 : 0;
   const box = BOX[arcs];
   // The window is as tall as the cards need (at least room for a three-line caption) plus the bubble's box.
@@ -352,10 +355,21 @@ function App() {
           <Liquid.Item observe key={a.id}>
             <div className="card ask">
               <div>{a.question}</div>
+              {/* the command (or the task) exactly as it will run: all of it, wrapped, never cut or scrolled */}
+              {a.detail && <pre className="detail">{a.detail}</pre>}
               <div className="row">
                 <button className="btn" onClick={() => { if (settled()) void post('/answer', { id: a.id, yes: false }); }}>No</button>
                 <button className="btn strong" onClick={() => { if (settled()) void post('/answer', { id: a.id, yes: true }); }}>Yes</button>
               </div>
+            </div>
+          </Liquid.Item>
+        ))}
+        {reminders.slice(0, 1).map(r => (
+          <Liquid.Item observe key={r.id}>
+            <div className="card ask">
+              <div className="title">Reminder · {r.at}{reminders.length > 1 ? ` (and ${reminders.length - 1} more)` : ''}</div>
+              <div className="said">{r.text}</div>
+              <div className="row"><button className="btn strong" onClick={() => void post('/reminder/done', { id: r.id })}>OK</button></div>
             </div>
           </Liquid.Item>
         ))}

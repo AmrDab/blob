@@ -3,7 +3,7 @@ import { isAbsolute } from 'node:path';
 import { PILL_HOST, StreamParser, callLabel, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
 
 describe('claude command line', () => {
-  it('runs stream-json print mode with clawdcursor, the files and self servers and the read-only built-ins', () => {
+  it('runs stream-json print mode with clawdcursor, the files (and shell) and self servers and the read-only built-ins', () => {
     const a = claudeArgs({ mcpConfigPath: '/tmp/mcp.json', model: 'sonnet' });
     const after = (flag: string) => a[a.indexOf(flag) + 1];
     expect(a[0]).toBe('-p');
@@ -13,16 +13,16 @@ describe('claude command line', () => {
     expect(after('--mcp-config')).toBe('/tmp/mcp.json');
     expect(a).toContain('--strict-mcp-config');
     expect(after('--tools')).toBe('Read,Glob,Grep');
-    expect(after('--allowedTools')).toBe('mcp__clawdcursor__*,mcp__files__*,mcp__blob__*,Read,Glob,Grep');
-    expect(a.join(' ')).not.toMatch(/Bash|Edit|Write/);
+    expect(after('--allowedTools')).toBe('mcp__clawdcursor__*,mcp__files__*,mcp__blob__*,Read,Glob,Grep');   // files__* covers the shell tool, run
+    expect(a.join(' ')).not.toMatch(/Bash|Edit|Write/);                 // Claude Code's own shell stays off: run asks, Bash would not
     expect(after('--model')).toBe('sonnet');
-    expect(after('--append-system-prompt')).toMatch(/clawdcursor/);
+    expect(after('--append-system-prompt')).toMatch(/one short plain sentence/);
     expect(a).not.toContain('--resume');
   });
 
   it('adds what Blob knows about itself to the system prompt, and takes Opus', () => {
-    const a = claudeArgs({ mcpConfigPath: 'm.json', model: 'opus', persona: 'You are Blob.' });
-    expect(a[a.indexOf('--append-system-prompt') + 1]).toMatch(/clawdcursor[^]*\nYou are Blob\.$/);
+    const a = claudeArgs({ mcpConfigPath: 'm.json', model: 'opus', persona: 'Blob is an assistant.' });
+    expect(a[a.indexOf('--append-system-prompt') + 1]).toMatch(/caption[^]*\nBlob is an assistant\.$/);
     expect(a[a.indexOf('--model') + 1]).toBe('opus');
   });
 

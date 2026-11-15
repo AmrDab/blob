@@ -12,6 +12,7 @@ export interface Settings {
   watching: boolean;        // learn from what the user does (watch.ts)
   autoShortcuts: boolean;   // build a shortcut from a task done about 3 times (habits.ts)
   voice: boolean;           // hold the blob and talk
+  startAtLogin: boolean;    // start Blob when the user signs in, so schedules work (autostart.ts)
   phonePaired: boolean;     // status only: the host sets it, nobody asks for it
   onboarded: boolean;       // the first-run questions were answered; the host sets it
 }
@@ -19,13 +20,13 @@ export type Key = keyof Settings;
 
 /** Before the first-run questions: nothing that learns about the user is on until they say Yes. */
 export const DEFAULTS: Settings = {
-  model: 'sonnet', watching: false, autoShortcuts: true, voice: true, phonePaired: false, onboarded: false,
+  model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false,
 };
 
 /** What the user can change by asking. The rest is set by the host. */
-export const CHANGEABLE = ['model', 'watching', 'autoShortcuts', 'voice'] as const;
+export const CHANGEABLE = ['model', 'watching', 'autoShortcuts', 'voice', 'startAtLogin'] as const;
 /** What the first run asks about (phone pairing is its own step: the QR). */
-export const FIRST_RUN = ['watching', 'voice', 'autoShortcuts'] as const;
+export const FIRST_RUN = ['watching', 'voice', 'autoShortcuts', 'startAtLogin'] as const;
 
 export const WHAT: Record<Key, string> = {
   model: 'Which Claude model does the work: default, sonnet, haiku or opus. A change applies from the next request.',
@@ -34,6 +35,7 @@ export const WHAT: Record<Key, string> = {
     'you say Yes to it, asked each time.',
   autoShortcuts: 'When the same task has worked about 3 times, Blob makes a shortcut for it and asks once whether to keep it.',
   voice: 'Hold the blob and talk. Off means typing only.',
+  startAtLogin: 'Blob opens by itself when you sign in to this computer, so reminders and scheduled tasks are not missed.',
   phonePaired: 'Whether a phone is paired (status only; "pair my phone" shows the QR).',
   onboarded: 'Whether the first-run questions were answered (status only).',
 };
@@ -41,6 +43,7 @@ export const WHAT: Record<Key, string> = {
 /** The first-run cards' questions, one per FIRST_RUN key. The card's text is WHAT. */
 export const ASK: Record<typeof FIRST_RUN[number], string> = {
   watching: 'Learn from what you do?', voice: 'Talk to Blob?', autoShortcuts: 'Make shortcuts for you?',
+  startAtLogin: 'Start Blob when you sign in?',
 };
 
 export const blobHome = (env: NodeJS.ProcessEnv = process.env) => env.BLOB_HOME || join(homedir(), '.blob');

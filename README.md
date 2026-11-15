@@ -1,17 +1,25 @@
 # Blob
 
-A small floating blob on your desktop that makes the computer and the internet simple. Tell it what to do, by voice
-or by typing, and it does it on your computer while you watch.
+A small floating blob on your desktop that does tasks on your computer. Tell it what to do, by voice or by typing,
+and it does it while you watch, then says in a sentence that it is done.
 
+- **Any task, the fastest way.** It opens a link or an app directly, runs a command when one does the job, uses its
+  file tools for files, and works an app's window only when that is the only way.
+- **Reminders and schedules.** "Remind me at 5 to call the bank." "Every weekday at 9, open my mail."
+- **Memory.** "Remember that I use Outlook for mail." It is a plain file on your computer that you can read and edit.
 - **Simple.** One blob. No settings menu: to change something, just ask ("use Haiku", "stop watching").
 - **It learns.** A task that worked 3 times becomes a shortcut by itself. If you let it, it also learns which apps
   and sites you use.
-- **It knows itself.** Ask it what it is, what it can do or how it is set up, and it tells you.
 
 Blob runs **your own Claude Code** (signed in with your Claude plan, no API key) and gives it
 [clawdcursor](https://github.com/AmrDab/clawdcursor) as its hands: it reads apps by name, clicks, types, and checks
 every step. For files it can look, move, rename, make folders, or put things in the Recycle Bin / Trash; it asks you
-first before anything goes to the bin or a file gets replaced. It has no shell.
+first before anything goes to the bin or a file gets replaced.
+
+It can also run commands (PowerShell on Windows, your login shell on macOS and Linux). A command that only looks
+(listing a folder, reading a file, `git status`, `winget list`, a `--version`) runs at once. Anything that changes or
+installs something is shown to you first, word for word, on a Yes / No card, and runs only on Yes. When Blob is not
+sure which kind a command is, it asks.
 
 > Early and in progress. Windows first; macOS and Linux are planned.
 
@@ -36,7 +44,8 @@ Blob walks you through it on small cards, one at a time:
    clawdcursor* and *Give clawdcursor its OK* are one tap each. On a Mac, *Allow Blob to use your Mac* asks for
    Accessibility and Screen Recording, opens the right page of System Settings and notices by itself when you are
    done (Screen Recording may need Blob to be closed and opened again).
-2. **Three questions**, Yes or No: learn from what you do, talk to Blob, make shortcuts for you.
+2. **Four questions**, Yes or No: learn from what you do, talk to Blob, make shortcuts for you, start Blob when you
+   sign in (so reminders and schedules are not missed).
 3. **Pair your phone?** Later, or show the QR code.
 
 ## Use
@@ -53,10 +62,22 @@ Blob walks you through it on small cards, one at a time:
 - **While it works**, a pill at the top of the screen says what Blob is doing and has **Stop**. When Blob needs you
   (a sign-in, a choice), the pill becomes a card that waits for you.
 
+### Reminders and schedules
+
+- **A reminder** shows its text on the blob at that time, with the system sound, and stays until you press OK. It
+  goes to your phone too when one is paired. "Remind me in 20 minutes to check the oven."
+- **A scheduled task** runs as if you had typed it, at that time, when Blob is free. Blob asks Yes first, showing
+  what will run and when. "Every Monday at 9, open my calendar."
+- One time, every day, Monday to Friday, one day a week, or every N minutes; your computer's local time.
+- "What is scheduled?" lists them. "Remove the 9 o'clock one" removes it (it asks first).
+- They fire only while Blob is open, so say Yes to "Start Blob when you sign in?" (or ask for it later). A task that
+  came due while Blob was closed runs once when Blob opens if it is less than an hour late; later than that it is
+  skipped, and the Log says so. A missed reminder is still shown.
+
 ### No settings menu, just ask
 
-"Use Opus." "Stop watching." "Turn voice off." "Stop making shortcuts." "Pair my phone." Blob asks back with a Yes /
-No card and changes nothing without your Yes.
+"Use Opus." "Stop watching." "Turn voice off." "Stop making shortcuts." "Start when I sign in." "Pair my phone." Blob
+asks back with a Yes / No card and changes nothing without your Yes.
 
 ## Your phone
 
@@ -82,6 +103,15 @@ isn't set up.
 - **"Stop watching"** turns it off. **"Forget what you noted"** deletes it.
 - Private browser windows are not noted, and nothing is noted while Blob itself is working.
 - The AI can't read or screenshot Blob's own cards and the pill, and can't press their buttons by name: a Yes is yours.
+- **Memory is a file on your computer**: `~/.blob/memory.md`, one fact per line. Blob adds a line when you tell it
+  to remember something, or when it learns a lasting preference ("uses Outlook for mail"); never passwords or keys.
+  The file's facts are sent to the AI (to Claude, through your own Claude Code) with each request, so that it knows
+  them. To see it, open the file or ask "what do you remember?". To forget, delete lines in the file, or say
+  "forget that I use Outlook": Blob shows the lines and asks first.
+- **Commands** run as you, in your home folder. Blob's own tokens and any API keys in the environment are not passed
+  to them. The AI is told never to put a password or key in a command; each command that changes something is on
+  the Yes card in full before it runs.
+- **Reminders and schedules** are in `~/.blob/schedule.json`, on your computer.
 
 ## Environment
 
@@ -92,7 +122,8 @@ isn't set up.
 - `BLOB_HOME`: where Blob keeps its state (default `~/.blob`).
 - `BLOB_DEVTOOLS=1`: allow the window's devtools.
 
-State in `~/.blob/`: `settings.json`, `shortcuts.json`, `habits.json`, `activity.jsonl`, `pair.json`, `logs/`.
+State in `~/.blob/`: `settings.json`, `memory.md`, `schedule.json`, `shortcuts.json`, `habits.json`, `activity.jsonl`,
+`pair.json`, `logs/`, and `start.cmd` (Windows, when Blob starts at sign-in).
 
 ## Develop
 
@@ -102,9 +133,12 @@ State in `~/.blob/`: `settings.json`, `shortcuts.json`, `habits.json`, `activity
 - `src/brain.ts`: starts `claude -p` (stream-json) with clawdcursor, the files server, the self server and the
   read-only built-ins, and parses what it does.
 - `src/settings.ts`, `src/self-mcp.ts`, `src/persona.ts`: the settings, the "blob" tools that change them after a
-  Yes, and what Blob knows about itself.
+  Yes, and the brief the AI gets (what Blob can do, and the order to try it in).
+- `src/shell.ts`: the `run` tool: which commands only look, the Yes card for the rest, and the run itself.
+- `src/memory.ts`, `src/schedule.ts`, `src/autostart.ts`: the memory file, reminders and scheduled tasks, and
+  starting at sign-in (a `Run` registry value on Windows, a LaunchAgent on macOS).
 - `src/habits.ts`, `src/watch.ts`: shortcuts from repeated tasks, and the learn-only watcher.
-- `src/files-mcp.ts`, `src/ask.ts`: the files tools and the Yes/No questions.
+- `src/files-mcp.ts`, `src/ask.ts`: the files tools (and `run`) and the Yes/No questions.
 - `src/shortcuts.ts`, `src/replay.ts`: what can be saved, and the replay (no model).
 - `src/pill-host.ts`, `src/pill.ts`, `src/overlay.ts`, `src/own-ui.ts`: clawdcursor's pill, drawn by Blob, and
   keeping Blob's own windows out of the agent's reach.

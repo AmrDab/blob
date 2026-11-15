@@ -1,6 +1,7 @@
 // The host: a 127.0.0.1 server for the built UI and its event stream, the bubble window, the Brain, shortcuts,
 // the settings (changed by asking Blob, never by a menu), the files and self servers' questions, clawdcursor's pill,
-// the paired phone, the learn-only watcher, focus hand-back, the log file and the first-run check.
+// the paired phone, the learn-only watcher, reminders and scheduled tasks, starting at sign-in, focus hand-back, the
+// log file and the first-run check.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -10,16 +11,19 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Application } from '@webviewjs/webview';
 import { Brain, callLabel, mcpConfig, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
-import { Questions } from './ask.ts';
+import { MAX_DETAIL, Questions } from './ask.ts';
+import { setAutostart, supported as autostartSupported, systemAutostart } from './autostart.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
+import { memoryBrief, memoryFile } from './memory.ts';
 import { hideFromCapture, overlay, type Overlay } from './overlay.ts';
 import { keepOwnUiFile, processLister } from './own-ui.ts';
 import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type Reply, type RoomInfo } from './pair.ts';
 import { persona } from './persona.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
+import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } from './schedule.ts';
 import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, parseValue, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
@@ -38,6 +42,8 @@ const PAIR = pairFile();
 const RELAY = (process.env.BLOB_RELAY ?? 'https://theblob.pages.dev').trim().replace(/^ws/, 'http').replace(/\/+$/, '');
 const QR_MS = 2 * 60_000;                           // how long an unscanned QR stays up
 const KEEP_MS = 10 * 60_000;                        // how long the "Keep it?" offer stays up
+const SCHEDULE = scheduleFile();
+const SCHEDULE_MS = 20_000;                         // how often the host looks for a due reminder or task
 const DIST = resolve(import.meta.dirname, '..', 'dist');
 // A fixed port keeps the page's origin, and so the cached Whisper model, the same across starts; any free port if taken.
 const PORT = 47615;
@@ -78,7 +84,7 @@ function sendSettings(): void {
   const s = settings.get();
   send({
     type: 'settings', model: s.model, voice: s.voice, onboarded: s.onboarded, canPair: !!RELAY,
-    firstRun: FIRST_RUN.map(key => ({ key, title: ASK[key], text: WHAT[key] })),
+    firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || autostartSupported()).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
   });
 }
 
@@ -98,7 +104,10 @@ let watcher: Watcher | undefined;
 
 // A question shows on the bubble and on the paired phone; the first answer counts.
 const questions = new Questions({
-  show: (id, question) => { send({ type: 'ask', id, question }); pairing?.ask({ id: `q${id}`, question }); },
+  show: (id, question, detail) => {
+    send({ type: 'ask', id, question, detail });
+    pairing?.ask({ id: `q${id}`, question: detail ? `${question}\n${detail}` : question });
+  },
   hide: id => { send({ type: 'ask-done', id }); pairing?.askDone(`q${id}`); },
 });
 
@@ -241,6 +250,43 @@ function run(text: string): string | null {
   request = text;
   row({ kind: 'request', text });
   return null;
+}
+
+// ── reminders and scheduled tasks ────────────────────────────────────────────
+const waiting: Entry[] = [];                        // tasks that came due while Blob was working
+
+/** A reminder: a card that stays until it is dismissed, the system sound, and the phone when one is paired. */
+function remind(e: Entry, due: number): void {
+  send({ type: 'reminder', id: `${e.id}-${due}`, text: e.text, at: stamp(due).slice(11) });
+  row({ kind: 'answer', text: `Reminder: ${e.text}` });
+  if (process.platform === 'darwin') spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore' }).on('error', () => {});
+  else pillUi.beep();
+  pairing?.answer(`Reminder: ${e.text}`);
+}
+
+/** Every 20 s, and once at the start (what was missed while Blob was closed comes due then). */
+function checkSchedule(): void {
+  const now = Date.now();
+  const t = tick(loadSchedule(SCHEDULE), now);
+  if (t.fire.length) {
+    // saved first: an entry whose firing can't be written down would fire again at every look
+    try { saveSchedule(SCHEDULE, t.entries); } catch (e) { caption(`Could not save the schedule: ${(e as Error).message}`); return; }
+  }
+  for (const f of t.fire) {
+    if (f.entry.kind === 'remind') remind(f.entry, f.due);
+    else if (f.late) row({ kind: 'answer', text: `Skipped a scheduled task (due ${stamp(f.due)}, more than an hour ago): ${f.entry.text}` });
+    else if (!waiting.some(w => w.id === f.entry.id)) waiting.push(f.entry);
+  }
+  // a task runs like a typed request, when Blob is free
+  if (waiting.length && !brain.busy && !replaying && !run(waiting[0].text)) waiting.shift();
+}
+
+/** The startAtLogin setting changed: make the system match. If it can't be turned on, the setting goes back to off. */
+async function applyAutostart(on: boolean): Promise<void> {
+  const r = await setAutostart(on, systemAutostart());
+  if (r.ok || !on) return;
+  caption(r.text);
+  try { settings.set('startAtLogin', false); } catch { /* the caption said it */ }
 }
 
 /** The phone's Stop: what the pill's Stop does, and the request (or the shortcut) ends even when no pill is up. */
@@ -415,6 +461,7 @@ async function post(path: string, body: any): Promise<void> {
       return;
     }
     case '/answer': questions.answer(str(body.id), body.yes === true); focus.restore(); return;
+    case '/reminder/done': send({ type: 'reminder-done', id: str(body.id) }); focus.restore(); return;
     case '/pair/close': closeQr(); focus.restore(); return;
     case '/shortcut/run': {
       const s = shortcuts.find(x => x.id === body.id);
@@ -437,7 +484,10 @@ async function post(path: string, body: any): Promise<void> {
       focus.restore();
       const key = FIRST_RUN.find(k => k === body.key);
       if (body.done === true) settings.set('onboarded', true);
-      else if (key && typeof body.value === 'boolean') settings.set(key, body.value);
+      else if (key && typeof body.value === 'boolean') {
+        settings.set(key, body.value);
+        if (key === 'startAtLogin' && !body.value) void applyAutostart(false);   // No: make sure nothing is left
+      }
       return;
     }
     case '/pair/show': { focus.restore(); const r = showQr(); if (!r.ok) caption(r.text); return; }
@@ -491,9 +541,10 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (asking) {
-      const question = str(body.question);
-      const yes = question ? await questions.ask(question.slice(0, 400)) : false;
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ yes }));
+      // `detail` (a command, a task's words) is shown whole or the question is not asked at all: never cut
+      const question = str(body.question), detail = typeof body.detail === 'string' ? body.detail : '';
+      const yes = question && detail.length <= MAX_DETAIL ? await questions.ask(question.slice(0, 400), undefined, detail || undefined) : false;
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ yes, shown: !!detail }));
       return;
     }
     try { await post(url.pathname, body); } catch (e) { caption(`Error: ${(e as Error).message}`); }
@@ -528,7 +579,7 @@ process.env.BLOB_PILL_TOKEN = pillToken;
 process.env.BLOB_OWN_UI_FILE = join(tmp, 'own-ui-pids');
 const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, processLister());
 writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer }), { mode: 0o600 });
-brain = new Brain({ mcpConfigPath, cwd: WORK, emit: onBrain, persona: () => persona(settings.get()) });
+brain = new Brain({ mcpConfigPath, cwd: WORK, emit: onBrain, persona: () => persona(settings.get(), { memory: memoryBrief(memoryFile()) }) });
 sendShortcuts();
 sendSettings();
 
@@ -541,6 +592,7 @@ if (settings.get().watching) watcher.start();
 // The self server writes the settings file after the user's Yes: follow it.
 settings.onChange((now, changed) => {
   if (changed.includes('watching')) { if (now.watching) watcher?.start(); else watcher?.stop(); }
+  if (changed.includes('startAtLogin')) void applyAutostart(now.startAtLogin);
   sendSettings();
 });
 settings.watch();
@@ -549,6 +601,10 @@ settings.watch();
 const savedRoom = loadRoom(PAIR);
 if (savedRoom) connectPhone(savedRoom, true);
 if (settings.get().phonePaired !== !!savedRoom) setPaired(!!savedRoom);
+
+// Reminders and scheduled tasks: a look now (for what came due while Blob was closed), then every 20 s.
+checkSchedule();
+setInterval(checkSchedule, SCHEDULE_MS).unref();
 
 // ── window ───────────────────────────────────────────────────────────────────
 const app = new Application();
@@ -573,7 +629,7 @@ const win = app.createBrowserWindow({
 let current = START;
 function resize(w: number, h: number): void {
   if (!Number.isFinite(w) || !Number.isFinite(h)) return;
-  const next = { w: Math.round(Math.min(480, Math.max(200, w))), h: Math.round(Math.min(600, Math.max(200, h))) };
+  const next = { w: Math.round(Math.min(480, Math.max(200, w))), h: Math.round(Math.min(700, Math.max(200, h))) };   // room for a whole command on a Yes card
   if (next.w === current.w && next.h === current.h) return;
   const p = win.getPosition(true);
   win.setSize(next.w, next.h, true);

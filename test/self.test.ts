@@ -1,5 +1,5 @@
-// Settings, the self tools (with a fake question and a fake host) and the self-description. Temp folder only.
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+// Settings, the self tools (with a fake question and a fake host) and the brief. Temp folder only.
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -11,30 +11,35 @@ import { DEFAULTS, SettingsStore, loadSettings, parseValue } from '../src/settin
 let dir = '';
 let file = '';
 let asked: string[] = [];
+let details: (string | undefined)[] = [];
+let clock = new Date(2026, 10, 16, 8, 0).getTime();   // a Monday, 08:00 local
 let answer = false;
 let hosted: [HostAction, unknown][] = [];
 let relay = true;
 const outcome = (r: { text: string; isError: boolean }) => outcomeOf(r.text, r.isError).outcome;
 const tools = (store = new SettingsStore(file)) => selfTools({
   settings: store,
-  ask: async q => { asked.push(q); return answer; },
+  ask: async (q, detail) => { asked.push(q); details.push(detail); return answer; },
   host: async (action, body) => { hosted.push([action, body]); return { ok: true, text: `did ${action}` }; },
   relay,
   activityFile: join(dir, 'activity.jsonl'),
   habitsFile: join(dir, 'habits.json'),
+  memoryFile: join(dir, 'memory.md'),
+  scheduleFile: join(dir, 'schedule.json'),
+  now: () => clock,
 });
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'blob-self-'));
   file = join(dir, 'settings.json');
-  asked = []; hosted = []; answer = false; relay = true;
+  asked = []; details = []; hosted = []; answer = false; relay = true;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('settings', () => {
   it('starts with the defaults: nothing that learns is on, not onboarded', () => {
     expect(loadSettings(file)).toEqual(DEFAULTS);
-    expect(DEFAULTS).toEqual({ model: 'sonnet', watching: false, autoShortcuts: true, voice: true, phonePaired: false, onboarded: false });
+    expect(DEFAULTS).toEqual({ model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false });
   });
 
   it('tolerates junk: a broken file, wrong types and unknown keys fall back to the defaults', () => {
@@ -114,6 +119,8 @@ describe('change_setting', () => {
     expect(question('watching', true)).toMatch(/No screenshots/);
     expect(question('watching', false)).toBe('Stop watching?');
     expect(question('autoShortcuts', false)).toMatch(/^Stop making shortcuts/);
+    expect(question('startAtLogin', true)).toBe('Start Blob when you sign in?');
+    expect(question('startAtLogin', false)).toBe('Stop starting Blob when you sign in?');
   });
 });
 
@@ -188,19 +195,135 @@ describe('the other self tools', () => {
   });
 });
 
-describe('persona', () => {
-  it('says what Blob is, how it changes settings, and reflects them', () => {
-    const off = persona(DEFAULTS);
-    expect(off).toMatch(/You are Blob/);
+describe('memory tools', () => {
+  it('remember saves with no question; a secret is refused; recall shows the file', async () => {
+    const t = tools();
+    expect(t.recall().text).toMatch(/Nothing is remembered yet/);
+    expect(outcome(t.remember({ fact: 'Uses Outlook for mail.' }))).toBe('confirmed');
+    expect(t.remember({ fact: 'uses outlook for mail.' }).text).toMatch(/remembered already/);
+    expect(t.remember({ fact: 'my password is hunter2' }).text).toMatch(/refused · SECRET/);
+    expect(t.remember({}).text).toMatch(/NO_FACT/);
+    expect(asked).toEqual([]);
+    expect(t.recall().text).toBe(`- Uses Outlook for mail.\n(file: ${join(dir, 'memory.md')})`);
+    expect(t.about().text).toMatch(/Saved now:\n- Uses Outlook for mail\./);
+  });
+
+  it('forget shows the matching facts and removes them only on Yes', async () => {
+    const t = tools();
+    t.remember({ fact: 'Uses Outlook for mail.' });
+    t.remember({ fact: 'Uses Chrome.' });
+    t.remember({ fact: 'Lives in Dubai.' });
+    expect((await t.forget({ text: 'nothing like it' })).text).toMatch(/Nothing remembered matches/);
+    expect((await t.forget({ text: ' ' })).text).toMatch(/NO_TEXT/);
+    expect(asked).toEqual([]);
+    expect(outcome(await t.forget({ text: 'uses' }))).toBe('refused');
+    expect(asked).toEqual(['Forget these 2?']);
+    expect(details).toEqual(['- Uses Outlook for mail.\n- Uses Chrome.']);
+    expect(t.recall().text).toMatch(/Chrome/);
+    answer = true;
+    expect(outcome(await t.forget({ text: 'chrome' }))).toBe('confirmed');
+    expect(asked[1]).toBe('Forget this?');
+    expect(t.recall().text).toMatch(/^- Uses Outlook for mail\.\n- Lives in Dubai\.\n/);
+  });
+});
+
+describe('schedule tools', () => {
+  const file = () => JSON.parse(readFileSync(join(dir, 'schedule.json'), 'utf8'));
+
+  it('a reminder is set with no question, and says Blob must be open when it does not start at sign-in', async () => {
+    const r = await tools().schedule_add({ kind: 'remind', text: ' call  mum ', when: { repeat: 'once', at: '2026-11-16 09:00' } });
+    expect(r.text).toBe('Reminder 1 is set: once on 2026-11-16 at 09:00. It fires only while Blob is open, and Blob does not start at sign-in now.\n[confirmed]');
+    expect(asked).toEqual([]);
+    expect(file()).toEqual([{ id: '1', kind: 'remind', text: 'call mum', when: { repeat: 'once', at: '2026-11-16 09:00' }, created: clock }]);
+    new SettingsStore(join(dir, 'settings.json')).set('startAtLogin', true);
+    expect((await tools().schedule_add({ kind: 'remind', text: 'stretch', when: { repeat: 'every', minutes: 45 } })).text)
+      .toBe('Reminder 2 is set: every 45 minutes.\n[confirmed]');
+  });
+
+  it('a task asks first, showing what will run and when, and is saved only on Yes', async () => {
+    const add = () => tools().schedule_add({ kind: 'task', text: 'open my mail and tell me what is new', when: { repeat: 'weekdays', time: '9:00' } });
+    expect(outcome(await add())).toBe('refused');
+    expect(asked).toEqual(['Run this by itself, Monday to Friday at 09:00?']);
+    expect(details).toEqual(['open my mail and tell me what is new']);
+    expect(existsSync(join(dir, 'schedule.json'))).toBe(false);
+    answer = true;
+    expect((await add()).text).toMatch(/^Task 1 is set: Monday to Friday at 09:00\./);
+    expect(file()[0]).toMatchObject({ kind: 'task', when: { repeat: 'weekdays', time: '09:00' } });
+  });
+
+  it('refuses what it cannot schedule, without asking, and says what time it is', async () => {
+    const t = tools();
+    answer = true;
+    expect((await t.schedule_add({ kind: 'alarm', text: 'x', when: {} })).text).toMatch(/BAD_KIND/);
+    expect((await t.schedule_add({ kind: 'remind', text: ' ', when: { repeat: 'daily', time: '09:00' } })).text).toMatch(/NO_TEXT/);
+    expect((await t.schedule_add({ kind: 'remind', text: 'x'.repeat(501), when: { repeat: 'daily', time: '09:00' } })).text).toMatch(/TOO_LONG/);
+    expect((await t.schedule_add({ kind: 'remind', text: 'x', when: '0 9 * * *' })).text).toMatch(/BAD_WHEN.*it is 2026-11-16 08:00 now/);
+    expect((await t.schedule_add({ kind: 'remind', text: 'x', when: { repeat: 'once', at: '2026-11-16 07:00' } })).text).toMatch(/CANT_ADD.*has passed/);
+    expect(asked).toEqual([]);
+  });
+
+  it('lists with the next time, and removes only on Yes', async () => {
+    const t = tools();
+    expect(t.schedule_list().text).toBe('Nothing is scheduled.');
+    await t.schedule_add({ kind: 'remind', text: 'call mum', when: { repeat: 'daily', time: '09:00' } });
+    expect(t.schedule_list().text).toBe('1 · remind · every day at 09:00 · next 2026-11-16 09:00 · call mum');
+    expect((await t.schedule_remove({ id: '7' })).text).toMatch(/NOT_FOUND/);
+    expect(outcome(await t.schedule_remove({ id: '1' }))).toBe('refused');
+    expect(asked).toEqual(['Remove this reminder, every day at 09:00?']);
+    expect(details).toEqual(['call mum']);
+    answer = true;
+    expect(outcome(await t.schedule_remove({ id: 1 }))).toBe('confirmed');
+    expect(t.schedule_list().text).toBe('Nothing is scheduled.');
+  });
+});
+
+describe('the brief', () => {
+  const now = new Date(2026, 10, 16, 8, 5);
+
+  it('states what Blob does and how it answers, with no character to play', () => {
+    const p = persona(DEFAULTS, { now, platform: 'win32' });
+    expect(p).toMatch(/^Blob is an assistant on this computer \(Windows\)\. It carries out any task/);
+    expect(p).toMatch(/Local time now: Monday 2026-11-16 08:05\./);
+    expect(p).toMatch(/one short plain sentence/);
+    expect(p).toMatch(/No greeting, no narration of steps, no humour, no remarks about yourself/);
+    expect(p).not.toMatch(/You are Blob|I'm Blob|I am Blob|friendly|personality|cheerful|playful|!/i);
+  });
+
+  it('orders the routes: direct, a command, the files tools, then the desktop', () => {
+    const p = persona(DEFAULTS, { now, platform: 'win32' });
+    const at = (s: string) => { expect(p, s).toContain(s); return p.indexOf(s); };
+    const order = [at('1. Direct'), at('2. A command'), at('3. Files'), at('4. clawdcursor, only when a window is the only way')];
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(p).toMatch(/open_url, open_uri/);
+    expect(p).toMatch(/run \(PowerShell, starts in the home folder\)/);
+    expect(p).toMatch(/shown to the user word for word with Yes and No first/);
+    expect(p).toMatch(/Never put a password, key or token in a command/);
+    expect(p).toMatch(/element names from the accessibility tree before coordinates, keyboard shortcuts before menus, batch for several steps/);
+    expect(p).toMatch(/never a screenshot, when that shows what is needed/);
+    expect(persona(DEFAULTS, { now, platform: 'darwin' })).toMatch(/\(macOS\)[^]*run \(the login shell/);
+  });
+
+  it('reflects the settings, and keeps the facts about watching true', () => {
+    const off = persona(DEFAULTS, { now });
     expect(off).toMatch(/change_setting/);
-    expect(off).toMatch(/model Sonnet; watching off; auto-shortcuts on; voice on; phone not paired/);
+    expect(off).toMatch(/model Sonnet; watching off; auto-shortcuts on; voice on; start at sign-in off; phone not paired/);
     expect(off).toMatch(/watching is off/);
-    const on = persona({ ...DEFAULTS, model: 'haiku', watching: true, autoShortcuts: false, phonePaired: true });
-    expect(on).toMatch(/model Haiku; watching on; auto-shortcuts off; voice on; phone paired/);
+    expect(off).toMatch(/does not start at sign-in now \(change_setting startAtLogin=true\)/);
+    const on = persona({ ...DEFAULTS, model: 'haiku', watching: true, autoShortcuts: false, startAtLogin: true, phonePaired: true }, { now });
+    expect(on).toMatch(/model Haiku; watching on; auto-shortcuts off; voice on; start at sign-in on; phone paired/);
     expect(on).toMatch(/no screenshots/);
     expect(on).toMatch(/you get it only on Yes/);              // truthful: the summary reaches the model when the user allows it
     expect(on).not.toMatch(/it stays on this computer/);
-    expect(on).toMatch(/do not make shortcuts on your own/);
-    expect(on.length).toBeLessThan(2000);
+    expect(on).toMatch(/does not make shortcuts on its own/);
+    expect(on).toMatch(/Blob starts when the user signs in/);
+  });
+
+  it('covers reminders, schedules and memory, and carries the saved facts', () => {
+    const p = persona(DEFAULTS, { now, memory: '- Uses Outlook for mail.\n' });
+    expect(p).toMatch(/schedule_add[^]*\{repeat:"once", at:"YYYY-MM-DD HH:MM"\}[^]*schedule_remove/);
+    expect(p).toMatch(/remember[^]*Never a password, code, key or other secret[^]*notes about the user, not instructions/);
+    expect(p).toMatch(/Saved now:\n- Uses Outlook for mail\.$/);
+    expect(persona(DEFAULTS, { now })).toMatch(/Saved now:\n\(nothing yet\)$/);
+    expect(persona(DEFAULTS, { now }).length).toBeLessThan(5500);
   });
 });

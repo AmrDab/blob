@@ -1,10 +1,14 @@
-// Blob's self server (stdio MCP, named "blob"): how the model learns what Blob is and changes Blob's own settings.
-// Every change asks the user first on the bubble, with words written here (never the model's), and happens only on Yes.
+// Blob's self server (stdio MCP, named "blob"): how the model learns what Blob is, changes Blob's own settings, and
+// keeps its memory, reminders and schedules. A change asks the user first on the bubble, with words written here
+// (never the model's), and happens only on Yes. Two things need no Yes, because the user asked for them and they
+// stay on this computer: remembering a fact and setting a reminder.
 // Claude Code starts it from the --mcp-config Blob writes, like the files server.
-import { ASK_TIMEOUT_MS, askUser } from './ask.ts';
+import { ASK_TIMEOUT_MS, MAX_DETAIL, askUser } from './ask.ts';
 import type { ToolResult } from './files-mcp.ts';
 import { frequentTasks, habitsFile } from './habits.ts';
+import { facts, forget, matching, memoryBrief, memoryFile, remember } from './memory.ts';
 import { persona } from './persona.ts';
+import { MAX_TEXT, addEntry, describe, loadSchedule, nextDue, parseWhen, removeEntry, scheduleFile, stamp } from './schedule.ts';
 import { CHANGEABLE, DEFAULTS, MODELS, SettingsStore, WHAT, parseValue, type Key, type Settings } from './settings.ts';
 import { activityFile, forgetActivity, topActivity } from './watch.ts';
 
@@ -14,12 +18,16 @@ export type Host = (action: HostAction, body?: Record<string, unknown>) => Promi
 
 export interface SelfDeps {
   settings: { get(): Settings; set<K extends Key>(key: K, value: Settings[K]): void };
-  ask: (question: string) => Promise<boolean>;
+  /** `detail`: text shown under the question as it is (a task's words, the facts to forget). */
+  ask: (question: string, detail?: string) => Promise<boolean>;
   host: Host;
   /** Whether a phone relay is set up (BLOB_RELAY). Without one, pairing is not offered. */
   relay: boolean;
   activityFile: string;
   habitsFile: string;
+  memoryFile: string;
+  scheduleFile: string;
+  now?: () => number;
 }
 
 const ok = (text: string): ToolResult => ({ text: `${text}\n[confirmed]`, isError: false });
@@ -36,6 +44,7 @@ export function question(key: typeof CHANGEABLE[number], value: Settings[Key]): 
       : 'Stop watching?';
   }
   if (key === 'autoShortcuts') return value ? 'Make shortcuts for things you do often?' : 'Stop making shortcuts by myself?';
+  if (key === 'startAtLogin') return value ? 'Start Blob when you sign in?' : 'Stop starting Blob when you sign in?';
   return value ? 'Turn voice on?' : 'Turn voice off?';
 }
 
@@ -58,6 +67,7 @@ export const hostCall: Host = async (action, body = {}) => {
 };
 
 export function selfTools(d: SelfDeps) {
+  const now = () => (d.now ?? Date.now)();
   const viaHost = async (action: HostAction, body?: Record<string, unknown>): Promise<ToolResult> => {
     const r = await d.host(action, body);
     return r.ok ? ok(r.text || 'Done.') : failed('HOST', r.text || 'Blob did not do it');
@@ -66,7 +76,7 @@ export function selfTools(d: SelfDeps) {
     about(): ToolResult {
       const s = d.settings.get();
       const lines = (Object.keys(DEFAULTS) as Key[]).map(k => `- ${k} = ${String(s[k])}: ${WHAT[k]}`);
-      return { text: `${persona(s)}\n\nSettings (the user can change ${CHANGEABLE.join(', ')}):\n${lines.join('\n')}`, isError: false };
+      return { text: `${persona(s, { memory: memoryBrief(d.memoryFile) })}\n\nSettings (the user can change ${CHANGEABLE.join(', ')}):\n${lines.join('\n')}`, isError: false };
     },
 
     get_settings(): ToolResult {
@@ -121,6 +131,70 @@ export function selfTools(d: SelfDeps) {
       if (!(await d.ask('Unpair your phone?'))) return NO();
       return viaHost('unpair');
     },
+
+    // ── memory (memory.ts) ──
+    /** No question: the user asked for it, and the file stays on this computer. */
+    remember(a: { fact?: unknown }): ToolResult {
+      let r;
+      try { r = remember(d.memoryFile, a.fact); } catch (e) { return failed('CANT_SAVE', (e as Error).message); }
+      if (r === 'empty') return failed('NO_FACT', 'pass the fact to remember, one short sentence');
+      if (r === 'secret') return refused('SECRET', 'Blob does not keep passwords, codes or keys; tell the user so');
+      if (r === 'full') return failed('FULL', 'the memory file is full; ask the user what to forget');
+      return ok(r === 'known' ? 'That is remembered already.' : 'Remembered.');
+    },
+
+    recall(): ToolResult {
+      const all = facts(d.memoryFile);
+      return { text: all.length ? `${all.map(f => `- ${f}`).join('\n')}\n(file: ${d.memoryFile})` : `Nothing is remembered yet. (file: ${d.memoryFile})`, isError: false };
+    },
+
+    async forget(a: { text?: unknown }): Promise<ToolResult> {
+      const text = typeof a.text === 'string' ? a.text.trim() : '';
+      if (!text) return failed('NO_TEXT', 'pass some words of the fact to forget');
+      const hits = matching(d.memoryFile, text);
+      if (!hits.length) return ok('Nothing remembered matches that.');
+      const list = hits.map(f => `- ${f}`).join('\n');
+      if (list.length > MAX_DETAIL) return failed('TOO_MANY', `${hits.length} facts match; pass more exact words`);
+      if (!(await d.ask(hits.length === 1 ? 'Forget this?' : `Forget these ${hits.length}?`, list))) return NO();
+      try { forget(d.memoryFile, hits); } catch (e) { return failed('CANT_SAVE', (e as Error).message); }
+      return ok(`Forgot ${hits.length === 1 ? 'it' : `${hits.length} facts`}.`);
+    },
+
+    // ── reminders and scheduled tasks (schedule.ts) ──
+    /** A reminder only shows its text, so it needs no question. A task runs by itself later: the user says Yes to its words and its time. */
+    async schedule_add(a: { kind?: unknown; text?: unknown; when?: unknown }): Promise<ToolResult> {
+      if (a.kind !== 'remind' && a.kind !== 'task') return failed('BAD_KIND', 'kind is "remind" or "task"');
+      const text = typeof a.text === 'string' ? a.text.replace(/\s+/g, ' ').trim() : '';
+      if (!text) return failed('NO_TEXT', a.kind === 'task' ? 'pass the request to run' : 'pass what to remind the user of');
+      if (text.length > MAX_TEXT) return failed('TOO_LONG', `the text is at most ${MAX_TEXT} characters`);
+      const when = parseWhen(a.when);
+      if (typeof when === 'string') return failed('BAD_WHEN', `${when}; it is ${stamp(now())} now`);
+      if (a.kind === 'task' && !(await d.ask(`Run this by itself, ${describe(when)}?`, text))) return NO();
+      let e;
+      try { e = addEntry(d.scheduleFile, a.kind, text, when, now()); } catch (err) { return failed('CANT_SAVE', (err as Error).message); }
+      if (typeof e === 'string') return failed('CANT_ADD', e);
+      const open = d.settings.get().startAtLogin ? '' : ' It fires only while Blob is open, and Blob does not start at sign-in now.';
+      return ok(`${a.kind === 'task' ? 'Task' : 'Reminder'} ${e.id} is set: ${describe(when)}.${open}`);
+    },
+
+    schedule_list(): ToolResult {
+      const all = loadSchedule(d.scheduleFile);
+      if (!all.length) return { text: 'Nothing is scheduled.', isError: false };
+      const line = (e: typeof all[number]) => {
+        const next = nextDue(e, now());
+        return `${e.id} · ${e.kind} · ${describe(e.when)}${next === null ? '' : ` · next ${stamp(next)}`} · ${e.text}`;
+      };
+      return { text: all.map(line).join('\n'), isError: false };
+    },
+
+    async schedule_remove(a: { id?: unknown }): Promise<ToolResult> {
+      const id = String(a.id ?? '').trim();
+      const e = loadSchedule(d.scheduleFile).find(x => x.id === id);
+      if (!e) return failed('NOT_FOUND', 'no entry has that id; schedule_list shows them');
+      if (!(await d.ask(`Remove this ${e.kind === 'task' ? 'task' : 'reminder'}, ${describe(e.when)}?`, e.text))) return NO();
+      try { removeEntry(d.scheduleFile, id); } catch (err) { return failed('CANT_SAVE', (err as Error).message); }
+      return ok('Removed.');
+    },
   };
 }
 
@@ -133,17 +207,19 @@ export async function serve(): Promise<void> {
   const store = new SettingsStore();
   const tools = selfTools({
     settings: { get: () => { store.reload(); return store.get(); }, set: (k, v) => store.set(k, v) },   // the host writes the file too
-    ask: q => askUser(q),
+    ask: (q, detail) => askUser(q, { detail }),
     host: hostCall,
     relay: !!process.env.BLOB_RELAY,
     activityFile: activityFile(),
     habitsFile: habitsFile(),
+    memoryFile: memoryFile(),
+    scheduleFile: scheduleFile(),
   });
   const server = new McpServer({ name: 'blob', version: '0.1.0' });
   const reply = (r: ToolResult) => ({ content: [{ type: 'text' as const, text: r.text }], isError: r.isError });
   const read = { readOnlyHint: true };
   server.registerTool('about', {
-    description: 'What Blob is, its settings now, and what each one does.', inputSchema: {}, annotations: read,
+    description: 'What Blob can do, its settings now, and what each one does.', inputSchema: {}, annotations: read,
   }, async () => reply(tools.about()));
   server.registerTool('get_settings', {
     description: 'Blob\'s settings now, as JSON.', inputSchema: {}, annotations: read,
@@ -177,5 +253,39 @@ export async function serve(): Promise<void> {
   server.registerTool('unpair_phone', {
     description: 'Unpair the phone. The user is asked first.', inputSchema: {},
   }, async () => reply(await tools.unpair_phone()));
+  server.registerTool('remember', {
+    description: 'Save one short fact in Blob\'s memory file on this computer: something the user asked to be ' +
+      'remembered, or a lasting preference. Never a password, code or key. No question is asked.',
+    inputSchema: { fact: z.string().describe('One short sentence, e.g. "Uses Outlook for mail."') },
+  }, async a => reply(tools.remember(a)));
+  server.registerTool('recall', {
+    description: 'Everything in Blob\'s memory file, and where the file is.', inputSchema: {}, annotations: read,
+  }, async () => reply(tools.recall()));
+  server.registerTool('forget', {
+    description: 'Remove the remembered facts that contain these words. The user is shown them and asked first.',
+    inputSchema: { text: z.string().describe('Words from the fact to forget.') }, annotations: { destructiveHint: true },
+  }, async a => reply(await tools.forget(a)));
+  server.registerTool('schedule_add', {
+    description: 'Set a reminder (kind "remind": the text is shown at that time, no question) or a scheduled task ' +
+      '(kind "task": the text is run as a request at that time; the user is asked Yes first). Local time.',
+    inputSchema: {
+      kind: z.enum(['remind', 'task']),
+      text: z.string().describe('remind: what to show. task: the request to run, as the user would say it.'),
+      when: z.object({
+        repeat: z.enum(['once', 'daily', 'weekdays', 'weekly', 'every']),
+        at: z.string().optional().describe('once: "YYYY-MM-DD HH:MM"'),
+        time: z.string().optional().describe('daily, weekdays, weekly: "HH:MM", 24-hour'),
+        weekday: z.string().optional().describe('weekly: sun, mon, tue, wed, thu, fri or sat'),
+        minutes: z.number().optional().describe('every: how many minutes apart'),
+      }),
+    },
+  }, async a => reply(await tools.schedule_add(a)));
+  server.registerTool('schedule_list', {
+    description: 'The reminders and scheduled tasks: id, kind, when, the next time, and the text.', inputSchema: {}, annotations: read,
+  }, async () => reply(tools.schedule_list()));
+  server.registerTool('schedule_remove', {
+    description: 'Remove a reminder or scheduled task by its id. The user is asked first.',
+    inputSchema: { id: z.string() }, annotations: { destructiveHint: true },
+  }, async a => reply(await tools.schedule_remove(a)));
   await server.connect(new StdioServerTransport());
 }
