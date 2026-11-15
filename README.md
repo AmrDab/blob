@@ -11,7 +11,7 @@ and it does it while you watch, then says in a sentence that it is done.
 - **It learns.** A task that worked 3 times becomes a shortcut by itself. If you let it, it also learns which apps
   and sites you use.
 
-Blob runs **your own Claude Code** (signed in with your Claude plan, no API key) and gives it
+Blob runs **your own Claude Code or Codex** (signed in with your own plan, no API key) and gives it
 [clawdcursor](https://github.com/AmrDab/clawdcursor) as its hands: it reads apps by name, clicks, types, and checks
 every step. For files it can look, move, rename, make folders, or put things in the Recycle Bin / Trash; it asks you
 first before anything goes to the bin or a file gets replaced.
@@ -20,6 +20,16 @@ It can also run commands (PowerShell on Windows, your login shell on macOS and L
 (listing a folder, reading a file, `git status`, `winget list`, a `--version`) runs at once. Anything that changes or
 installs something is shown to you first, word for word, on a Yes / No card, and runs only on Yes. When Blob is not
 sure which kind a command is, it asks.
+
+### Claude Code or Codex
+
+The brain is the one you have: Claude Code, or OpenAI's Codex (`npm i -g @openai/codex`, then `codex login`). Each
+needs its own install and its own sign-in; Blob needs one of them, and with only one it uses that one. To switch,
+say "use Codex" or "use Claude": Blob asks Yes / No, and the next request starts a new conversation with the other
+one. Everything else is the same with both: the same tools, the same Yes / No cards, the same Log, pill and
+shortcuts. Codex's own shell, sub-agents, apps and plugins are switched off and what is left of it runs read-only,
+so with Codex too Blob's tools are the only way to act. With Codex the chip says `Codex`: it runs its own default
+model.
 
 > Early and in progress. Windows first; macOS and Linux are planned.
 
@@ -40,7 +50,7 @@ The blob opens at the bottom right of your main screen. Close it from its taskba
 
 Blob walks you through it on small cards, one at a time:
 
-1. **Setup.** *Install Claude Code* and *Sign in* are commands to copy (they need your own login). *Install
+1. **Setup.** *Install Claude Code or Codex* and *Sign in* are commands to copy (they need your own login). *Install
    clawdcursor* and *Give clawdcursor its OK* are one tap each. On a Mac, *Allow Blob to use your Mac* asks for
    Accessibility and Screen Recording, opens the right page of System Settings and notices by itself when you are
    done (Screen Recording may need Blob to be closed and opened again).
@@ -53,7 +63,7 @@ Blob walks you through it on small cards, one at a time:
 - **Speak** (the blob): hold it still and talk, or tap to start and tap again to stop. Press and move it to drag it
   somewhere else. The first time, it asks once to download the speech model (about 81 MB). Speech becomes text on
   your computer.
-- **Type** (fans out on hover): a one-line box. The chip next to it is the model; a click changes it.
+- **Type** (fans out on hover): a one-line box. The chip next to it is the model; a click changes it (with Codex it says `Codex`).
 - **Log**: each request, each step and whether it was confirmed, and the answer. Also kept in `~/.blob/logs/`.
 - **Shortcuts.** A shortcut replays a task's steps directly, with no AI, and stops at the first step that does not
   confirm. When the same task has worked 3 times, Blob makes the shortcut, pins it on the blob and asks once: "Keep
@@ -76,7 +86,7 @@ Blob walks you through it on small cards, one at a time:
 
 ### No settings menu, just ask
 
-"Use Opus." "Stop watching." "Turn voice off." "Stop making shortcuts." "Start when I sign in." "Pair my phone." Blob
+"Use Opus." "Use Codex." "Stop watching." "Turn voice off." "Stop making shortcuts." "Start when I sign in." "Pair my phone." Blob
 asks back with a Yes / No card and changes nothing without your Yes.
 
 ## Your phone
@@ -99,13 +109,13 @@ isn't set up.
   front. It reads them from the accessibility tree: never a screenshot, never the text of a page.
 - **It stays on your computer**, in `~/.blob/activity.jsonl`, for 14 days. Blob's AI does not see it. If it would
   help, Blob asks "Share what you use most with Blob's AI?" each time, and only on Yes does a short list of your
-  most-used apps and sites go to the model (to Claude, through your own Claude Code). Window titles never do.
+  most-used apps and sites go to the model (through your own Claude Code or Codex). Window titles never do.
 - **"Stop watching"** turns it off. **"Forget what you noted"** deletes it.
 - Private browser windows are not noted, and nothing is noted while Blob itself is working.
 - The AI can't read or screenshot Blob's own cards and the pill, and can't press their buttons by name: a Yes is yours.
 - **Memory is a file on your computer**: `~/.blob/memory.md`, one fact per line. Blob adds a line when you tell it
   to remember something, or when it learns a lasting preference ("uses Outlook for mail"); never passwords or keys.
-  The file's facts are sent to the AI (to Claude, through your own Claude Code) with each request, so that it knows
+  The file's facts are sent to the AI (through your own Claude Code or Codex) with each request, so that it knows
   them. To see it, open the file or ask "what do you remember?". To forget, delete lines in the file, or say
   "forget that I use Outlook": Blob shows the lines and asks first.
 - **Commands** run as you, in your home folder. Blob's own tokens and any API keys in the environment are not passed
@@ -131,7 +141,8 @@ State in `~/.blob/`: `settings.json`, `memory.md`, `schedule.json`, `shortcuts.j
 
 - `src/main.ts`: the windows (`@webviewjs/webview`) and a 127.0.0.1 server (random tokens) for the UI and its events.
 - `src/brain.ts`: starts `claude -p` (stream-json) with clawdcursor, the files server, the self server and the
-  read-only built-ins, and parses what it does.
+  read-only built-ins, or `codex exec --json` with the same three servers, and parses what either does into the
+  same events.
 - `src/settings.ts`, `src/self-mcp.ts`, `src/persona.ts`: the settings, the "blob" tools that change them after a
   Yes, and the brief the AI gets (what Blob can do, and the order to try it in).
 - `src/shell.ts`: the `run` tool: which commands only look, the Yes card for the rest, and the run itself.
