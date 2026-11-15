@@ -1,6 +1,7 @@
 // One run at a time of the user's own `claude -p`, with clawdcursor and Blob's file tools.
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 
 export type Model = 'sonnet' | 'haiku' | 'default';
 
@@ -37,15 +38,25 @@ export const SYSTEM_PROMPT =
   'files tools (list_dir, make_folder, move, trash) to change them, not the desktop. Your final reply is shown as a ' +
   'one-line caption: one or two short plain sentences saying what you did or found, no markdown.';
 
-/** clawdcursor's pill and its "waiting for you" card in Blob's light blob look (clawdcursor's opt-in theme). */
-const PILL = { CLAWD_BANNER_THEME: 'blob' };
+/** Blob's relay (built by build.mjs): clawdcursor starts it in place of its own pill, and Blob draws the pill. */
+export const PILL_HOST = fileURLToPath(new URL('../dist/pill-host.mjs', import.meta.url));
+/** The env that hands clawdcursor's pill and its "waiting for you" card to Blob, once the host has set where the relay finds it. */
+function pillEnv(env: NodeJS.ProcessEnv): Record<string, string> | undefined {
+  if (!env.BLOB_PILL_URL || !env.BLOB_PILL_TOKEN) return undefined;
+  return {
+    CLAWD_PILL_CMD: JSON.stringify([process.execPath, PILL_HOST]),
+    CLAWD_OWN_UI_PIDS: String(process.pid),     // Blob's windows are clawdcursor's own UI, never a target
+    BLOB_PILL_URL: env.BLOB_PILL_URL, BLOB_PILL_TOKEN: env.BLOB_PILL_TOKEN,
+  };
+}
 /** The clawdcursor MCP server command: `clawdcursor mcp --compact`, or BLOB_CLAWDCURSOR (e.g. a dev build). */
 export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): ServerCommand {
   const raw = env.BLOB_CLAWDCURSOR?.trim() || 'clawdcursor mcp --compact';
   const parts = (raw.match(/"[^"]*"|\S+/g) ?? []).map(p => p.replace(/^"|"$/g, ''));
+  const pill = pillEnv(env);
   // npm installs clawdcursor as a .cmd shim on Windows, which only cmd can start.
-  if (platform === 'win32') return { command: 'cmd', args: ['/c', ...parts], env: PILL };
-  return { command: parts[0], args: parts.slice(1), env: PILL };
+  if (platform === 'win32') return { command: 'cmd', args: ['/c', ...parts], ...(pill && { env: pill }) };
+  return { command: parts[0], args: parts.slice(1), ...(pill && { env: pill }) };
 }
 
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }

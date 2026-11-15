@@ -6,7 +6,7 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { BorderBeam } from 'border-beam';
 import type { Model } from '../brain.ts';
 import { formatLog, type LogRow } from '../log.ts';
-import { ICONS, MAX_PINNED } from '../shared.ts';
+import { GOO, ICONS, MAX_PINNED } from '../shared.ts';
 import { Icon } from './icons.tsx';
 import { DOWNLOAD_MB, Recorder, isDownloaded, load, transcribe } from './speech.ts';
 
@@ -21,7 +21,6 @@ const back = () => void post('/focus-back');
 const MODELS: Model[] = ['sonnet', 'haiku', 'default'];
 const LABEL: Record<Model, string> = { sonnet: 'Sonnet', haiku: 'Haiku', default: 'Default' };
 const T = { duration: 550, ease: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
-const GOO = { blur: 13.5, contrast: 40, fill: '#e9e9e9', waviness: 8 };
 const HOLD_MS = 350;   // a press longer than this is press-and-hold; shorter is a tap (tap again to finish)
 const STILL_MS = 150;  // a press that stays still this long starts the mic
 const DRAG_PX = 4;     // a press that moves further than this drags the window instead

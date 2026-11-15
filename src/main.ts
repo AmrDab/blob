@@ -1,16 +1,19 @@
 // The host: a 127.0.0.1 server for the built UI and its event stream, the bubble window, the Brain, shortcuts,
-// the files server's questions, focus hand-back, the log file and the first-run check.
-import { createServer, type ServerResponse } from 'node:http';
+// the files server's questions, clawdcursor's pill, focus hand-back, the log file and the first-run check.
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 import { Application } from '@webviewjs/webview';
 import { Brain, callLabel, mcpConfig, type BrainEvent, type Model, type ServerCommand } from './brain.ts';
 import { Questions } from './ask.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
+import { overlay, type Overlay } from './overlay.ts';
+import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
 import { ICONS, MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveShortcuts, type Shortcut, type Step } from './shortcuts.ts';
@@ -34,6 +37,7 @@ const tmp = mkdtempSync(join(tmpdir(), 'blob-'));
 const mcpConfigPath = join(tmp, 'mcp.json');
 const token = randomBytes(24).toString('hex');      // the page's
 const askToken = randomBytes(24).toString('hex');   // the files server's: it can only ask a question
+const pillToken = randomBytes(24).toString('hex');  // the pill relay's: it can only show clawdcursor's pill
 
 // ── events to the page ───────────────────────────────────────────────────────
 const clients = new Set<ServerResponse>();
@@ -67,6 +71,70 @@ const questions = new Questions({
   show: (id, question) => send({ type: 'ask', id, question }),
   hide: id => send({ type: 'ask-done', id }),
 });
+
+// ── clawdcursor's pill ───────────────────────────────────────────────────────
+// clawdcursor starts dist/pill-host.mjs in place of its own pill (brain.ts). That relay keeps one request open: its
+// body is the pill's state and then clawdcursor's lines, its response carries the answers. The pill is on screen for
+// as long as that request lives.
+type Pill = { state: PillState; res: ServerResponse };
+let pill: Pill | null = null;
+let pillUi: Overlay = { show() {}, hide() {}, keyboard() {}, beep() {}, asksRefocus: false };
+let pillGone: ReturnType<typeof setTimeout> | undefined;
+let pillBack: ReturnType<typeof setTimeout> | undefined;     // the end of a dodge
+const pillClients = new Set<ServerResponse>();
+const pillEvent = () => `data: ${JSON.stringify({ state: pill?.state ?? null })}\n\n`;
+function sendPill(): void { for (const c of pillClients) c.write(pillEvent()); }
+
+function closePill(linger = false): void {
+  pill = null;
+  clearTimeout(pillBack);
+  clearTimeout(pillGone);
+  const gone = () => { sendPill(); pillUi.keyboard(false); pillUi.hide(); };
+  // clawdcursor swaps the running pill for the paused card by killing one relay and starting the next: wait a
+  // moment, so the one on screen morphs into the next instead of blinking.
+  if (linger) pillGone = setTimeout(gone, 250); else gone();
+}
+
+function servePill(req: IncomingMessage, res: ServerResponse): void {
+  res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+  res.flushHeaders();
+  let mine: Pill | undefined;
+  createInterface({ input: req }).on('line', line => {
+    if (!mine) {                                    // the first line: what the pill starts as
+      let state: PillState | undefined;
+      try { state = JSON.parse(line); } catch { /* below */ }
+      if (state?.mode !== 'running' && state?.mode !== 'paused') { res.end(); return; }
+      pill = mine = { state, res };               // the newest relay wins; an older one is being killed by clawdcursor
+      clearTimeout(pillGone);
+      clearTimeout(pillBack);
+      sendPill();
+      pillUi.show();
+      if (state.mode === 'paused' && state.sound) pillUi.beep();
+      return;
+    }
+    if (pill !== mine) return;
+    const c = parseCommand(line);
+    if (c?.type === 'hide') {                       // an agent's click is coming: out of its way, back after c.ms
+      const p = mine;
+      pillUi.hide();
+      clearTimeout(pillBack);
+      pillBack = setTimeout(() => { if (pill === p) pillUi.show(); }, c.ms);
+    } else if (c?.type === 'activity' && mine.state.mode === 'running') {
+      mine.state = { mode: 'running', activity: c.text.slice(0, 80) };
+      sendPill();
+    }
+  });
+  req.on('end', () => res.end());                   // stdin closed
+  res.on('close', () => { if (mine && pill === mine) closePill(true); });   // ...or the relay was killed
+}
+
+/** The user's click on the pill: one line back to clawdcursor, and the pill is done (as clawdcursor's own exits). */
+function answerPill(a: PillAnswer): void {
+  const line = pill && a.kind !== 'refocus' ? answerLine(a, pill.state) : null;
+  if (!pill || !line) return;
+  pill.res.end(line + '\n');
+  closePill();
+}
 
 function sendShortcuts(): void {
   send({ type: 'shortcuts', list: shortcuts.map(s => ({ id: s.id, name: s.name, icon: s.icon, pinned: s.pinned })) });
@@ -177,6 +245,15 @@ async function post(path: string, body: any): Promise<void> {
     case '/shortcut/delete': store(shortcuts.filter(s => s.id !== body.id)); return;
     case '/setup/check': focus.restore(); await check(); return;
     case '/setup/mic': openMicSettings(); return;
+    case '/pill/answer': answerPill(body); return;
+    case '/pill/size': placePill(Number(body.w), Number(body.h)); return;
+    case '/pill/keyboard': {                        // a click into the reply box takes the keyboard; Esc gives it back
+      if (pill?.state.mode !== 'paused') return;
+      pillUi.keyboard(body.on === true);
+      if (body.on === true) pillView.focus();
+      else if (pillUi.asksRefocus) pill.res.write(answerLine({ kind: 'refocus' }, pill.state) + '\n');
+      return;
+    }
   }
 }
 
@@ -191,6 +268,19 @@ const server = createServer(async (req, res) => {
     for (const d of history) res.write(d);
     clients.add(res);
     req.on('close', () => clients.delete(res));
+    return;
+  }
+  if (url.pathname === '/pill-events') {
+    if (url.searchParams.get('t') !== token) { res.writeHead(403).end(); return; }
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+    res.write(pillEvent());
+    pillClients.add(res);
+    req.on('close', () => pillClients.delete(res));
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/pill') {
+    if (req.headers['x-pill-token'] !== pillToken) { res.writeHead(403).end(); return; }
+    servePill(req, res);
     return;
   }
   if (req.method === 'POST') {
@@ -214,6 +304,7 @@ const server = createServer(async (req, res) => {
   try { data = readFileSync(file); } catch { res.writeHead(404).end(); return; }
   res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' }).end(data);
 });
+server.requestTimeout = 0;                          // the pill relay's request stays open for as long as the pill does
 await new Promise<void>(ok => {
   server.once('error', () => server.listen(0, '127.0.0.1', ok));
   server.listen(PORT, '127.0.0.1', ok);
@@ -226,6 +317,9 @@ filesServer = {
   args: [join(DIST, 'files-mcp.mjs')],
   env: { BLOB_ASK_URL: `http://127.0.0.1:${port}/ask`, BLOB_ASK_TOKEN: askToken },
 };
+// Where the pill relay finds Blob: brain.ts hands these to clawdcursor, which passes its own env on to the relay.
+process.env.BLOB_PILL_URL = `http://127.0.0.1:${port}/pill`;
+process.env.BLOB_PILL_TOKEN = pillToken;
 writeFileSync(mcpConfigPath, mcpConfig(filesServer), { mode: 0o600 });
 brain = new Brain({ mcpConfigPath, cwd: WORK, emit: onBrain });
 sendShortcuts();
@@ -276,8 +370,38 @@ const view = win.createWebview({
   navigationHandler: u => u.startsWith(`http://127.0.0.1:${port}/`),
   newWindowHandler: () => false,
 });
+// clawdcursor's pill: a second window at the top centre of the primary display, as big as the page says its
+// content is, shown only while a relay is connected. Made here so it shares the first webview's browser flags.
+const PILL = { w: 320, h: 64 };
+const pillWin = app.createBrowserWindow({
+  title: 'Blob pill',
+  width: PILL.w, height: PILL.h, logical: true,
+  transparent: true, decorations: false, alwaysOnTop: true, focused: false,
+  resizable: false, maximizable: false, minimizable: false,
+  windowsUndecoratedShadow: false, windowsSkipTaskbar: true,
+  visible: false,
+});
+function placePill(w: number, h: number): void {
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+  const next = { w: Math.round(Math.min(520, Math.max(120, w))), h: Math.round(Math.min(700, Math.max(40, h))) };
+  const m = pillWin.getPrimaryMonitor();
+  const s = m?.scaleFactor ?? 1;
+  const left = m ? m.position.x / s : 0, width = m ? m.size.width / s : 1280, top = m ? m.position.y / s : 0;
+  pillWin.setSize(next.w, next.h, true);
+  pillWin.setPosition(Math.round(left + (width - next.w) / 2), Math.round(top), true);
+}
+const pillView = pillWin.createWebview({
+  url: `http://127.0.0.1:${port}/pill.html?t=${token}`,
+  transparent: true,
+  webContext,
+  navigationHandler: u => u.startsWith(`http://127.0.0.1:${port}/`),
+  newWindowHandler: () => false,
+});
 delete process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS;
 view.setBackgroundColor(0, 0, 0, 0);
+pillView.setBackgroundColor(0, 0, 0, 0);
+placePill(PILL.w, PILL.h);
+pillUi = overlay(pillWin);
 win.show();
 focus = focusKeeper(win.getNativeHandle());
 void check();

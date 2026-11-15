@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { StreamParser, callLabel, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
+import { isAbsolute } from 'node:path';
+import { PILL_HOST, StreamParser, callLabel, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
 
 describe('claude command line', () => {
   it('runs stream-json print mode with clawdcursor, the files server and the read-only built-ins', () => {
@@ -26,14 +27,23 @@ describe('claude command line', () => {
     expect(claudeArgs({ mcpConfigPath: 'm.json', model: 'haiku' })).toContain('haiku');
   });
 
-  it('starts clawdcursor mcp --compact, through cmd on Windows, or the override, with the blob pill', () => {
-    const env = { CLAWD_BANNER_THEME: 'blob' };
-    expect(clawdcursorCommand({}, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'], env });
-    expect(clawdcursorCommand({}, 'darwin')).toEqual({ command: 'clawdcursor', args: ['mcp', '--compact'], env });
+  it('starts clawdcursor mcp --compact, through cmd on Windows, or the override', () => {
+    expect(clawdcursorCommand({}, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'] });
+    expect(clawdcursorCommand({}, 'darwin')).toEqual({ command: 'clawdcursor', args: ['mcp', '--compact'] });
     expect(clawdcursorCommand({ BLOB_CLAWDCURSOR: 'node "C:/dev x/cli.js" mcp --compact' }, 'linux'))
-      .toEqual({ command: 'node', args: ['C:/dev x/cli.js', 'mcp', '--compact'], env });
+      .toEqual({ command: 'node', args: ['C:/dev x/cli.js', 'mcp', '--compact'] });
+    expect(clawdcursorCommand({ BLOB_PILL_URL: 'http://127.0.0.1:1/pill' }, 'linux').env).toBeUndefined();   // no token yet
+  });
+
+  it('hands the pill to Blob: the relay as CLAWD_PILL_CMD, Blob as own UI, and where the relay finds Blob', () => {
+    const host = { BLOB_PILL_URL: 'http://127.0.0.1:1/pill', BLOB_PILL_TOKEN: 'p' };
+    const env = { ...host, CLAWD_PILL_CMD: JSON.stringify([process.execPath, PILL_HOST]), CLAWD_OWN_UI_PIDS: String(process.pid) };
+    expect(isAbsolute(PILL_HOST)).toBe(true);
+    expect(PILL_HOST.replace(/\\/g, '/')).toMatch(/\/dist\/pill-host\.mjs$/);
+    expect(clawdcursorCommand(host, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'], env });
+    expect(clawdcursorCommand({ ...host, BLOB_CLAWDCURSOR: 'node cli.js mcp' }, 'linux')).toEqual({ command: 'node', args: ['cli.js', 'mcp'], env });
     const files = { command: '/usr/bin/node', args: ['/app/dist/files-mcp.mjs'], env: { BLOB_ASK_URL: 'http://127.0.0.1:1/ask', BLOB_ASK_TOKEN: 't' } };
-    expect(JSON.parse(mcpConfig(files, {}, 'linux'))).toEqual({ mcpServers: {
+    expect(JSON.parse(mcpConfig(files, host, 'linux'))).toEqual({ mcpServers: {
       clawdcursor: { type: 'stdio', command: 'clawdcursor', args: ['mcp', '--compact'], env },
       files: { type: 'stdio', ...files },
     } });

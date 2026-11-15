@@ -41,9 +41,9 @@ button { font: inherit; color: inherit; }
 .card { box-sizing: border-box; max-width: 100%; border-radius: 18px; padding: 9px 14px; background: transparent; line-height: 17px; }
 .card .title { font-weight: 600; margin-bottom: 4px; }
 .card .row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
-.card input { box-sizing: border-box; width: 100%; border: 0; outline: 0; border-radius: 10px; padding: 5px 8px; font: inherit;
+.card input, .card textarea { box-sizing: border-box; width: 100%; border: 0; outline: 0; border-radius: 10px; padding: 5px 8px; font: inherit;
   color: #1c1c1e; background: rgba(28, 28, 30, .07); user-select: text; }
-.card input::placeholder { color: #8e8e93; }
+.card input::placeholder, .card textarea::placeholder { color: #8e8e93; }
 .btn { border: 0; border-radius: 999px; padding: 3px 12px; font-weight: 500; background: rgba(28, 28, 30, .08); cursor: pointer; }
 .btn:hover { background: rgba(28, 28, 30, .14); }
 .btn.strong { font-weight: 650; background: rgba(28, 28, 30, .16); }
@@ -73,3 +73,23 @@ button { font: inherit; color: inherit; }
 .log .call.confirmed span { color: #1e7d34; }
 .log .call.unverified span { color: #8a6a00; }
 .log .call.refused span, .log .call.failed span, .log .call.error span { color: #c41e1e; }
+
+/* clawdcursor's pill (pill.html): one more liquid group, at the top centre of its own small window */
+.pill-root { box-sizing: border-box; height: 100%; padding: 10px; display: flex; justify-content: center; align-items: flex-start; }
+.pill { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.pill-row { display: flex; align-items: center; gap: 4px; }
+.pill .orb { width: 36px; height: 36px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
+.pill .activity { max-width: 300px; padding: 9px 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill .stop { height: 36px; font-weight: 600; }
+/* paused: the "waiting for you" card, its choices as blobs, then the reply box and the buttons */
+.pill .wait, .pill .acts { width: 360px; }
+.pill .message { max-height: 170px; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; user-select: text; }
+.pill .choices { max-width: 360px; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.pill .choice { max-width: 360px; padding: 8px 14px; font-size: inherit; text-align: left; overflow-wrap: anywhere; background: rgba(28, 28, 30, .08); }
+.pill .choice:hover { background: rgba(28, 28, 30, .14); }
+.pill .reply { display: flex; align-items: center; gap: 6px; }
+.pill textarea { display: block; height: 62px; resize: none; }
+.pill .note { margin-top: 4px; font-size: 11.5px; color: #6e6e73; }
+.pill .acts .row { margin-top: 0; }
+.pill .reply + .row, .pill .note + .row { margin-top: 8px; }
+.pill .else { margin-right: auto; }

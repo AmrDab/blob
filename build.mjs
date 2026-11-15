@@ -1,11 +1,11 @@
-// Builds into dist/: the UI (the React bundle, the page, onnxruntime-web's wasm, served locally, not from a CDN) and
-// the files MCP server that Claude Code starts with Node.
+// Builds into dist/: the UI (the React bundles, the pages, onnxruntime-web's wasm, served locally, not from a CDN),
+// the files MCP server that Claude Code starts with Node, and the pill relay that clawdcursor starts with Node.
 import { build } from 'esbuild';
 import { cpSync, mkdirSync } from 'node:fs';
 
 mkdirSync('dist/ort', { recursive: true });
 await build({
-  entryPoints: ['src/ui/main.tsx'],
+  entryPoints: ['src/ui/main.tsx', 'src/ui/pill.tsx'],   // the bubble, and clawdcursor's pill
   outdir: 'dist',
   bundle: true,
   splitting: true,          // speech (transformers + onnxruntime) loads only when Speak is first used
@@ -25,7 +25,18 @@ await build({
   target: 'node20',
   logLevel: 'warning',
 });
+// The pill relay clawdcursor starts with Node in place of its own pill (brain.ts): Node built-ins only.
+await build({
+  stdin: { contents: "import { main } from './src/pill-host.ts'; main();", resolveDir: import.meta.dirname, loader: 'ts' },
+  outfile: 'dist/pill-host.mjs',
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node20',
+  logLevel: 'warning',
+});
 cpSync('src/ui/index.html', 'dist/index.html');
+cpSync('src/ui/pill.html', 'dist/pill.html');
 cpSync('src/ui/style.css', 'dist/style.css');
 mkdirSync('dist/fonts', { recursive: true });
 for (const f of ['inter-latin-wght-normal.woff2', 'inter-latin-ext-wght-normal.woff2']) {
