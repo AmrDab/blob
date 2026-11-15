@@ -37,22 +37,23 @@ export const SYSTEM_PROMPT =
   'files tools (list_dir, make_folder, move, trash) to change them, not the desktop. Your final reply is shown as a ' +
   'one-line caption: one or two short plain sentences saying what you did or found, no markdown.';
 
+/** clawdcursor's pill and its "waiting for you" card in Pronto's light blob look (clawdcursor's opt-in theme). */
+const PILL = { CLAWD_BANNER_THEME: 'blob' };
 /** The clawdcursor MCP server command: `clawdcursor mcp --compact`, or PRONTO_CLAWDCURSOR (e.g. a dev build). */
-export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): { command: string; args: string[] } {
+export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): ServerCommand {
   const raw = env.PRONTO_CLAWDCURSOR?.trim() || 'clawdcursor mcp --compact';
   const parts = (raw.match(/"[^"]*"|\S+/g) ?? []).map(p => p.replace(/^"|"$/g, ''));
   // npm installs clawdcursor as a .cmd shim on Windows, which only cmd can start.
-  if (platform === 'win32') return { command: 'cmd', args: ['/c', ...parts] };
-  return { command: parts[0], args: parts.slice(1) };
+  if (platform === 'win32') return { command: 'cmd', args: ['/c', ...parts], env: PILL };
+  return { command: parts[0], args: parts.slice(1), env: PILL };
 }
 
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
 
 /** The --mcp-config file: clawdcursor and Pronto's files server, nothing else. */
 export function mcpConfig(files: ServerCommand, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
-  const { command, args } = clawdcursorCommand(env, platform);
   return JSON.stringify({ mcpServers: {
-    clawdcursor: { type: 'stdio', command, args },
+    clawdcursor: { type: 'stdio', ...clawdcursorCommand(env, platform) },
     files: { type: 'stdio', ...files },
   } }, null, 2);
 }

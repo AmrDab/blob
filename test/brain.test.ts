@@ -26,14 +26,15 @@ describe('claude command line', () => {
     expect(claudeArgs({ mcpConfigPath: 'm.json', model: 'haiku' })).toContain('haiku');
   });
 
-  it('starts clawdcursor mcp --compact, through cmd on Windows, or the override', () => {
-    expect(clawdcursorCommand({}, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'] });
-    expect(clawdcursorCommand({}, 'darwin')).toEqual({ command: 'clawdcursor', args: ['mcp', '--compact'] });
+  it('starts clawdcursor mcp --compact, through cmd on Windows, or the override, with the blob pill', () => {
+    const env = { CLAWD_BANNER_THEME: 'blob' };
+    expect(clawdcursorCommand({}, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'], env });
+    expect(clawdcursorCommand({}, 'darwin')).toEqual({ command: 'clawdcursor', args: ['mcp', '--compact'], env });
     expect(clawdcursorCommand({ PRONTO_CLAWDCURSOR: 'node "C:/dev x/cli.js" mcp --compact' }, 'linux'))
-      .toEqual({ command: 'node', args: ['C:/dev x/cli.js', 'mcp', '--compact'] });
+      .toEqual({ command: 'node', args: ['C:/dev x/cli.js', 'mcp', '--compact'], env });
     const files = { command: '/usr/bin/node', args: ['/app/dist/files-mcp.mjs'], env: { PRONTO_ASK_URL: 'http://127.0.0.1:1/ask', PRONTO_ASK_TOKEN: 't' } };
     expect(JSON.parse(mcpConfig(files, {}, 'linux'))).toEqual({ mcpServers: {
-      clawdcursor: { type: 'stdio', command: 'clawdcursor', args: ['mcp', '--compact'] },
+      clawdcursor: { type: 'stdio', command: 'clawdcursor', args: ['mcp', '--compact'], env },
       files: { type: 'stdio', ...files },
     } });
   });

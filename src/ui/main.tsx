@@ -25,7 +25,7 @@ const GOO = { blur: 13.5, contrast: 40, fill: '#e9e9e9', waviness: 8 };
 const HOLD_MS = 350;   // a press longer than this is press-and-hold; shorter is a tap (tap again to finish)
 const STILL_MS = 150;  // a press that stays still this long starts the mic
 const DRAG_PX = 4;     // a press that moves further than this drags the window instead
-const RING = 108;      // the voice ring's canvas, centred on Speak
+const RING = 84;       // the voice ring: Speak's face (its loops fill about 40% of the canvas, which overhangs the blob)
 
 // Shortcut blobs sit on arcs around Speak, from straight left to straight up: 5 on the inner one, 7 more on the outer.
 const arc = (r: number, n: number) => Array.from({ length: n }, (_, i) => {
@@ -41,7 +41,6 @@ type ShortcutInfo = { id: string; name: string; icon: string; pinned: boolean };
 type Offer = { name: string } | { why: string } | null;
 type Check = { id: string; ok: boolean; label: string; fix: string };
 
-const Mic = () => <svg viewBox="0 0 24 24" width="22" height="22"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" /></svg>;
 const Keys = () => <svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="6" width="18" height="12" rx="2.5" fill="none" /><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8" fill="none" /></svg>;
 const List = () => <svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 7h11M8 12h11M8 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01" fill="none" /></svg>;
 
@@ -258,7 +257,8 @@ function App() {
 
   const open = hover || busy || phase === 'recording' || browsing;
   const pinned = shortcuts.filter(s => s.pinned);
-  const shown = caption || (phase === 'ask' || phase === 'downloading');
+  // While Pronto works only the orb shows: no step-by-step text on the bubble (the Log has it).
+  const shown = !busy && (caption || phase === 'ask' || phase === 'downloading');
   return (
     <div className="root" data-webview-drag-region="deep"
       onPointerDown={e => { if (!(e.target as Element).closest('button, input, .log')) dragging.current = true; }}>
@@ -354,7 +354,6 @@ function App() {
 
       <div className="goo-box" style={{ width: box.w, height: box.h }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => { setHover(false); setHint(null); }}>
-        {micStream && <VoiceRing className="ring" size={RING} type="mono" theme="light" state="listening" stream={micStream} />}
         <Liquid {...GOO} className="goo" style={{ width: box.w, height: box.h }}>
           <Liquid.Item className="it-small" x={open ? -54 : 0} y={open ? -34 : 0} transition={T}>
             <button className={`blob small${open ? '' : ' shut'}`} aria-label="Type"
@@ -391,7 +390,9 @@ function App() {
           <Liquid.Item className="it-main">
             <button className={`blob main ${phase}`} aria-label="Speak"
               onPointerDown={speakDown} onPointerMove={speakMove} onPointerUp={speakUp} onPointerCancel={speakCancel}>
-              {busy ? <ThinkingOrb state="working" size={32} theme="light" /> : <Mic />}
+              {busy ? <ThinkingOrb state="working" size={32} theme="light" />
+                : <span className="face"><VoiceRing size={RING} type="mono" theme="light" stream={micStream ?? undefined}
+                    state={phase === 'recording' ? 'listening' : phase === 'transcribing' || phase === 'downloading' ? 'processing' : 'idle'} /></span>}
             </button>
           </Liquid.Item>
         </Liquid>

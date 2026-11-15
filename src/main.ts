@@ -24,7 +24,7 @@ const DIST = resolve(import.meta.dirname, '..', 'dist');
 // A fixed port keeps the page's origin, and so the cached Whisper model, the same across starts; any free port if taken.
 const PORT = 47615;
 const START = { w: 320, h: 230 };
-const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm' };
+const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.woff2': 'font/woff2' };
 
 mkdirSync(WORK, { recursive: true });
 const tmp = mkdtempSync(join(tmpdir(), 'pronto-'));
