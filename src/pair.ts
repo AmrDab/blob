@@ -4,21 +4,22 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { renderSVG } from 'uqr';
-import { CLOSE, HELLO_BYTES, pairKeys, parseFragment, randomB64url, type Channel, type PairKeys, type PcMsg, type PhoneMsg, type RelayMsg } from './pair-crypto.ts';
+import { CLOSE, isHello, pairKeys, parseFragment, randomB64url, type Channel, type PairKeys, type PcMsg, type PhoneMsg, type RelayMsg } from './pair-crypto.ts';
 import { blobHome } from './settings.ts';
 
-/** A pairing. Saving these three values keeps the phone paired across restarts. */
+/** A pairing. Saving these values keeps the phone paired across restarts. */
 export interface RoomInfo {
   site: string;     // where the phone page and the relay live, e.g. https://blob-relay.example.workers.dev
   room: string;     // random id, 16 bytes as base64url
   secret: string;   // one-time secret, 32 bytes as base64url; it never leaves the PC and the QR
+  pc: string;       // this PC's own token for the relay, 16 bytes as base64url; never in the QR, so only this PC is the room's PC
 }
 
 export function createRoom(site: string): RoomInfo {
-  return { site: site.replace(/\/+$/, ''), room: randomB64url(16), secret: randomB64url(32) };
+  return { site: site.replace(/\/+$/, ''), room: randomB64url(16), secret: randomB64url(32), pc: randomB64url(16) };
 }
 
-/** The link in the QR. The room and the secret are in the fragment, which browsers never send to a server. */
+/** The link in the QR. The room and the secret are in the fragment, which browsers never send to a server. The PC's token is not in it. */
 export function qrUrl(r: RoomInfo): string {
   return `${r.site}/#r=${r.room}&k=${r.secret}`;
 }
@@ -34,8 +35,9 @@ export const pairFile = (env: NodeJS.ProcessEnv = process.env) => join(blobHome(
 export function loadRoom(file: string): RoomInfo | null {
   try {
     const d = JSON.parse(readFileSync(file, 'utf8'));
-    const ok = typeof d?.site === 'string' && /^https?:\/\//.test(d.site) && parseFragment(`#r=${d.room}&k=${d.secret}`);
-    return ok ? { site: d.site, room: d.room, secret: d.secret } : null;
+    const ok = typeof d?.site === 'string' && /^https?:\/\//.test(d.site) && parseFragment(`#r=${d.room}&k=${d.secret}`)
+      && typeof d.pc === 'string' && /^[\w-]{22}$/.test(d.pc);
+    return ok ? { site: d.site, room: d.room, secret: d.secret, pc: d.pc } : null;
   } catch { return null; }
 }
 
@@ -81,7 +83,7 @@ export class Pairing extends EventEmitter<Events> {
   async connect(): Promise<void> {
     const keys = this.keys ??= await pairKeys(this.info.secret, this.info.room, 'pc');
     if (this.over) return;
-    const url = `${this.info.site.replace(/^http/, 'ws')}/room/${this.info.room}?role=pc&auth=${keys.auth}`;
+    const url = `${this.info.site.replace(/^http/, 'ws')}/room/${this.info.room}?role=pc&auth=${keys.auth}&pc=${this.info.pc}`;
     const ws = this.ws = this.o.open ? this.o.open(url) : new WebSocket(url) as unknown as Socket;
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => { this.tries = 0; };
@@ -105,10 +107,11 @@ export class Pairing extends EventEmitter<Events> {
       const m = JSON.parse(data) as RelayMsg;
       if (m.t !== 'peer') return this.end(m.t === 'replaced' ? 'refused' : m.t);
       this.gone();
-      if (m.on) ws.send(this.keys!.hello());         // a new connection: new keys, once the phone's hello is here
+      if (m.on) ws.send(await this.keys!.hello());   // a new connection: new keys, once the phone's hello is here
       return;
     }
-    if (data.byteLength === HELLO_BYTES) {
+    if (isHello(data)) {
+      if (this.ch) return;                           // one hello per connection: a second one (a replay) changes nothing
       this.ch = await this.keys!.channel(data);
       this.emit('phone', true);
       for (const a of this.asks.values()) this.send({ t: 'ask', ...a });   // the phone (re)joined: what is still open

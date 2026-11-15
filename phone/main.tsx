@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { Liquid } from 'liquid-gooey';
 import { VoiceRing } from 'voice-ring';
 import { ThinkingOrb } from 'thinking-orbs';
-import { CLOSE, HELLO_BYTES, pairKeys, parseFragment, randomB64url, type Channel, type PairKeys, type PcMsg, type PhoneMsg, type RelayMsg } from '../src/pair-crypto.ts';
+import { CLOSE, isHello, pairKeys, parseFragment, randomB64url, type Channel, type PairKeys, type PcMsg, type PhoneMsg, type RelayMsg } from '../src/pair-crypto.ts';
 
 declare const __RELAY__: string;   // set at build time when the relay is on another host; '' = this page's host
 
@@ -127,8 +127,9 @@ function App() {
           if (m.t !== 'peer') { end(m.t === 'replaced' ? 'taken' : m.t); s.close(); return; }
           ch.current = null;                             // a new connection: new keys, once the computer's hello is here
           setPcOn(false); setMode('ready'); setAsk(null);
-          if (m.on) s.send(k.hello());
-        } else if (data.byteLength === HELLO_BYTES) {
+          if (m.on) s.send(await k.hello());
+        } else if (isHello(data)) {
+          if (ch.current) return;                        // one hello per connection: a second one changes nothing
           ch.current = await k.channel(data);
           setPcOn(true);
         } else if (ch.current) got(await ch.current.open(data));

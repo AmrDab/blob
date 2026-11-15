@@ -3,8 +3,11 @@
 
 export type Role = 'pc' | 'phone';
 export interface Sock { send(data: string | ArrayBuffer): void; close(code?: number, reason?: string): void }
-/** `auth` is the room's access token, set by the PC that creates the room. `phone` is the first phone's device id. */
-export interface Live { auth: string; created: number; paired: boolean; seen: number; phone?: string }
+/**
+ * `auth` is the room's access token (the phone has it too, from the QR). `pc` is a hash of the token only the PC that
+ * made the room has. `phone` is the first phone's device id.
+ */
+export interface Live { auth: string; pc: string; created: number; paired: boolean; seen: number; phone?: string }
 /** What is left of a room that was unpaired or expired: a hash of its token, so the room is never opened again. */
 export interface Gone { gone: string }
 export type Meta = Live | Gone;
@@ -35,25 +38,28 @@ async function hash(text: string): Promise<string> {
 }
 
 /**
- * Decides whether a new socket may join: 0, or the code to close it with. The first PC creates the room, once: a room
- * that was unpaired or expired stays closed. The first phone to join is the room's phone (by its device id, `dev`):
- * no other phone gets in after it. A newcomer takes the place of an older socket of its own (a reload, or a
- * connection that died without closing).
+ * Decides whether a new socket may join: 0, or the code to close it with. `who` is the PC's own token, or the
+ * phone's device id. The first PC creates the room, once: a room that was unpaired or expired stays closed, and only
+ * that PC is ever its PC (the QR link does not carry its token). The first phone to join is the room's phone: no
+ * other phone gets in after it. A newcomer takes the place of an older socket of its own (a reload, or a connection
+ * that died without closing); anyone else is refused and the one that is there stays.
  */
-export async function admit(h: Host, role: Role, auth: string, now: number, dev?: string): Promise<number> {
+export async function admit(h: Host, role: Role, auth: string, now: number, who: string): Promise<number> {
   let meta = await h.meta();
   if (isGone(meta)) return CLOSE.gone;
   if (meta && !meta.paired && now >= meta.created + UNUSED_MS) { await expire(h, meta); return CLOSE.gone; }
   if (!meta) {
     if (role !== 'pc') return CLOSE.gone;
-    meta = { auth, created: now, paired: false, seen: now };
+    if (!who) return CLOSE.badAuth;
+    meta = { auth, pc: await hash(who), created: now, paired: false, seen: now };
     await h.alarm(now + UNUSED_MS);
   }
-  if (meta.auth !== auth) return CLOSE.badAuth;
-  if (role === 'phone') {
-    if (!dev) return CLOSE.badAuth;
-    if (meta.phone && meta.phone !== dev) return CLOSE.taken;   // another phone: the one that is paired stays
-    meta.phone = dev;
+  if (meta.auth !== auth || !who) return CLOSE.badAuth;
+  if (role === 'pc') {
+    if (meta.pc !== await hash(who)) return CLOSE.badAuth;     // not the PC that made the room (the QR link is not enough)
+  } else {
+    if (meta.phone && meta.phone !== who) return CLOSE.taken;   // another phone: the one that is paired stays
+    meta.phone = who;
     meta.paired = true;
   }
   for (const old of h.socks(role)) drop(old, 'replaced', CLOSE.taken);

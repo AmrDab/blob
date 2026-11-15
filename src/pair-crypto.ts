@@ -55,41 +55,63 @@ export interface Channel {
   open(frame: ArrayBuffer): Promise<any>;
 }
 
-/** A hello frame: 16 random bytes, sent by each side when the other one is there. Anything longer is ciphertext. */
-export const HELLO_BYTES = 16;
+// Every binary frame starts with one byte that says what it is.
+const HELLO = 0, DATA = 1;
+const NONCE_BYTES = 16;
+
+/** Is this frame a hello (each side sends one when the other is there)? Anything else is ciphertext. */
+export const isHello = (frame: ArrayBuffer): boolean => frame.byteLength > 0 && new Uint8Array(frame)[0] === HELLO;
 
 export interface PairKeys {
   /** The room's access token for the relay. It is derived from the secret but cannot decrypt anything. */
   auth: string;
-  /** A fresh nonce for this connection: send it to the other side as it is. */
-  hello(): ArrayBuffer;
-  /** The other side's hello: the connection's channel, with keys made from both nonces. */
+  /** This side's hello for a new connection: a fresh nonce, signed. Send it to the other side as it is. */
+  hello(): Promise<ArrayBuffer>;
+  /**
+   * The other side's hello: the connection's channel, with keys made from both nonces. Throws when the hello was not
+   * signed by the other side (a forged one, or this side's own sent back), and when this side's nonce was used
+   * already: one hello() makes one channel.
+   */
   channel(peerHello: ArrayBuffer): Promise<Channel>;
 }
 
 /**
- * Keys from the one-time secret with HKDF-SHA-256 (salt: the room id). The relay token is fixed for the pairing. The
- * AES-256-GCM keys (one per direction) are new for every connection: HKDF(secret, room + both sides' nonces), so a
- * frame recorded in an earlier connection opens in no later one. A frame is a 12-byte random nonce followed by the
- * ciphertext of `{ n, ...msg }`; `n` only goes up.
+ * Keys from the one-time secret with HKDF-SHA-256 (salt: the room id). The relay token is fixed for the pairing. A
+ * hello is a random nonce with an HMAC over room + role + nonce, so only the two holders of the secret can make one
+ * and neither takes its own back. The AES-256-GCM keys (one per direction) are new for every connection:
+ * HKDF(secret, room + both sides' nonces), so a frame recorded in an earlier connection opens in no later one. A data
+ * frame is a 12-byte random nonce followed by the ciphertext of `{ n, ...msg }`; `n` only goes up, for the life of
+ * the key.
  */
 export async function pairKeys(secret: string, room: string, side: Side): Promise<PairKeys> {
   const base = await crypto.subtle.importKey('raw', unb64url(secret), 'HKDF', false, ['deriveKey', 'deriveBits']);
   const hkdf = (info: string) => ({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode(room), info: enc.encode(info) });
   const auth = b64url(new Uint8Array(await crypto.subtle.deriveBits(hkdf('blob-pair auth'), base, 128)));
-  let mine: Uint8Array | null = null;
+  const mac = await crypto.subtle.deriveKey(hkdf('blob-pair hello'), base, { name: 'HMAC', hash: 'SHA-256', length: 256 }, false, ['sign', 'verify']);
+  const signed = (from: Side, nonce: Uint8Array<ArrayBuffer>) => enc.encode(`${room} ${from} ${b64url(nonce)}`);
+  const peer: Side = side === 'pc' ? 'phone' : 'pc';
+  let mine: Uint8Array<ArrayBuffer> | null = null;
   return {
     auth,
-    hello() {
-      mine = crypto.getRandomValues(new Uint8Array(HELLO_BYTES));
-      return mine.slice().buffer;
+    async hello() {
+      const nonce = mine = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
+      const tag = new Uint8Array(await crypto.subtle.sign('HMAC', mac, signed(side, nonce)));
+      const frame = new Uint8Array(1 + NONCE_BYTES + tag.length);
+      frame[0] = HELLO;
+      frame.set(nonce, 1);
+      frame.set(tag, 1 + NONCE_BYTES);
+      return frame.buffer;
     },
     async channel(peerHello) {
-      if (!mine || peerHello.byteLength !== HELLO_BYTES) throw new Error('no hello');
-      const theirs = new Uint8Array(peerHello);
-      const nonces = side === 'pc' ? `${b64url(mine)} ${b64url(theirs)}` : `${b64url(theirs)} ${b64url(mine)}`;   // PC's first
+      const nonce = mine;
+      mine = null;                                    // one nonce, one channel: a hello sent again makes nothing
+      if (!nonce) throw new Error('no hello of our own');
+      if (!isHello(peerHello) || peerHello.byteLength !== 1 + NONCE_BYTES + 32) throw new Error('not a hello');
+      const theirs = new Uint8Array(peerHello.slice(1, 1 + NONCE_BYTES));
+      if (!(await crypto.subtle.verify('HMAC', mac, peerHello.slice(1 + NONCE_BYTES), signed(peer, theirs)))) throw new Error('hello not from the other side');
+      const nonces = side === 'pc' ? `${b64url(nonce)} ${b64url(theirs)}` : `${b64url(theirs)} ${b64url(nonce)}`;   // the PC's first
       const key = (from: Side) => crypto.subtle.deriveKey(hkdf(`blob-pair ${from} ${nonces}`), base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-      const [out, inn] = await Promise.all([key(side), key(side === 'pc' ? 'phone' : 'pc')]);
+      const [out, inn] = await Promise.all([key(side), key(peer)]);
       let sent = 0, seen = 0;
       // One at a time, in call order: frames leave and are read in the order of their `n`.
       let line: Promise<unknown> = Promise.resolve();
@@ -102,13 +124,15 @@ export async function pairKeys(secret: string, room: string, side: Side): Promis
         seal: msg => inOrder(async () => {
           const iv = crypto.getRandomValues(new Uint8Array(12));
           const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, out, enc.encode(JSON.stringify({ ...msg, n: ++sent })));
-          const frame = new Uint8Array(12 + data.byteLength);
-          frame.set(iv);
-          frame.set(new Uint8Array(data), 12);
+          const frame = new Uint8Array(13 + data.byteLength);
+          frame[0] = DATA;
+          frame.set(iv, 1);
+          frame.set(new Uint8Array(data), 13);
           return frame.buffer;
         }),
         open: frame => inOrder(async () => {
-          const data = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: frame.slice(0, 12) }, inn, frame.slice(12));
+          if (new Uint8Array(frame)[0] !== DATA) throw new Error('not a data frame');
+          const data = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: frame.slice(1, 13) }, inn, frame.slice(13));
           const { n, ...msg } = JSON.parse(dec.decode(data));
           if (typeof n !== 'number' || n <= seen) throw new Error('replayed frame');
           seen = n;

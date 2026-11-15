@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CLOSE, HELLO_BYTES, pairKeys, parseFragment, unb64url, type Channel, type PhoneMsg } from '../src/pair-crypto.ts';
+import { CLOSE, isHello, pairKeys, parseFragment, unb64url, type Channel, type PhoneMsg } from '../src/pair-crypto.ts';
 import { Pairing, createRoom, loadRoom, qrSvg, qrUrl, saveRoom, type Reply, type Socket } from '../src/pair.ts';
 
 const room = createRoom('https://blob-relay.example.workers.dev/');
@@ -10,7 +10,7 @@ const room = createRoom('https://blob-relay.example.workers.dev/');
 /** One connection: both sides say hello and make this connection's keys. */
 async function connection(r = room): Promise<{ pc: Channel; phone: Channel }> {
   const pc = await pairKeys(r.secret, r.room, 'pc'), phone = await pairKeys(r.secret, r.room, 'phone');
-  const a = pc.hello(), b = phone.hello();
+  const a = await pc.hello(), b = await phone.hello();
   return { pc: await pc.channel(b), phone: await phone.channel(a) };
 }
 
@@ -25,7 +25,8 @@ describe('pairing crypto', () => {
     const a = await pairKeys(room.secret, room.room, 'pc'), b = await pairKeys(room.secret, room.room, 'phone');
     expect(a.auth).toBe(b.auth);                            // the relay token is the pairing's, not the connection's
     expect(a.auth).toMatch(/^[\w-]{22}$/);
-    expect(a.hello().byteLength).toBe(HELLO_BYTES);
+    expect(isHello(await a.hello())).toBe(true);
+    expect(isHello(req)).toBe(false);
   });
 
   it('keeps the order of frames sealed at once', async () => {
@@ -55,11 +56,32 @@ describe('pairing crypto', () => {
     await expect(next.pc.open(recorded)).rejects.toThrow();
     // Also when only one side is new (the PC restarted, an attacker replays the phone's old hello and frame).
     const pc = await pairKeys(room.secret, room.room, 'pc'), phone = await pairKeys(room.secret, room.room, 'phone');
-    const phoneHello = phone.hello();
-    const first = await phone.channel(pc.hello());
+    const phoneHello = await phone.hello();
+    const first = await phone.channel(await pc.hello());
     const frame = await first.seal({ t: 'req', id: '2', text: 'again' });
-    pc.hello();                                                         // the PC's next connection: a new nonce
+    await pc.hello();                                                   // the PC's next connection: a new nonce
     await expect((await pc.channel(phoneHello)).open(frame)).rejects.toThrow();
+  });
+
+  it('takes a hello only from the other side, and uses its own nonce for one channel only', async () => {
+    const pc = await pairKeys(room.secret, room.room, 'pc'), phone = await pairKeys(room.secret, room.room, 'phone');
+    await expect(pc.channel(await phone.hello())).rejects.toThrow('no hello of our own');   // nothing to pair it with yet
+    const mine = await pc.hello();
+    await expect(pc.channel(mine)).rejects.toThrow('not from the other side');              // its own hello sent back
+    await pc.hello();
+    const forged = (await phone.hello()).slice(0);
+    new Uint8Array(forged)[3] ^= 1;                                                          // a nonce the relay made up
+    await expect(pc.channel(forged)).rejects.toThrow('not from the other side');
+    await pc.hello();
+    const stranger = await pairKeys(createRoom('https://x').secret, room.room, 'phone');     // signed with another secret
+    await expect(pc.channel(await stranger.hello())).rejects.toThrow('not from the other side');
+
+    // A good hello makes one channel. Sent again, it makes no second one with the same keys and a counter back at 0.
+    await pc.hello();
+    const hello = await phone.hello();
+    const ch = await pc.channel(hello);
+    expect(ch).toBeDefined();
+    await expect(pc.channel(hello)).rejects.toThrow('no hello of our own');
   });
 });
 
@@ -114,20 +136,22 @@ describe('the PC side of a pairing', () => {
   async function paired() {
     saveRoom(file, room);
     const relay = new FakeRelay();
-    const p = new Pairing(room, { file, open: () => relay });
+    let url = '';
+    const p = new Pairing(room, { file, open: u => { url = u; return relay; } });
     const got = { replies: [] as Reply[], requests: [] as string[], phone: [] as boolean[], over: [] as string[] };
     p.on('reply', r => got.replies.push(r)).on('request', r => got.requests.push(r.text))
       .on('phone', on => got.phone.push(on)).on('unpaired', why => got.over.push(why));
     await p.connect();
     relay.say('{"t":"peer","on":true}');
     await tick();
-    const pcHello = relay.sent.find(d => typeof d !== 'string' && d.byteLength === HELLO_BYTES) as ArrayBuffer;
+    const pcHello = relay.sent.find(d => typeof d !== 'string' && isHello(d)) as ArrayBuffer;
     const keys = await pairKeys(room.secret, room.room, 'phone');
-    relay.say(keys.hello());
+    const phoneHello = await keys.hello();
+    relay.say(phoneHello);
     const phone = await keys.channel(pcHello);
     await tick();
-    const from = async (m: PhoneMsg) => { relay.say(await phone.seal(m)); await tick(); };
-    return { p, relay, got, from };
+    const from = async (m: PhoneMsg) => { const f = await phone.seal(m); relay.say(f); await tick(); return f; };
+    return { p, relay, got, from, phoneHello, url };
   }
 
   it('saves and loads the pairing, and takes nothing that is not one', () => {
@@ -136,6 +160,27 @@ describe('the PC side of a pairing', () => {
     expect(loadRoom(file)).toEqual(room);
     saveRoom(file, { ...room, secret: 'short' });
     expect(loadRoom(file)).toBeNull();
+    saveRoom(file, { ...room, pc: '' });
+    expect(loadRoom(file)).toBeNull();
+  });
+
+  it('shows the relay its own PC token, which the QR link does not carry', async () => {
+    const { p, url } = await paired();
+    expect(url).toContain(`&pc=${room.pc}`);
+    expect(qrUrl(room)).not.toContain(room.pc);
+    expect(unb64url(room.pc)).toHaveLength(16);
+    p.close();
+  });
+
+  it('ignores a hello sent again in the same connection: recorded frames do not open a second time', async () => {
+    const { relay, got, from, phoneHello } = await paired();
+    const frame = await from({ t: 'req', id: 'a', text: 'open notepad' });
+    relay.say(phoneHello);                                     // the relay replays the phone's hello...
+    await tick();
+    relay.say(frame);                                          // ...and then the request
+    await tick();
+    expect(got.requests).toEqual(['open notepad']);            // once
+    expect(got.phone).toEqual([true]);                         // and the connection is the same one
   });
 
   it('takes a request, and a reply only for an ask that is open', async () => {

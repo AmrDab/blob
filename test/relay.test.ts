@@ -23,8 +23,8 @@ function fakeRoom() {
     socks: role => state.all.filter(s => s.closed === undefined && (!role || s.role === role)),
   };
   /** Joins like the Durable Object does; gives the socket, or the close code. */
-  async function join(role: Role, auth = 'token', now = 0, dev = 'phone-1'): Promise<FakeSock | number> {
-    const code = await admit(host, role, auth, now, role === 'phone' ? dev : undefined);
+  async function join(role: Role, auth = 'token', now = 0, who = role === 'pc' ? 'pc-1' : 'phone-1'): Promise<FakeSock | number> {
+    const code = await admit(host, role, auth, now, who);
     if (code) return code;
     const s = new FakeSock(role);
     state.all.push(s);
@@ -56,7 +56,7 @@ describe('relay room', () => {
     expect(phone.got.at(-1)).toBe(b);
     await frame(r.host, 'phone', phone, 'plain text is not forwarded', 1);
     expect(pc.got.at(-1)).toBe(a);
-    expect(Object.keys(r.state.meta!).sort()).toEqual(['auth', 'created', 'paired', 'phone', 'seen']);   // no content is kept
+    expect(Object.keys(r.state.meta!).sort()).toEqual(['auth', 'created', 'paired', 'pc', 'phone', 'seen']);   // no content is kept
   });
 
   it('holds one PC and one phone: a newcomer takes the place of the old socket in its role', async () => {
@@ -153,10 +153,26 @@ describe('relay room', () => {
     expect(await unused.join('pc', 'token', UNUSED_MS + 1)).toBe(CLOSE.gone);
   });
 
+  it('has one PC, the one that made it: the QR link is not enough to be the PC', async () => {
+    const r = fakeRoom();
+    const pc = await r.join('pc') as FakeSock;
+    const phone = await r.join('phone') as FakeSock;
+    // Someone who has the QR link has the room id and the room token, but not the PC's own token.
+    expect(await r.join('pc', 'token', 1, 'someone-else')).toBe(CLOSE.badAuth);
+    expect(await r.join('pc', 'token', 1, '')).toBe(CLOSE.badAuth);
+    expect(pc.closed).toBeUndefined();                              // the real PC is not pushed out
+    expect(r.host.socks('pc')).toEqual([pc]);
+    expect(phone.texts).toEqual(['{"t":"peer","on":true}']);        // and the phone heard nothing of it
+    expect(JSON.stringify(r.state.meta)).not.toContain('pc-1');     // a hash of the PC's token is kept, not the token
+    const back = await r.join('pc', 'token', 2) as FakeSock;        // the same PC reconnects
+    expect(pc.closed).toBe(CLOSE.taken);
+    expect(r.host.socks('pc')).toEqual([back]);
+  });
+
   it('belongs to the first phone: another phone is refused, the same one may come back', async () => {
     const r = fakeRoom();
     const pc = await r.join('pc') as FakeSock;
-    expect(await admit(r.host, 'phone', 'token', 0)).toBe(CLOSE.badAuth);   // a phone must name itself
+    expect(await admit(r.host, 'phone', 'token', 0, '')).toBe(CLOSE.badAuth);   // a phone must name itself
     const phone = await r.join('phone', 'token', 1, 'phone-1') as FakeSock;
     expect(await r.join('phone', 'token', 2, 'phone-2')).toBe(CLOSE.taken);   // someone else with the same QR link
     expect(phone.closed).toBeUndefined();                                     // the paired phone is not pushed out
