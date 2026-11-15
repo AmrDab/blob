@@ -14,7 +14,8 @@ import { Questions } from './ask.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
-import { overlay, type Overlay } from './overlay.ts';
+import { hideFromCapture, overlay, type Overlay } from './overlay.ts';
+import { keepOwnUiFile, processLister } from './own-ui.ts';
 import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type Reply, type RoomInfo } from './pair.ts';
 import { persona } from './persona.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
@@ -517,6 +518,9 @@ const selfServer: ServerCommand = {
 // Where the pill relay finds Blob: brain.ts hands these to clawdcursor, which passes its own env on to the relay.
 process.env.BLOB_PILL_URL = `http://127.0.0.1:${port}/pill`;
 process.env.BLOB_PILL_TOKEN = pillToken;
+// Blob's web view processes, named to clawdcursor as its own UI in a file that follows them (own-ui.ts).
+process.env.BLOB_OWN_UI_FILE = join(tmp, 'own-ui-pids');
+const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, processLister());
 writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer }), { mode: 0o600 });
 brain = new Brain({ mcpConfigPath, cwd: WORK, emit: onBrain, persona: () => persona(settings.get()) });
 sendShortcuts();
@@ -618,6 +622,8 @@ view.setBackgroundColor(0, 0, 0, 0);
 pillView.setBackgroundColor(0, 0, 0, 0);
 placePill(PILL.w, PILL.h);
 pillUi = overlay(pillWin);
+// The bubble and its cards (a question, the phone's QR code) are for the person at the screen: not in any capture.
+if (!hideFromCapture(win)) console.log('Blob: the bubble shows in screen captures on this system');
 win.show();
 focus = focusKeeper(win.getNativeHandle());
 void check();
@@ -629,6 +635,7 @@ function quit(): void {
   exiting = true;
   brain.stop();
   watcher?.stop();
+  stopOwnUi();
   pairing?.close();
   settings.unwatch();
   focus.stop();

@@ -16,6 +16,8 @@ export interface SelfDeps {
   settings: { get(): Settings; set<K extends Key>(key: K, value: Settings[K]): void };
   ask: (question: string) => Promise<boolean>;
   host: Host;
+  /** Whether a phone relay is set up (BLOB_RELAY). Without one, pairing is not offered. */
+  relay: boolean;
   activityFile: string;
   habitsFile: string;
 }
@@ -30,7 +32,7 @@ export function question(key: typeof CHANGEABLE[number], value: Settings[Key]): 
   if (key === 'model') return value === 'default' ? "Switch to Claude Code's default model?" : `Switch to ${String(value)[0].toUpperCase()}${String(value).slice(1)}?`;
   if (key === 'watching') {
     return value
-      ? 'Start watching to learn your habits? I note the app, window title and website in front. No screenshots, and it stays on this computer.'
+      ? 'Start watching to learn your habits? I note the app, window title and website in front. No screenshots. The notes stay on this computer; I ask before my AI sees which apps and sites you use most.'
       : 'Stop watching?';
   }
   if (key === 'autoShortcuts') return value ? 'Make shortcuts for things you do often?' : 'Stop making shortcuts by myself?';
@@ -83,16 +85,19 @@ export function selfTools(d: SelfDeps) {
       return ok(`${key} is now ${String(value)}.${key === 'model' ? ' It applies from the next request, not this one.' : ''}`);
     },
 
-    habits(): ToolResult {
-      const s = d.settings.get();
-      const { apps, sites } = topActivity(d.activityFile);
-      const tasks = frequentTasks(d.habitsFile);
+    /**
+     * The tasks the user asked Blob for come back as they are. The apps and sites noted while watching are the
+     * user's own doings: nothing of them with watching off, and with it on only after a Yes, asked every time.
+     */
+    async habits(): Promise<ToolResult> {
       const list = (x: string[]) => (x.length ? x.join(', ') : 'nothing noted yet');
-      return {
-        text: `Watching is ${s.watching ? 'on' : 'off'}. Last 14 days, most often in front:\n` +
-          `Apps: ${list(apps)}\nSites: ${list(sites)}\nTasks asked for more than once: ${list(tasks)}`,
-        isError: false,
-      };
+      const tasks = `Tasks asked for more than once: ${list(frequentTasks(d.habitsFile))}`;
+      if (!d.settings.get().watching) return { text: `Watching is off: no apps or sites to tell.\n${tasks}`, isError: false };
+      if (!(await d.ask("Share what you use most with Blob's AI?"))) {
+        return { text: `Watching is on, but the user did not share the apps and sites this time. Do not ask again for this request.\n${tasks}`, isError: false };
+      }
+      const { apps, sites } = topActivity(d.activityFile);
+      return { text: `Watching is on. Last 14 days, most often in front:\nApps: ${list(apps)}\nSites: ${list(sites)}\n${tasks}`, isError: false };
     },
 
     async forget_watching(): Promise<ToolResult> {
@@ -104,8 +109,12 @@ export function selfTools(d: SelfDeps) {
     /** The host asks the user first, with the request's own words and the steps: never a name from the model. */
     save_last_as_shortcut(): Promise<ToolResult> { return viaHost('save_shortcut'); },
 
-    /** The QR is the question: nothing is paired until the user scans it. */
-    pair_phone(): Promise<ToolResult> { return viaHost('pair'); },
+    /** A paired phone can ask Blob for anything, so the user says Yes before the QR shows; then they scan it. */
+    async pair_phone(): Promise<ToolResult> {
+      if (!d.relay) return failed('NOT_SET_UP', "phone pairing isn't set up yet on this computer. Tell the user so, plainly");
+      if (!(await d.ask('Pair a phone with Blob?'))) return NO();
+      return viaHost('pair');
+    },
 
     async unpair_phone(): Promise<ToolResult> {
       if (!d.settings.get().phonePaired) return ok('No phone is paired.');
@@ -126,6 +135,7 @@ export async function serve(): Promise<void> {
     settings: { get: () => { store.reload(); return store.get(); }, set: (k, v) => store.set(k, v) },   // the host writes the file too
     ask: q => askUser(q),
     host: hostCall,
+    relay: !!process.env.BLOB_RELAY,
     activityFile: activityFile(),
     habitsFile: habitsFile(),
   });
@@ -148,10 +158,11 @@ export async function serve(): Promise<void> {
     },
   }, async a => reply(await tools.change_setting(a)));
   server.registerTool('habits', {
-    description: 'A short summary of what Blob has learned on this computer: the apps and sites most often in front, ' +
-      'and tasks asked for more than once. Use it when the user asks about it or when it helps their request.',
+    description: 'A short summary of what Blob has learned on this computer: tasks asked for more than once and, ' +
+      'when watching is on and the user says Yes to sharing it this time, the apps and sites most often in front. ' +
+      'Use it when the user asks about it or when it helps their request.',
     inputSchema: {}, annotations: read,
-  }, async () => reply(tools.habits()));
+  }, async () => reply(await tools.habits()));
   server.registerTool('forget_watching', {
     description: 'Delete everything Blob noted while watching. The user is asked first. It does not turn watching off.',
     inputSchema: {}, annotations: { destructiveHint: true },
@@ -161,7 +172,7 @@ export async function serve(): Promise<void> {
     inputSchema: {},
   }, async () => reply(await tools.save_last_as_shortcut()));
   server.registerTool('pair_phone', {
-    description: 'Show the QR code that pairs the user\'s phone with Blob.', inputSchema: {},
+    description: 'Show the QR code that pairs the user\'s phone with Blob. The user is asked first.', inputSchema: {},
   }, async () => reply(await tools.pair_phone()));
   server.registerTool('unpair_phone', {
     description: 'Unpair the phone. The user is asked first.', inputSchema: {},

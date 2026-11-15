@@ -13,11 +13,13 @@ let file = '';
 let asked: string[] = [];
 let answer = false;
 let hosted: [HostAction, unknown][] = [];
+let relay = true;
 const outcome = (r: { text: string; isError: boolean }) => outcomeOf(r.text, r.isError).outcome;
 const tools = (store = new SettingsStore(file)) => selfTools({
   settings: store,
   ask: async q => { asked.push(q); return answer; },
   host: async (action, body) => { hosted.push([action, body]); return { ok: true, text: `did ${action}` }; },
+  relay,
   activityFile: join(dir, 'activity.jsonl'),
   habitsFile: join(dir, 'habits.json'),
 });
@@ -25,7 +27,7 @@ const tools = (store = new SettingsStore(file)) => selfTools({
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'blob-self-'));
   file = join(dir, 'settings.json');
-  asked = []; hosted = []; answer = false;
+  asked = []; hosted = []; answer = false; relay = true;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -127,23 +129,62 @@ describe('the other self tools', () => {
     writeFileSync(activity, JSON.stringify({ t: Date.now(), app: 'Notepad', title: 'a' }) + '\n');
     expect(outcome(await tools().forget_watching())).toBe('refused');
     expect(existsSync(activity)).toBe(true);
-    expect(tools().habits().text).toMatch(/Notepad \(1×\)/);
     answer = true;
     expect(outcome(await tools().forget_watching())).toBe('confirmed');
     expect(existsSync(activity)).toBe(false);
-    expect(tools().habits().text).toMatch(/Apps: nothing noted yet/);
+  });
+
+  it('habits tells the apps and sites only with watching on, and only after a Yes each time', async () => {
+    const activity = join(dir, 'activity.jsonl');
+    writeFileSync(activity, JSON.stringify({ t: Date.now(), app: 'Notepad', title: 'a', host: 'mail.example.com' }) + '\n');
+    writeFileSync(join(dir, 'habits.json'), JSON.stringify({ runs: [1, 2].map(t => ({ t, request: 'open my inbox', sig: '' })), offered: [] }));
+
+    // Watching off: nothing about apps or sites, though the file has them, and no question. Tasks come back.
+    const off = await tools().habits();
+    expect(off.text).not.toMatch(/Notepad|example\.com/);
+    expect(off.text).toMatch(/open my inbox \(2×\)/);
+    expect(asked).toEqual([]);
+
+    // Watching on: asked first. On No, still nothing about apps or sites.
+    new SettingsStore(file).set('watching', true);
+    const no = await tools().habits();
+    expect(asked).toEqual(["Share what you use most with Blob's AI?"]);
+    expect(no.text).not.toMatch(/Notepad|example\.com/);
+    expect(no.text).toMatch(/open my inbox \(2×\)/);
+
+    // On Yes it comes back, and the next call asks again.
+    answer = true;
+    const yes = await tools().habits();
+    expect(yes.text).toMatch(/Apps: Notepad \(1×\)/);
+    expect(yes.text).toMatch(/Sites: mail\.example\.com \(1×\)/);
+    expect(yes.text).not.toMatch(/"a"|title/);                 // window titles stay on disk
+    await tools().habits();
+    expect(asked).toHaveLength(3);
   });
 
   it('hands shortcuts and pairing to the host; unpair asks first', async () => {
     expect(outcome(await tools().save_last_as_shortcut())).toBe('confirmed');   // the host asks the user, in its own words
-    expect(outcome(await tools().pair_phone())).toBe('confirmed');
-    expect(hosted).toEqual([['save_shortcut', undefined], ['pair', undefined]]);
+    expect(hosted).toEqual([['save_shortcut', undefined]]);
     expect(asked).toEqual([]);
     expect((await tools().unpair_phone()).text).toMatch(/No phone is paired/);
     new SettingsStore(file).set('phonePaired', true);
     expect(outcome(await tools().unpair_phone())).toBe('refused');
     expect(asked).toEqual(['Unpair your phone?']);
-    expect(hosted).toHaveLength(2);
+    expect(hosted).toHaveLength(1);
+  });
+
+  it('pair_phone asks first: no QR without a Yes, and none at all without a relay', async () => {
+    expect(outcome(await tools().pair_phone())).toBe('refused');   // the user said No
+    expect(asked).toEqual(['Pair a phone with Blob?']);
+    expect(hosted).toEqual([]);
+    answer = true;
+    expect(outcome(await tools().pair_phone())).toBe('confirmed');
+    expect(hosted).toEqual([['pair', undefined]]);
+    relay = false;
+    const r = await tools().pair_phone();
+    expect(r.text).toMatch(/NOT_SET_UP.*isn't set up yet/);
+    expect(asked).toHaveLength(2);                                 // not asked about something that can't happen
+    expect(hosted).toHaveLength(1);
   });
 });
 
@@ -157,6 +198,8 @@ describe('persona', () => {
     const on = persona({ ...DEFAULTS, model: 'haiku', watching: true, autoShortcuts: false, phonePaired: true });
     expect(on).toMatch(/model Haiku; watching on; auto-shortcuts off; voice on; phone paired/);
     expect(on).toMatch(/no screenshots/);
+    expect(on).toMatch(/you get it only on Yes/);              // truthful: the summary reaches the model when the user allows it
+    expect(on).not.toMatch(/it stays on this computer/);
     expect(on).toMatch(/do not make shortcuts on your own/);
     expect(on.length).toBeLessThan(2000);
   });

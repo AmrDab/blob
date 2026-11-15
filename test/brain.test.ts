@@ -47,6 +47,9 @@ describe('claude command line', () => {
     expect(isAbsolute(PILL_HOST)).toBe(true);
     expect(PILL_HOST.replace(/\\/g, '/')).toMatch(/\/dist\/pill-host\.mjs$/);
     expect(clawdcursorCommand(host, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'], env });
+    // The file that names Blob's web view processes (they change while clawdcursor runs) goes along when there is one.
+    expect(clawdcursorCommand({ ...host, BLOB_OWN_UI_FILE: '/tmp/blob/own-ui-pids' }, 'linux').env)
+      .toEqual({ ...env, CLAWD_OWN_UI_PIDS_FILE: '/tmp/blob/own-ui-pids' });
     expect(clawdcursorCommand({ ...host, BLOB_CLAWDCURSOR: 'node cli.js mcp' }, 'linux')).toEqual({ command: 'node', args: ['cli.js', 'mcp'], env });
     const files = { command: '/usr/bin/node', args: ['/app/dist/files-mcp.mjs'], env: { BLOB_ASK_URL: 'http://127.0.0.1:1/ask', BLOB_ASK_TOKEN: 't' } };
     expect(JSON.parse(mcpConfig({ files, blob: { command: 'node', args: ['self.mjs'] } }, host, 'linux'))).toEqual({ mcpServers: {

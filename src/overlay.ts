@@ -1,5 +1,5 @@
 // The pill window's native side. It appears while clawdcursor types and clicks, so it must not take the keyboard.
-// On Windows (user32 through koffi) it is left out of screen captures, shown without activating, not activated by
+// It is left out of screen captures. On Windows (user32 through koffi) it is also shown without activating, not activated by
 // a click, and takes the keyboard only while the user types a reply. Elsewhere there is only the window library's
 // own show, hide and content protection: there the pill can take the front when it is shown or clicked.
 import { createRequire } from 'node:module';
@@ -17,18 +17,28 @@ export interface Overlay {
   asksRefocus: boolean;
 }
 
+/**
+ * Leaves a window out of screen captures: what Blob shows (a question, the phone's QR code) is for the person at the
+ * screen, never for a screenshot or OCR the agent takes. False when the system can't do it.
+ */
+export function hideFromCapture(win: BrowserWindow, platform: string = process.platform): boolean {
+  try {
+    if (platform !== 'win32') { win.setContentProtection(true); return true; }
+    const user32 = createRequire(import.meta.url)('koffi').load('user32.dll');
+    const SetWindowDisplayAffinity = user32.func('int __stdcall SetWindowDisplayAffinity(intptr_t hwnd, uint32_t affinity)');
+    return !!SetWindowDisplayAffinity(Number(win.getNativeHandle()), 0x11);   // WDA_EXCLUDEFROMCAPTURE (Windows 10 2004+)
+  } catch { return false; }
+}
+
 export function overlay(win: BrowserWindow, platform: string = process.platform): Overlay {
   const plain: Overlay = { show: () => win.show(), hide: () => win.hide(), keyboard: on => { if (on) win.focus(); }, beep() {}, asksRefocus: platform === 'linux' };
-  if (platform !== 'win32') {
-    try { win.setContentProtection(true); } catch { /* the pill then shows in captures */ }
-    return plain;
-  }
+  hideFromCapture(win, platform);
+  if (platform !== 'win32') return plain;
   const h = Number(win.getNativeHandle());
   const NOACTIVATE = 0x08000000, EXSTYLE = -20;
   try {
     const koffi = createRequire(import.meta.url)('koffi');
     const user32 = koffi.load('user32.dll'), kernel32 = koffi.load('kernel32.dll');
-    const SetWindowDisplayAffinity = user32.func('int __stdcall SetWindowDisplayAffinity(intptr_t hwnd, uint32_t affinity)');
     const GetWindowLongPtrW = user32.func('intptr_t __stdcall GetWindowLongPtrW(intptr_t hwnd, int index)');
     const SetWindowLongPtrW = user32.func('intptr_t __stdcall SetWindowLongPtrW(intptr_t hwnd, int index, intptr_t value)');
     const ShowWindow = user32.func('int __stdcall ShowWindow(intptr_t hwnd, int cmd)');
@@ -42,7 +52,6 @@ export function overlay(win: BrowserWindow, platform: string = process.platform)
       const ex = Number(GetWindowLongPtrW(h, EXSTYLE));
       SetWindowLongPtrW(h, EXSTYLE, on ? ex | NOACTIVATE : ex & ~NOACTIVATE);
     };
-    SetWindowDisplayAffinity(h, 0x11);   // WDA_EXCLUDEFROMCAPTURE (Windows 10 2004+; older Windows ignores it)
     noActivate(true);
     const keeper = focusKeeper(h, platform);   // remembers the user's window, to hand the keyboard back to
     return {

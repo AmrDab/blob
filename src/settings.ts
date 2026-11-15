@@ -29,8 +29,9 @@ export const FIRST_RUN = ['watching', 'voice', 'autoShortcuts'] as const;
 
 export const WHAT: Record<Key, string> = {
   model: 'Which Claude model does the work: default, sonnet, haiku or opus. A change applies from the next request.',
-  watching: 'Learn only: Blob notes which app, window title and website are in front. No screenshots, no page text, ' +
-    'nothing leaves this computer.',
+  watching: 'Learn only: Blob notes which app, window title and website are in front. No screenshots, no page text. ' +
+    'The notes stay on this computer. A short list of the apps and sites you use most goes to Blob\'s AI only when ' +
+    'you say Yes to it, asked each time.',
   autoShortcuts: 'When the same task has worked about 3 times, Blob makes a shortcut for it and asks once whether to keep it.',
   voice: 'Hold the blob and talk. Off means typing only.',
   phonePaired: 'Whether a phone is paired (status only; "pair my phone" shows the QR).',

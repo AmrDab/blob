@@ -47,6 +47,8 @@ function pillEnv(env: NodeJS.ProcessEnv): Record<string, string> | undefined {
   return {
     CLAWD_PILL_CMD: JSON.stringify([process.execPath, PILL_HOST]),
     CLAWD_OWN_UI_PIDS: String(process.pid),     // Blob's windows are clawdcursor's own UI, never a target
+    // ...and so is what its web view draws in them, in processes of its own that come and go (own-ui.ts)
+    ...(env.BLOB_OWN_UI_FILE && { CLAWD_OWN_UI_PIDS_FILE: env.BLOB_OWN_UI_FILE }),
     BLOB_PILL_URL: env.BLOB_PILL_URL, BLOB_PILL_TOKEN: env.BLOB_PILL_TOKEN,
   };
 }
