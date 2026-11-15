@@ -9,7 +9,8 @@ export const MAX_FILE = 16_000;     // characters in the file: remember() refuse
 export const MAX_BRIEF = 4_000;     // characters of it that go into the brief (the newest facts)
 
 const HEADER = "# Blob's memory\n\nOne fact per line. Edit or delete lines as you like.\n\n";
-const SECRET = /\b(pass(word|code|phrase)|pin code|api[ _-]?key|secret|token)s?\b.{0,24}(\bis\b|:|=)/i;
+/** Reads like a password, code or key: never saved. */
+export const SECRET = /\b(pass(word|code|phrase)|pin code|api[ _-]?key|secret|token)s?\b.{0,24}(\bis\b|:|=)/i;
 
 export const memoryFile = (env: NodeJS.ProcessEnv = process.env) => join(blobHome(env), 'memory.md');
 

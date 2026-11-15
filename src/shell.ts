@@ -33,12 +33,19 @@ const SUBS: Record<string, string[]> = {
   winget: ['list', 'search', 'show'],
   brew: ['list', 'search', 'info'],
 };
-/** Programs that are known to answer a version question and do nothing else. */
-const VERSIONED = new Set([
-  'node', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'deno', 'python', 'python3', 'py', 'pip', 'git', 'gh', 'winget', 'brew',
-  'code', 'claude', 'clawdcursor', 'dotnet', 'java', 'go', 'cargo', 'rustc', 'ruby', 'docker', 'tsc', 'ffmpeg', 'pwsh',
-]);
-const VERSION_ARGS = new Set(['--version', '-version', '-v', '-V', 'version']);
+/** The exact flags each program documents for printing its version, and nothing else. (No `npx`, which runs a
+ *  package of that name, and no bare word like `version`, which some programs read as a command.) */
+const VERSION_FLAGS: Record<string, string[]> = {
+  node: ['--version', '-v'], npm: ['--version', '-v'], pnpm: ['--version'], yarn: ['--version'], bun: ['--version'],
+  deno: ['--version'], python: ['--version', '-V'], python3: ['--version', '-V'], py: ['--version'], pip: ['--version', '-V'],
+  git: ['--version'], gh: ['--version'], winget: ['--version', '-v'], brew: ['--version'], code: ['--version'],
+  claude: ['--version'], clawdcursor: ['--version'], dotnet: ['--version'], java: ['-version', '--version'],
+  cargo: ['--version'], rustc: ['--version'], ruby: ['--version'], docker: ['--version'], tsc: ['--version'],
+  ffmpeg: ['-version'], pwsh: ['--version'],
+};
+/** A network or device path (\\server\share, //server, \\?\, a URL) anywhere in an argument: reading one can send the
+ *  user's Windows sign-in to that server, so it is never "only looking". */
+const REMOTE = /\\\\|\/\//;
 
 // Anything that chains, redirects, substitutes or groups, quoted or not; and curly quotes, which PowerShell reads as quotes.
 const WIN_UNSAFE = /[;&<>(){}`$\r\n\u2018-\u201f]/;
@@ -83,7 +90,8 @@ export function classify(command: string, platform: string = process.platform): 
     if (!tokens.length || tokens[0].quoted) return 'ask';     // `a || b`, a trailing pipe, a quoted command name
     const name = win ? tokens[0].text.toLowerCase() : tokens[0].text;
     const args = tokens.slice(1).map(t => t.text);
-    if (args.length === 1 && VERSIONED.has(name) && VERSION_ARGS.has(args[0])) continue;
+    if (args.length === 1 && VERSION_FLAGS[name]?.includes(args[0])) continue;
+    if (args.some(a => REMOTE.test(a))) return 'ask';
     if (SUBS[name]) {
       // the sub-command comes first (no `git -c …`), and nothing writes its output to a file
       if (!SUBS[name].includes(args[0]) || args.some(a => /^(-o|--output)/.test(a))) return 'ask';

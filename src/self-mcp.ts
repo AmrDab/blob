@@ -6,7 +6,7 @@
 import { ASK_TIMEOUT_MS, MAX_DETAIL, askUser } from './ask.ts';
 import type { ToolResult } from './files-mcp.ts';
 import { frequentTasks, habitsFile } from './habits.ts';
-import { facts, forget, matching, memoryBrief, memoryFile, remember } from './memory.ts';
+import { SECRET, facts, forget, matching, memoryBrief, memoryFile, remember } from './memory.ts';
 import { persona } from './persona.ts';
 import { MAX_TEXT, addEntry, describe, loadSchedule, nextDue, parseWhen, removeEntry, scheduleFile, stamp } from './schedule.ts';
 import { CHANGEABLE, DEFAULTS, MODELS, SettingsStore, WHAT, parseValue, type Key, type Settings } from './settings.ts';
@@ -133,8 +133,12 @@ export function selfTools(d: SelfDeps) {
     },
 
     // ── memory (memory.ts) ──
-    /** No question: the user asked for it, and the file stays on this computer. */
-    remember(a: { fact?: unknown }): ToolResult {
+    /** Asked first, with the fact shown: whatever is saved goes into every later request, so a page that tricked the
+     *  AI must not be able to plant it. */
+    async remember(a: { fact?: unknown }): Promise<ToolResult> {
+      const fact = typeof a.fact === 'string' ? a.fact.trim() : '';
+      if (fact && facts(d.memoryFile).some(f => f.toLowerCase() === fact.toLowerCase())) return ok('That is remembered already.');
+      if (fact && !SECRET.test(fact) && !(await d.ask('Remember this?', fact))) return NO();   // a secret is refused below, unasked
       let r;
       try { r = remember(d.memoryFile, a.fact); } catch (e) { return failed('CANT_SAVE', (e as Error).message); }
       if (r === 'empty') return failed('NO_FACT', 'pass the fact to remember, one short sentence');
@@ -255,9 +259,9 @@ export async function serve(): Promise<void> {
   }, async () => reply(await tools.unpair_phone()));
   server.registerTool('remember', {
     description: 'Save one short fact in Blob\'s memory file on this computer: something the user asked to be ' +
-      'remembered, or a lasting preference. Never a password, code or key. No question is asked.',
+      'remembered, or a lasting preference. Never a password, code or key. The user is asked first.',
     inputSchema: { fact: z.string().describe('One short sentence, e.g. "Uses Outlook for mail."') },
-  }, async a => reply(tools.remember(a)));
+  }, async a => reply(await tools.remember(a)));
   server.registerTool('recall', {
     description: 'Everything in Blob\'s memory file, and where the file is.', inputSchema: {}, annotations: read,
   }, async () => reply(tools.recall()));
