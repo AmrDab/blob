@@ -12,7 +12,7 @@ const LINES = [
   ['It does it on your computer.', 'Your own Claude thinks. clawdcursor is its hands.'],
   ['It learns your shortcuts.', 'Do a task three times and it becomes one tap.'],
   ['Just ask it to change.', 'No settings menu. It always asks Yes first.'],
-  ['Private by design.', 'It reads app names, never screenshots. What it learns stays on your computer.'],
+  ['Private by design.', 'It learns from app names, never screenshots. That stays on your computer unless you say Yes.'],
   ['Your phone too.', 'Scan a QR code and ask from your phone.'],
 ];
 const LAST = LINES.length + 1;   // scroll runs 0 (hero) … LAST (how to get it), one step per blob
