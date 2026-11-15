@@ -1,0 +1,29 @@
+{
+  "name": "clawdcursor-talk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A floating bubble for testing clawdcursor by talking to it (local only).",
+  "type": "module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node build.mjs && tsx src/main.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
+    "@webviewjs/webview": "^0.6.0",
+    "liquid-gooey": "^0.2.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
