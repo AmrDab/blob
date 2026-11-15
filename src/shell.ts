@@ -27,9 +27,9 @@ const UNIX_READ = new Set([
 ]);
 /** These change something when they get an argument (`hostname x`, `date -s`): read-only with none. */
 const NO_ARGS = new Set(['hostname', 'date']);
-/** Programs whose listed sub-commands only look. */
+/** Programs whose listed sub-commands only look. (Not git: a repo's own .git/config can make even `git status` run
+ *  a program, e.g. core.fsmonitor, so every git command but `--version` asks.) */
 const SUBS: Record<string, string[]> = {
-  git: ['status', 'log', 'diff', 'show'],
   winget: ['list', 'search', 'show'],
   brew: ['list', 'search', 'info'],
 };

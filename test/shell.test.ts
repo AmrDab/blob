@@ -13,7 +13,7 @@ describe('classify: PowerShell', () => {
     for (const c of [
       'Get-ChildItem', 'ls', 'dir C:\\Users', 'gci -Recurse -Filter *.txt', 'Get-Content notes.txt', 'cat a.txt', 'type a.txt',
       'Select-String -Path *.log -Pattern error', 'Get-Process', 'Get-Process chrome', 'where.exe node', 'Get-Command git',
-      'Test-Path C:\\Temp', 'git status', 'git log --oneline -n 5', 'git diff', 'winget list', 'winget search vlc',
+      'Test-Path C:\\Temp', 'winget list', 'winget search vlc',
       'node --version', 'git --version', 'python -V', 'npm -v', 'whoami', 'hostname', 'Get-Date',
       'GET-CHILDITEM', 'get-content x', '  ls  ',
     ]) expect(win(c), c).toBe('read');
@@ -61,7 +61,7 @@ describe('classify: PowerShell', () => {
 
   it('asks for a look-alike with arguments that change something', () => {
     for (const c of [
-      'git status; git push', 'git -c core.pager=calc log', 'git log --output=x.txt', 'git diff --output x', 'git diff -o x',
+      'git status', 'git log --oneline -n 5', 'git diff', 'git status; git push', 'git -c core.pager=calc log', 'git log --output=x.txt', 'git diff --output x', 'git diff -o x',
       'git', 'winget', 'winget list | winget install x', 'hostname newname', 'sort.exe a /O b', 'node -e "1"', 'node script.js',
       'node --version x', 'evil --version', 'Remove-Item --version', 'C:\\x\\node.exe --version', 'npm version patch',
     ]) expect(win(c), c).toBe('ask');
@@ -71,7 +71,7 @@ describe('classify: PowerShell', () => {
 describe('classify: the login shell (macOS, Linux)', () => {
   it('lets commands that only look run at once', () => {
     for (const c of [
-      'ls -la', 'cat notes.txt', 'grep -r foo .', 'ps aux', 'which node', 'git status', 'git log -3', 'brew list',
+      'ls -la', 'cat notes.txt', 'grep -r foo .', 'ps aux', 'which node', 'brew list',
       'node --version', 'ls ~/Downloads | grep pdf', 'cat "my file.txt" | wc -l', 'ls $HOME', 'date', 'hostname', 'uname -a',
     ]) expect(unix(c), c).toBe('read');
   });
