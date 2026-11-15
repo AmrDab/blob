@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "strict": true,
+    "lib": ["es2023"],
+    "types": ["@cloudflare/workers-types"],
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
