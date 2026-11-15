@@ -21,7 +21,7 @@ export function createRoom(site: string): RoomInfo {
 
 /** The link in the QR. The room and the secret are in the fragment, which browsers never send to a server. The PC's token is not in it. */
 export function qrUrl(r: RoomInfo): string {
-  return `${r.site}/#r=${r.room}&k=${r.secret}`;
+  return `${r.site}/phone/#r=${r.room}&k=${r.secret}`;
 }
 
 /** The QR as an SVG string, in Blob's colours. Shapes only: no text, title or link in it. */

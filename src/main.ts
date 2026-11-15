@@ -35,7 +35,7 @@ const LOGS = join(HOME, 'logs');
 const SHORTCUTS = join(HOME, 'shortcuts.json');
 const PAIR = pairFile();
 // Where the phone relay and the phone page live (https://… or wss://…). Not set: phone pairing isn't set up.
-const RELAY = (process.env.BLOB_RELAY ?? '').trim().replace(/^ws/, 'http').replace(/\/+$/, '');
+const RELAY = (process.env.BLOB_RELAY ?? 'https://theblob.pages.dev').trim().replace(/^ws/, 'http').replace(/\/+$/, '');
 const QR_MS = 2 * 60_000;                           // how long an unscanned QR stays up
 const KEEP_MS = 10 * 60_000;                        // how long the "Keep it?" offer stays up
 const DIST = resolve(import.meta.dirname, '..', 'dist');

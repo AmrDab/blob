@@ -96,9 +96,9 @@ describe('pairing room', () => {
 
   it('puts the room and the secret in the fragment only', () => {
     const url = qrUrl(room);
-    expect(url).toBe(`https://blob-relay.example.workers.dev/#r=${room.room}&k=${room.secret}`);
+    expect(url).toBe(`https://blob-relay.example.workers.dev/phone/#r=${room.room}&k=${room.secret}`);
     const u = new URL(url);
-    expect(u.pathname + u.search).toBe('/');
+    expect(u.pathname + u.search).toBe('/phone/');
     expect(parseFragment(u.hash)).toEqual({ room: room.room, secret: room.secret });
     expect(parseFragment('#r=short&k=short')).toBeNull();
     expect(parseFragment('')).toBeNull();
@@ -125,7 +125,11 @@ class FakeRelay implements Socket {
   close() { this.readyState = 3; }
   say(data: string | ArrayBuffer) { this.onmessage?.({ data }); }
 }
-const tick = () => new Promise(r => setTimeout(r, 15));
+/** Waits until the Pairing has handled every frame it was given (its queue is empty), not for a fixed time. */
+async function settled(p: Pairing): Promise<void> {
+  const q = p as unknown as { line: Promise<unknown> };
+  for (let line; line !== q.line;) await (line = q.line);
+}
 
 describe('the PC side of a pairing', () => {
   let dir = '', file = '';
@@ -143,14 +147,14 @@ describe('the PC side of a pairing', () => {
       .on('phone', on => got.phone.push(on)).on('unpaired', why => got.over.push(why));
     await p.connect();
     relay.say('{"t":"peer","on":true}');
-    await tick();
+    await settled(p);
     const pcHello = relay.sent.find(d => typeof d !== 'string' && isHello(d)) as ArrayBuffer;
     const keys = await pairKeys(room.secret, room.room, 'phone');
     const phoneHello = await keys.hello();
     relay.say(phoneHello);
     const phone = await keys.channel(pcHello);
-    await tick();
-    const from = async (m: PhoneMsg) => { const f = await phone.seal(m); relay.say(f); await tick(); return f; };
+    await settled(p);
+    const from = async (m: PhoneMsg) => { const f = await phone.seal(m); relay.say(f); await settled(p); return f; };
     return { p, relay, got, from, phoneHello, url };
   }
 
@@ -173,12 +177,12 @@ describe('the PC side of a pairing', () => {
   });
 
   it('ignores a hello sent again in the same connection: recorded frames do not open a second time', async () => {
-    const { relay, got, from, phoneHello } = await paired();
+    const { p, relay, got, from, phoneHello } = await paired();
     const frame = await from({ t: 'req', id: 'a', text: 'open notepad' });
     relay.say(phoneHello);                                     // the relay replays the phone's hello...
-    await tick();
+    await settled(p);
     relay.say(frame);                                          // ...and then the request
-    await tick();
+    await settled(p);
     expect(got.requests).toEqual(['open notepad']);            // once
     expect(got.phone).toEqual([true]);                         // and the connection is the same one
   });
@@ -209,7 +213,7 @@ describe('the PC side of a pairing', () => {
     const a = await paired();
     expect(existsSync(file)).toBe(true);
     a.relay.say('{"t":"unpaired"}');
-    await tick();
+    await settled(a.p);
     expect(a.got.over).toEqual(['unpaired']);
     expect(existsSync(file)).toBe(false);
     expect(a.got.phone).toEqual([true, false]);
