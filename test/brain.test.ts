@@ -30,9 +30,9 @@ describe('claude command line', () => {
     const env = { CLAWD_BANNER_THEME: 'blob' };
     expect(clawdcursorCommand({}, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'], env });
     expect(clawdcursorCommand({}, 'darwin')).toEqual({ command: 'clawdcursor', args: ['mcp', '--compact'], env });
-    expect(clawdcursorCommand({ PRONTO_CLAWDCURSOR: 'node "C:/dev x/cli.js" mcp --compact' }, 'linux'))
+    expect(clawdcursorCommand({ BLOB_CLAWDCURSOR: 'node "C:/dev x/cli.js" mcp --compact' }, 'linux'))
       .toEqual({ command: 'node', args: ['C:/dev x/cli.js', 'mcp', '--compact'], env });
-    const files = { command: '/usr/bin/node', args: ['/app/dist/files-mcp.mjs'], env: { PRONTO_ASK_URL: 'http://127.0.0.1:1/ask', PRONTO_ASK_TOKEN: 't' } };
+    const files = { command: '/usr/bin/node', args: ['/app/dist/files-mcp.mjs'], env: { BLOB_ASK_URL: 'http://127.0.0.1:1/ask', BLOB_ASK_TOKEN: 't' } };
     expect(JSON.parse(mcpConfig(files, {}, 'linux'))).toEqual({ mcpServers: {
       clawdcursor: { type: 'stdio', command: 'clawdcursor', args: ['mcp', '--compact'], env },
       files: { type: 'stdio', ...files },
@@ -50,9 +50,9 @@ describe('env', () => {
   it('drops API keys and host-session variables, keeps the rest', () => {
     const env = cleanEnv({
       PATH: '/bin', HOME: '/home/u', ANTHROPIC_API_KEY: 'k', ANTHROPIC_BASE_URL: 'u', CLAUDECODE: '1',
-      CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_OAUTH_TOKEN: 't', CLAUDE_CONFIG_DIR: '/c', PRONTO_CLAWDCURSOR: 'x',
+      CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_OAUTH_TOKEN: 't', CLAUDE_CONFIG_DIR: '/c', BLOB_CLAWDCURSOR: 'x',
     });
-    expect(env).toEqual({ PATH: '/bin', HOME: '/home/u', CLAUDE_CONFIG_DIR: '/c', PRONTO_CLAWDCURSOR: 'x' });
+    expect(env).toEqual({ PATH: '/bin', HOME: '/home/u', CLAUDE_CONFIG_DIR: '/c', BLOB_CLAWDCURSOR: 'x' });
   });
 });
 
@@ -138,7 +138,7 @@ describe('stream-json parsing', () => {
     const p = new StreamParser();
     expect(p.feed(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's',
       mcp_servers: [{ name: 'clawdcursor', status: 'connected' }, { name: 'files', status: 'failed' }] })))
-      .toContainEqual({ type: 'caption', text: "Pronto's file tools are failed." });
+      .toContainEqual({ type: 'caption', text: "Blob's file tools are failed." });
   });
 
   it('splits tool names and labels calls', () => {

@@ -1,5 +1,5 @@
-// Keyboard focus hand-back. Clicking the bubble makes Pronto the window in front, and clawdcursor then refuses keys
-// (the window in front is the app driving it). So Pronto keeps note of the last other window in front and gives the
+// Keyboard focus hand-back. Clicking the bubble makes Blob the window in front, and clawdcursor then refuses keys
+// (the window in front is the app driving it). So Blob keeps note of the last other window in front and gives the
 // front back to it after a click. Windows only for now (user32 through koffi); elsewhere it does nothing.
 import { createRequire } from 'node:module';
 
@@ -30,12 +30,12 @@ export function focusKeeper(own: bigint | number, platform: string = process.pla
       GetCurrentThreadId: kernel32.func('uint32_t __stdcall GetCurrentThreadId()'),
     };
   } catch (e) {
-    console.log(`Pronto: focus hand-back unavailable (${(e as Error).message})`);
+    console.log(`Blob: focus hand-back unavailable (${(e as Error).message})`);
     return NONE;
   }
   const me = Number(own);
   let last = 0;
-  // Every 150 ms: the window in front, when it isn't Pronto. By the time a click reaches the page, Pronto is in front.
+  // Every 150 ms: the window in front, when it isn't Blob. By the time a click reaches the page, Blob is in front.
   const timer = setInterval(() => {
     const h = f.GetForegroundWindow();
     if (h && h !== me) last = h;
@@ -46,7 +46,7 @@ export function focusKeeper(own: bigint | number, platform: string = process.pla
       if (f.GetForegroundWindow() !== me || !last || !f.IsWindow(last)) return;
       if (f.IsIconic(last)) f.ShowWindow(last, 9);   // SW_RESTORE
       if (f.SetForegroundWindow(last) && f.GetForegroundWindow() === last) return;
-      // Windows lets only the app in front hand the front over; Pronto is in front, but if it is still refused,
+      // Windows lets only the app in front hand the front over; Blob is in front, but if it is still refused,
       // join the front window's input queue for a moment.
       const them = f.GetWindowThreadProcessId(f.GetForegroundWindow(), null), self = f.GetCurrentThreadId();
       if (them && them !== self && f.AttachThreadInput(self, them, 1)) {

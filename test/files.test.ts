@@ -20,7 +20,7 @@ const tools = () => fileTools({
 const outcome = (r: { text: string; isError: boolean }) => outcomeOf(r.text, r.isError).outcome;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'pronto-files-'));
+  dir = mkdtempSync(join(tmpdir(), 'blob-files-'));
   asked = []; trashed = []; answer = false;
   writeFileSync(join(dir, 'a.txt'), 'A');
   writeFileSync(join(dir, 'b.txt'), 'B');
@@ -112,7 +112,7 @@ describe('asking the user', () => {
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ question: 'Trash it?' });
   });
 
-  it('is No without Pronto, on an error, or on anything but yes:true', async () => {
+  it('is No without Blob, on an error, or on anything but yes:true', async () => {
     expect(await askUser('q', { url: '', token: '' })).toBe(false);
     const reply = (body: string, status = 200) => (async () => new Response(body, { status })) as unknown as typeof fetch;
     expect(await askUser('q', { url: 'u', token: 't', fetch: reply('{"yes":false}') })).toBe(false);

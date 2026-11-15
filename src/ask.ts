@@ -1,13 +1,13 @@
-// Yes/No questions to the user on the bubble: the files server asks (askUser), Pronto's host shows the card (Questions).
+// Yes/No questions to the user on the bubble: the files server asks (askUser), Blob's host shows the card (Questions).
 
 export const ASK_TIMEOUT_MS = 60_000;
 
-/** Asks through Pronto's local server. False on No, after the timeout, or when Pronto can't be reached. */
+/** Asks through Blob's local server. False on No, after the timeout, or when Blob can't be reached. */
 export async function askUser(question: string, o: {
   url?: string; token?: string; fetch?: typeof fetch; timeoutMs?: number;
 } = {}): Promise<boolean> {
-  const url = o.url ?? process.env.PRONTO_ASK_URL;
-  const token = o.token ?? process.env.PRONTO_ASK_TOKEN;
+  const url = o.url ?? process.env.BLOB_ASK_URL;
+  const token = o.token ?? process.env.BLOB_ASK_TOKEN;
   if (!url || !token) return false;
   try {
     const res = await (o.fetch ?? fetch)(url, {

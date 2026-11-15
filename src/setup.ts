@@ -1,4 +1,4 @@
-// The first-run check: what Pronto needs before it can work, each with the one command that fixes it.
+// The first-run check: what Blob needs before it can work, each with the one command that fixes it.
 // The microphone is checked by the page, the first time Speak is used.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -27,7 +27,7 @@ const run = (command: string, args: string[]) => new Promise<{ ok: boolean; out:
 
 export async function runChecks(platform: string = process.platform): Promise<Check[]> {
   const checks: Check[] = [];
-  // `claude` is started the same way the Brain starts it, so this says whether Pronto can start it.
+  // `claude` is started the same way the Brain starts it, so this says whether Blob can start it.
   const claude = await run('claude', ['--version']);
   checks.push({
     id: 'claude', ok: claude.ok, label: 'Install Claude Code',

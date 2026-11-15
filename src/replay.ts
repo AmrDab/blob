@@ -1,4 +1,4 @@
-// Replays a shortcut: Pronto itself is the MCP client (clawdcursor, and the files server when a step needs it),
+// Replays a shortcut: Blob itself is the MCP client (clawdcursor, and the files server when a step needs it),
 // calling the saved steps in order with no model, and stopping at the first one that doesn't confirm.
 import { outcomeOf, callLabel, cleanEnv, clawdcursorCommand, type ServerCommand } from './brain.ts';
 import type { Step } from './shortcuts.ts';
@@ -38,7 +38,7 @@ export function mcpCaller(files: ServerCommand): { call: Caller; close: () => Pr
     const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
     const cmd: ServerCommand = server === 'clawdcursor' ? clawdcursorCommand() : files;
     const env = Object.fromEntries(Object.entries(cleanEnv()).filter((e): e is [string, string] => typeof e[1] === 'string'));
-    const client = new Client({ name: 'pronto', version: '0.1.0' });
+    const client = new Client({ name: 'blob', version: '0.1.0' });
     await client.connect(new StdioClientTransport({ command: cmd.command, args: cmd.args, env: { ...env, ...cmd.env }, stderr: 'ignore' }));
     return client;
   };

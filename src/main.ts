@@ -3,7 +3,7 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { Application } from '@webviewjs/webview';
@@ -16,7 +16,10 @@ import { ICONS, MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveShortcuts, type Shortcut, type Step } from './shortcuts.ts';
 import { runChecks } from './setup.ts';
 
-const HOME = join(homedir(), '.pronto');
+const HOME = join(homedir(), '.blob');
+// Blob was called Pronto: move its shortcuts and logs over once
+const OLD = join(homedir(), '.pronto');
+if (existsSync(OLD) && !existsSync(HOME)) try { renameSync(OLD, HOME); } catch { /* keep the old folder */ }
 const WORK = join(HOME, 'work');                     // claude's cwd: empty, and the same every time so --resume finds the session
 const LOGS = join(HOME, 'logs');
 const SHORTCUTS = join(HOME, 'shortcuts.json');
@@ -27,7 +30,7 @@ const START = { w: 320, h: 230 };
 const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.woff2': 'font/woff2' };
 
 mkdirSync(WORK, { recursive: true });
-const tmp = mkdtempSync(join(tmpdir(), 'pronto-'));
+const tmp = mkdtempSync(join(tmpdir(), 'blob-'));
 const mcpConfigPath = join(tmp, 'mcp.json');
 const token = randomBytes(24).toString('hex');      // the page's
 const askToken = randomBytes(24).toString('hex');   // the files server's: it can only ask a question
@@ -221,7 +224,7 @@ port = (server.address() as { port: number }).port;
 filesServer = {
   command: process.execPath,
   args: [join(DIST, 'files-mcp.mjs')],
-  env: { PRONTO_ASK_URL: `http://127.0.0.1:${port}/ask`, PRONTO_ASK_TOKEN: askToken },
+  env: { BLOB_ASK_URL: `http://127.0.0.1:${port}/ask`, BLOB_ASK_TOKEN: askToken },
 };
 writeFileSync(mcpConfigPath, mcpConfig(filesServer), { mode: 0o600 });
 brain = new Brain({ mcpConfigPath, cwd: WORK, emit: onBrain });
@@ -230,7 +233,7 @@ sendShortcuts();
 // ── window ───────────────────────────────────────────────────────────────────
 const app = new Application();
 const win = app.createBrowserWindow({
-  title: 'Pronto',
+  title: 'Blob',
   width: START.w, height: START.h, logical: true,
   transparent: true, decorations: false, alwaysOnTop: true,
   resizable: false, maximizable: false, minimizable: false,
@@ -269,7 +272,7 @@ const view = win.createWebview({
   url: `http://127.0.0.1:${port}/?t=${token}`,
   transparent: true,
   webContext,
-  enableDevtools: !!process.env.PRONTO_DEVTOOLS,
+  enableDevtools: !!process.env.BLOB_DEVTOOLS,
   navigationHandler: u => u.startsWith(`http://127.0.0.1:${port}/`),
   newWindowHandler: () => false,
 });
@@ -296,4 +299,4 @@ process.on('SIGINT', quit);
 process.on('SIGTERM', quit);
 process.on('exit', () => brain.stop());
 app.run();
-console.log(`Pronto: http://127.0.0.1:${port} (close the bubble from the taskbar, or Ctrl+C here)`);
+console.log(`Blob: http://127.0.0.1:${port} (close the bubble from the taskbar, or Ctrl+C here)`);

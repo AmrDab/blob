@@ -78,7 +78,7 @@ describe('shortcut store', () => {
   afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 
   it('round-trips, and reads a missing or broken file as empty', () => {
-    dir = mkdtempSync(join(tmpdir(), 'pronto-test-'));
+    dir = mkdtempSync(join(tmpdir(), 'blob-test-'));
     const file = join(dir, 'sub', 'shortcuts.json');
     expect(loadShortcuts(file)).toEqual([]);
     const list: Shortcut[] = [{ id: '1', name: 'Notepad', icon: 'file', pinned: true, steps: [{ server: 'clawdcursor', tool: 'system', args: { action: 'open_app', name: 'Notepad' } }] }];

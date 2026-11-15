@@ -138,7 +138,7 @@ function App() {
     const recorder = new Recorder();
     try { await recorder.start(); } catch (err) {
       const name = (err as Error).name;
-      setMicProblem(name === 'NotFoundError' ? 'No microphone found. Plug one in, then try Speak again.' : `Pronto can't use the microphone (${(err as Error).message}).`);
+      setMicProblem(name === 'NotFoundError' ? 'No microphone found. Plug one in, then try Speak again.' : `Blob can't use the microphone (${(err as Error).message}).`);
       return false;
     }
     setMicProblem(null);
@@ -257,7 +257,7 @@ function App() {
 
   const open = hover || busy || phase === 'recording' || browsing;
   const pinned = shortcuts.filter(s => s.pinned);
-  // While Pronto works only the orb shows: no step-by-step text on the bubble (the Log has it).
+  // While Blob works only the orb shows: no step-by-step text on the bubble (the Log has it).
   const shown = !busy && (caption || phase === 'ask' || phase === 'downloading');
   return (
     <div className="root" data-webview-drag-region="deep"
@@ -278,7 +278,7 @@ function App() {
         {(failing.length > 0 || micProblem) && (
           <Liquid.Item observe>
             <div className="card setup">
-              <div className="title">Before Pronto can work</div>
+              <div className="title">Before Blob can work</div>
               {failing.map(c => (
                 <div key={c.id} className="check">
                   {c.label}: <button className="cmd" title="Click to copy, then run it in a terminal"
@@ -364,7 +364,7 @@ function App() {
           </Liquid.Item>
           <Liquid.Item className="it-small" x={open ? -64 : 0} y={0} transition={T} delay={80}>
             <button className={`blob small${open ? '' : ' shut'}`} aria-label="Shortcuts" onClick={() => {
-              if (!shortcuts.length) setCaption('No shortcuts yet. When every step of a task confirms, Pronto offers to save it.');
+              if (!shortcuts.length) setCaption('No shortcuts yet. When every step of a task confirms, Blob offers to save it.');
               else setBrowsing(v => !v);
               back();
             }}><Icon name={browsing ? 'x' : 'plus'} /></button>

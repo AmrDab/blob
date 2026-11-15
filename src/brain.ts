@@ -1,4 +1,4 @@
-// One run at a time of the user's own `claude -p`, with clawdcursor and Pronto's file tools.
+// One run at a time of the user's own `claude -p`, with clawdcursor and Blob's file tools.
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
@@ -28,7 +28,7 @@ export type Update =
 
 export type BrainEvent = Update | { type: 'busy'; busy: boolean } | { type: 'done'; calls: Call[]; ok: boolean };
 
-/** Claude Code's read-only file tools; changes go through Pronto's files server, which asks before trash/overwrite. */
+/** Claude Code's read-only file tools; changes go through Blob's files server, which asks before trash/overwrite. */
 export const BUILTIN_TOOLS = ['Read', 'Glob', 'Grep'];
 
 export const SYSTEM_PROMPT =
@@ -37,11 +37,11 @@ export const SYSTEM_PROMPT =
   'files tools (list_dir, make_folder, move, trash) to change them, not the desktop. Your final reply is shown as a ' +
   'one-line caption: one or two short plain sentences saying what you did or found, no markdown.';
 
-/** clawdcursor's pill and its "waiting for you" card in Pronto's light blob look (clawdcursor's opt-in theme). */
+/** clawdcursor's pill and its "waiting for you" card in Blob's light blob look (clawdcursor's opt-in theme). */
 const PILL = { CLAWD_BANNER_THEME: 'blob' };
-/** The clawdcursor MCP server command: `clawdcursor mcp --compact`, or PRONTO_CLAWDCURSOR (e.g. a dev build). */
+/** The clawdcursor MCP server command: `clawdcursor mcp --compact`, or BLOB_CLAWDCURSOR (e.g. a dev build). */
 export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): ServerCommand {
-  const raw = env.PRONTO_CLAWDCURSOR?.trim() || 'clawdcursor mcp --compact';
+  const raw = env.BLOB_CLAWDCURSOR?.trim() || 'clawdcursor mcp --compact';
   const parts = (raw.match(/"[^"]*"|\S+/g) ?? []).map(p => p.replace(/^"|"$/g, ''));
   // npm installs clawdcursor as a .cmd shim on Windows, which only cmd can start.
   if (platform === 'win32') return { command: 'cmd', args: ['/c', ...parts], env: PILL };
@@ -50,7 +50,7 @@ export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platfor
 
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
 
-/** The --mcp-config file: clawdcursor and Pronto's files server, nothing else. */
+/** The --mcp-config file: clawdcursor and Blob's files server, nothing else. */
 export function mcpConfig(files: ServerCommand, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
   return JSON.stringify({ mcpServers: {
     clawdcursor: { type: 'stdio', ...clawdcursorCommand(env, platform) },
@@ -148,7 +148,7 @@ export class StreamParser {
       const f = servers.find(x => x?.name === 'files');
       if (!s) out.push({ type: 'caption', text: 'Claude Code started without clawdcursor.' });
       else if (s.status !== 'connected') out.push({ type: 'caption', text: `clawdcursor is ${s.status ?? 'not connected'}.` });
-      else if (f && f.status !== 'connected') out.push({ type: 'caption', text: `Pronto's file tools are ${f.status ?? 'not connected'}.` });
+      else if (f && f.status !== 'connected') out.push({ type: 'caption', text: `Blob's file tools are ${f.status ?? 'not connected'}.` });
       return out;
     }
     if (e?.type === 'assistant' && Array.isArray(e.message?.content)) {

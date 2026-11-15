@@ -1,5 +1,5 @@
 // Shortcuts: a run whose every step confirmed, saved as its ordered tool calls and replayed later with no model.
-// Stored in ~/.pronto/shortcuts.json.
+// Stored in ~/.blob/shortcuts.json.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Call } from './brain.ts';

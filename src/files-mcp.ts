@@ -1,5 +1,5 @@
-// Pronto's files server (stdio MCP): list_dir, make_folder, move (also renames) and trash. Claude Code starts it from
-// the --mcp-config Pronto writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
+// Blob's files server (stdio MCP): list_dir, make_folder, move (also renames) and trash. Claude Code starts it from
+// the --mcp-config Blob writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
 // onto an existing file ask the user on the bubble first (No, or no answer in 60 s, refuses).
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { execFile } from 'node:child_process';
@@ -117,11 +117,11 @@ function windowsTrash(path: string): void {
   if (!shDelete) {
     const koffi = createRequire(import.meta.url)('koffi');
     if (process.arch === 'ia32') throw new Error('32-bit Windows is not supported');
-    const OP = koffi.struct('PRONTO_SHFILEOPSTRUCTW', {
+    const OP = koffi.struct('BLOB_SHFILEOPSTRUCTW', {
       hwnd: 'intptr_t', wFunc: 'uint32_t', pFrom: 'const char16_t *', pTo: 'const char16_t *',
       fFlags: 'uint16_t', fAnyOperationsAborted: 'int32_t', hNameMappings: 'void *', lpszProgressTitle: 'const char16_t *',
     });
-    const fn = koffi.load('shell32.dll').func('int __stdcall SHFileOperationW(_Inout_ PRONTO_SHFILEOPSTRUCTW *op)');
+    const fn = koffi.load('shell32.dll').func('int __stdcall SHFileOperationW(_Inout_ BLOB_SHFILEOPSTRUCTW *op)');
     // FO_DELETE; FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI | FOF_WANTNUKEWARNING
     shDelete = p => {
       const op = { hwnd: 0, wFunc: 3, pFrom: p + '\0', pTo: null, fFlags: 0x40 | 0x10 | 0x4 | 0x400 | 0x4000, fAnyOperationsAborted: 0, hNameMappings: null, lpszProgressTitle: null };
@@ -150,7 +150,7 @@ export async function serve(): Promise<void> {
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const { z } = await import('zod');
   const tools = fileTools({ ask: q => askUser(q), trash: p => osTrash(p) });
-  const server = new McpServer({ name: 'pronto-files', version: '0.1.0' });
+  const server = new McpServer({ name: 'blob-files', version: '0.1.0' });
   const reply = (r: ToolResult) => ({ content: [{ type: 'text' as const, text: r.text }], isError: r.isError });
   const path = z.string().describe('Full path (a leading ~ means the home folder).');
   server.registerTool('list_dir', {

@@ -1,5 +1,5 @@
 // The log: one row per request, tool call and answer. Shown on the Log blob, copied as plain text, and appended to
-// ~/.pronto/logs/YYYY-MM-DD.log. Shared by the host and the page, so it imports nothing from Node.
+// ~/.blob/logs/YYYY-MM-DD.log. Shared by the host and the page, so it imports nothing from Node.
 
 export type LogBody =
   | { kind: 'request'; text: string }

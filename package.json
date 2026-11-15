@@ -1,5 +1,5 @@
 {
-  "name": "pronto",
+  "name": "blob",
   "version": "0.1.0",
   "private": true,
   "description": "A tiny floating bubble: tell your computer what to do, by voice or text. Runs your own Claude Code with clawdcursor as its hands.",
