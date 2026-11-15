@@ -37,7 +37,7 @@ const PAIR = pairFile();
 // Where the phone relay and the phone page live (https://… or wss://…). Not set: phone pairing isn't set up.
 const RELAY = (process.env.BLOB_RELAY ?? '').trim().replace(/^ws/, 'http').replace(/\/+$/, '');
 const QR_MS = 2 * 60_000;                           // how long an unscanned QR stays up
-const KEEP_MS = 10 * 60_000;                        // "Keep it?" waits longer than the other questions
+const KEEP_MS = 10 * 60_000;                        // how long the "Keep it?" offer stays up
 const DIST = resolve(import.meta.dirname, '..', 'dist');
 // A fixed port keeps the page's origin, and so the cached Whisper model, the same across starts; any free port if taken.
 const PORT = 47615;
@@ -203,11 +203,15 @@ async function saveLast(): Promise<{ ok: boolean; text: string }> {
   return { ok: true, text: `Saved "${s.name}"${s.pinned ? ' on the bubble' : '; it can be pinned from the + blob'}.` };
 }
 
-/** The same task worked 3 times (habits.ts): the shortcut is made, and the user is asked once whether to keep it. */
+/**
+ * The same task worked 3 times (habits.ts): the shortcut is made, and the user is offered once to keep it. An offer,
+ * not a question: it never holds up a real one (ask.ts). Only a No removes the shortcut: with no answer it stays, and
+ * can be removed from the + blob.
+ */
 async function propose(p: Proposal): Promise<void> {
   const s = addShortcut(p.name, p.icon, p.steps);
   if (!s) return;
-  if (!(await questions.ask(`I made a shortcut for "${p.name}". Keep it?`, KEEP_MS))) store(shortcuts.filter(x => x.id !== s.id));
+  if ((await questions.offer(`I made a shortcut for "${p.name}". Keep it?`, KEEP_MS)) === false) store(shortcuts.filter(x => x.id !== s.id));
 }
 
 /** A run ended. Only runs are noted, never a shortcut's replay (it does not come through here). */

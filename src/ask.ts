@@ -23,31 +23,61 @@ export async function askUser(question: string, o: {
   } catch { return false; }
 }
 
-/** The host's open questions: each resolves on the user's answer, or No after the timeout. */
+/**
+ * The host's open questions: each resolves on the user's answer, or No after the timeout. An offer ("Keep it?") is not
+ * one of them: it is only up while no question is open, so a question never waits behind it, and it steps aside for
+ * one that arrives and comes back after.
+ */
 export class Questions {
-  private open = new Map<string, { resolve: (yes: boolean) => void; timer: ReturnType<typeof setTimeout> }>();
+  private open = new Map<string, { resolve: (yes: boolean | null) => void; timer: ReturnType<typeof setTimeout>; question: string; offer: boolean }>();
   private next = 1;
+  private offerUp: string | null = null;   // the offer that is shown now
 
   constructor(private o: { show: (id: string, question: string) => void; hide: (id: string) => void; timeoutMs?: number }) {}
 
   /** `timeoutMs`: how long this one waits before it counts as No (the usual 60 s when left out). */
   ask(question: string, timeoutMs: number = this.o.timeoutMs ?? ASK_TIMEOUT_MS): Promise<boolean> {
-    const id = String(this.next++);
-    return new Promise(resolve => {
-      const timer = setTimeout(() => this.answer(id, false), timeoutMs);
-      this.open.set(id, { resolve, timer });
-      this.o.show(id, question);
-    });
+    return this.add(question, timeoutMs, false).then(yes => yes === true);
+  }
+
+  /** An offer: the user's Yes or No, or null when they did not answer in `timeoutMs`. */
+  offer(question: string, timeoutMs: number): Promise<boolean | null> {
+    return this.add(question, timeoutMs, true);
   }
 
   /** The user's click; false when that question is already closed. */
   answer(id: string, yes: boolean): boolean {
+    return this.close(id, yes);
+  }
+
+  private add(question: string, timeoutMs: number, offer: boolean): Promise<boolean | null> {
+    const id = String(this.next++);
+    return new Promise(resolve => {
+      const timer = setTimeout(() => this.close(id, null), timeoutMs);
+      this.open.set(id, { resolve, timer, question, offer });
+      this.placeOffer();
+      if (!offer) this.o.show(id, question);
+    });
+  }
+
+  private close(id: string, yes: boolean | null): boolean {
     const q = this.open.get(id);
     if (!q) return false;
     this.open.delete(id);
     clearTimeout(q.timer);
-    this.o.hide(id);
+    if (!q.offer) this.o.hide(id);
     q.resolve(yes);
+    this.placeOffer();
     return true;
+  }
+
+  /** The oldest offer is up while no question is open; otherwise none is. */
+  private placeOffer(): void {
+    const all = [...this.open];
+    const want = all.some(([, q]) => !q.offer) ? null : all.find(([, q]) => q.offer)?.[0] ?? null;
+    if (want === this.offerUp) return;
+    if (this.offerUp) this.o.hide(this.offerUp);
+    this.offerUp = want;
+    if (want) this.o.show(want, this.open.get(want)!.question);
   }
 }

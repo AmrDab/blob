@@ -140,4 +140,40 @@ describe('asking the user', () => {
       expect(q.answer('2', true)).toBe(false);           // too late
     } finally { vi.useRealTimers(); }
   });
+
+  it('an offer never holds up a question: it steps aside, comes back after, and no answer is not a No', async () => {
+    vi.useFakeTimers();
+    try {
+      let up: string[] = [];                             // what the bubble shows, oldest first
+      const q = new Questions({ show: (id, text) => up.push(`${id}:${text}`), hide: id => { up = up.filter(x => !x.startsWith(`${id}:`)); } });
+      const keep = q.offer('Keep it?', 600_000);
+      expect(up).toEqual(['1:Keep it?']);
+      const trash = q.ask('Trash a.txt?');               // a file question behind the offer
+      const replace = q.ask('Replace b.txt?');
+      expect(up).toEqual(['2:Trash a.txt?', '3:Replace b.txt?']);   // the questions, in order; the offer is out of their way
+      expect(q.answer('2', true)).toBe(true);
+      expect(await trash).toBe(true);
+      expect(up).toEqual(['3:Replace b.txt?']);
+      vi.advanceTimersByTime(60_000);                    // an unanswered question is still No
+      expect(await replace).toBe(false);
+      expect(up).toEqual(['1:Keep it?']);                // back once no question is open
+      vi.advanceTimersByTime(540_000);                   // 10 minutes since it was made
+      expect(await keep).toBeNull();
+      expect(up).toEqual([]);
+
+      const no = q.offer('Keep it?', 600_000);
+      const second = q.offer('Keep that?', 600_000);     // one offer at a time
+      expect(up).toEqual(['4:Keep it?']);
+      expect(q.answer('4', false)).toBe(true);
+      expect(await no).toBe(false);
+      expect(up).toEqual(['5:Keep that?']);
+      const asked = q.ask('Trash c.txt?');
+      expect(up).toEqual(['6:Trash c.txt?']);
+      expect(q.answer('5', true)).toBe(true);            // a click that was already on its way to the offer still counts for it
+      expect(await second).toBe(true);
+      q.answer('6', false);
+      expect(await asked).toBe(false);
+      expect(up).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
 });

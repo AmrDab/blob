@@ -1,5 +1,5 @@
 // Frequent tasks become shortcuts. Each finished run is noted in ~/.blob/habits.json; when the same steps have
-// worked 3 times, record() hands back a proposal and the host builds the shortcut, pins it and asks "Keep it?" once.
+// worked 3 times, record() hands back a proposal and the host builds the shortcut, pins it and offers "Keep it?" once.
 // What can be saved is decided by shortcuts.ts (saveOffer); nothing here repeats those rules.
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
