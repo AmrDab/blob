@@ -1,0 +1,39 @@
+/* Inter (variable, latin) */
+@font-face { font-family: "Inter"; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url(fonts/inter-latin-wght-normal.woff2) format("woff2-variations"); }
+html, body { margin: 0; background: #fff; overflow-x: hidden; }
+body { font: 450 15px/1.4 "Inter", system-ui, sans-serif; letter-spacing: -0.008em; color: #1c1c1e;
+  -webkit-font-smoothing: antialiased; }
+
+/* the stage stays put; the track behind it is what scrolls */
+.track { height: 900vh; }
+.stage { position: fixed; inset: 0; overflow: hidden; }
+.goo { width: 100%; height: 100%; }
+.b { position: absolute; left: 0; top: 0; will-change: translate; }
+
+/* one line per blob */
+.txt, .get, .ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; }
+h2 { margin: 0 0 6px; font-size: 19px; line-height: 1.2; font-weight: 650; letter-spacing: -0.02em; }
+p { margin: 0; }
+.txt p { font-size: 14px; opacity: .72; }
+
+/* the hero: the app's Speak blob, breathing */
+.hero { animation: breathe 4.4s ease-in-out infinite alternate; }
+@keyframes breathe { to { scale: calc(1 + .06 * var(--breath, 1)); } }
+.ring { pointer-events: none; }
+.ring > * { display: block; }
+.mark { position: fixed; left: 0; right: 0; text-align: center; font-weight: 600; letter-spacing: -0.02em; pointer-events: none; }
+.hint { position: fixed; left: 0; right: 0; bottom: 28px; text-align: center; font-size: 12px; pointer-events: none; }
+
+/* the last blob: how to get it */
+pre { margin: 10px 0 12px; padding: 12px 14px; border-radius: 16px; background: rgba(28, 28, 30, .06); text-align: left;
+  font: 12.5px/1.6 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+a { color: inherit; font-weight: 600; text-underline-offset: 3px; }
+.get small { display: block; margin-top: 8px; font-size: 12px; opacity: .55; }
+
+/* reduced motion: the same blobs, still, one under the other */
+.calm .track { display: none; }
+.calm .stage { position: static; overflow: visible; }
+.calm .goo { height: auto; display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 18vh 0 96px; }
+.calm .b { position: relative; flex: none; }
+.calm .mark { position: static; margin-top: -8px; }

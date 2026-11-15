@@ -8,6 +8,7 @@
   "scripts": {
     "build": "node build.mjs",
     "build:phone": "node phone/build.mjs",
+    "build:site": "node site/build.mjs",
     "check:phone": "tsc -p phone && tsc -p relay",
     "start": "node build.mjs && tsx src/main.ts",
     "test": "vitest run"
