@@ -162,6 +162,8 @@ const RUNS = /\.(exe|msi|msix|appx|bat|cmd|ps1|vbs|js|scr|lnk)$|\bsetup\b/i;
 const GUARD = /security warning|smartscreen|protected view|unknown publisher|protected your pc|macros have been disabled|potentially (?:harmful|unsafe)|blocked content/i;
 /** An item in a folder window or on the desktop: Explorer hides extensions, so its name can't tell a file that runs. */
 const folderItem = (m: Meta) => /^explorer$/i.test(m.app) && (m.role === 'ListItem' || m.role === 'DataItem');
+/** Explorer's own Open (toolbar, menu, split button, "Open with"): it opens the selected item, which may be a program. */
+const explorerOpens = (m: Meta) => /^explorer$/i.test(m.app) && /\bopen\b/i.test(m.name);
 const ASKS: Record<string, string> = { toggle: 'Switch', select: 'Select', expand: 'Open' };
 const DID: Record<string, string> = { press: 'Pressed', set: 'Set', toggle: 'Switched', select: 'Selected', expand: 'Expanded', collapse: 'Collapsed' };
 
@@ -188,7 +190,8 @@ export function refusal(step: Step, m: Meta | undefined, own: Set<number>): Tool
 /**
  * The Yes card a step needs, or null. A press asks when the model marked it, when it opens a link or a file that
  * runs (any item in a folder window: Explorer hides extensions), when its name, tooltip or id says what it does,
- * when its window is a security prompt, or when it is a bare OK, Yes or No in a window whose title or text does. A toggle and a select ask when marked or by their name, tooltip or id; an expand only when marked.
+ * when it is Explorer's Open, or when it is a bare OK, Yes or No in a window whose title or text does. Any step but
+ * a set or collapse asks in a security prompt. A toggle and a select ask when marked or by their name, tooltip or id; an expand only when marked.
  * A set asks when it would replace text in the field the user is in. `fg`: the window in front. The words are
  * Blob's; the app's are cut short.
  */
@@ -199,12 +202,12 @@ export function needsYes(step: Step, m: Meta, fg?: number): { question: string; 
   const press = step.action === 'press';
   if (press && m.role === 'Hyperlink') return { question: `Open the link "${name}" in ${app}?`, ...(m.value && { detail: flat(m.value, 600) }) };
   const question = `${ASKS[step.action] ?? 'Press'} "${name || m.role}" in ${app}?`;
+  const box = `${m.windowTitle} ${m.windowText}`;
+  if (GUARD.test(box)) return { question, detail: flat(box, 200) };
   // deleteButton: delete Button; SENDButton: SEND Button; delete2: delete 2
   const words = m.aid.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Za-z])(\d)/g, '$1 $2').replace(/[_.-]+/g, ' ');
   const says = CONSEQUENTIAL.test(m.name) || CONSEQUENTIAL.test(m.help) || CONSEQUENTIAL.test(words);
-  if (step.consequential === true || (says && step.action !== 'expand') || (press && (RUNS.test(m.name.trim()) || folderItem(m)))) return { question };
-  const box = `${m.windowTitle} ${m.windowText}`;
-  if (press && GUARD.test(box)) return { question, detail: flat(box, 200) };
+  if (step.consequential === true || (says && step.action !== 'expand') || (press && (RUNS.test(m.name.trim()) || folderItem(m) || explorerOpens(m)))) return { question };
   if (press && (!m.name.trim() || GENERIC.test(m.name.trim())) && (CONSEQUENTIAL.test(box) || LOSES.test(box))) return { question, detail: flat(box, 200) };
   return null;
 }

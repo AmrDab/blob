@@ -268,6 +268,13 @@ describe('the Yes card', () => {
     for (const box of [{ windowTitle: 'Open File - Security Warning' }, { windowTitle: 'Windows protected your PC' }, { windowTitle: 'Book1 - Excel', windowText: 'PROTECTED VIEW Be careful' },
       { windowTitle: 'Word', windowText: 'SECURITY WARNING Macros have been disabled.' }]) expect(card({ name: 'More info', ...box }), box.windowTitle).toEqual({ question: 'Press "More info" in Notepad?', detail: expect.any(String) });
     for (const name of ['Run', 'Enable Content', 'Enable Editing', 'Keep', 'Trust', 'Open anyway']) expect(card({ name }), name).not.toBeNull();
+    // not only a press: a box ticked or an option picked in a security prompt asks too
+    for (const action of ['toggle', 'select', 'expand']) expect(card({ name: 'Always ask', windowTitle: 'Open File - Security Warning' }, { action }), action).not.toBeNull();
+  });
+
+  it('asks before Explorer\'s own Open, which opens the selected item', () => {
+    for (const [role, name] of [['Button', 'Open'], ['MenuItem', 'Open with'], ['SplitButton', 'Open']]) expect(card({ app: 'explorer', role, name }), name).not.toBeNull();
+    expect(card({ role: 'Button', name: 'Open' })).toBeNull();                              // another app's Open is judged as before
   });
 
   it('asks before a bare OK when the window\'s title says what it does, and shows the title', () => {
