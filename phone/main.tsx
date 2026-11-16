@@ -50,13 +50,23 @@ const OVER: Record<Over, string> = {
 // The phone browser's speech recognition (Chrome, Safari). Without it the page is typed only.
 const Recognition: (new () => any) | undefined = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
 
-function say(text: string, onEnd?: () => void) {
-  if (!('speechSynthesis' in window)) return onEnd?.();
+/** Reads text aloud; `on` hears true when the voice really starts and false when it ends. */
+function say(text: string, on?: (speaking: boolean) => void) {
+  if (!('speechSynthesis' in window)) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = navigator.language;
-  u.onend = u.onerror = () => onEnd?.();
+  u.onstart = () => on?.(true);
+  u.onend = u.onerror = () => on?.(false);
   speechSynthesis.speak(u);
+}
+// iOS Safari stays silent until one speak() has run inside a tap: the first tap anywhere says nothing, once.
+if ('speechSynthesis' in window) {
+  const unlock = () => {
+    speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+    removeEventListener('touchend', unlock); removeEventListener('click', unlock);
+  };
+  addEventListener('touchend', unlock); addEventListener('click', unlock);
 }
 
 const Keys = () => <svg viewBox="0 0 24 24" width="24" height="24"><rect x="3" y="6" width="18" height="12" rx="2.5" /><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8" /></svg>;
@@ -96,8 +106,7 @@ function App() {
       else setMode(v => (v === 'working' ? 'ready' : v));
     } else if (m.t === 'answer') {
       setMode('answer'); setAnswer(m.text); setNote('');
-      setSpeaking(true);
-      say(m.text, () => setSpeaking(false));
+      say(m.text, setSpeaking);
     } else if (m.t === 'ask') {
       setAsk(m);
       if (m.input) setTyping(true);
@@ -166,7 +175,7 @@ function App() {
 
   function listen() {
     if (!Recognition) { setTyping(true); return; }
-    speechSynthesis?.cancel();
+    window.speechSynthesis?.cancel();
     setSpeaking(false);
     const r = rec.current = new Recognition();
     let said = '';
@@ -210,7 +219,7 @@ function App() {
     if (!ask) return;
     send({ t: 'reply', id: ask.id, ...r });
     setAsk(null);
-    speechSynthesis?.cancel();
+    window.speechSynthesis?.cancel();
   }
 
   function submit(e: FormEvent) {
@@ -255,6 +264,7 @@ function App() {
         {!over && open && <button className="unpair" onClick={unpair}>{sure ? 'Tap again to unpair' : 'Unpair'}</button>}
       </header>
 
+      <div className="mid">
       <div className={`words${mode === 'working' && !ask && live ? ' dim' : ''}`}><p className={!!heard && words === heard ? 'you' : undefined}>{words}</p></div>
 
       <Liquid {...GOO} className="goo" style={{ height: gooH }}>
@@ -286,6 +296,7 @@ function App() {
           </button>
         </Liquid.Item>
       </Liquid>
+      </div>
 
       <p className="hint">{hint}</p>
 

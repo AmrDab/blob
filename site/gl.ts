@@ -51,24 +51,28 @@ void main() {
 export function startLiquid(canvas: HTMLCanvasElement, read: () => Scene): (() => void) | null {
   const gl = canvas.getContext('webgl', { premultipliedAlpha: true, antialias: false, alpha: true });
   if (!gl) return null;
-  const prog = gl.createProgram()!;
-  for (const [type, src] of [[gl.VERTEX_SHADER, VERT], [gl.FRAGMENT_SHADER, FRAG]] as const) {
-    const sh = gl.createShader(type)!;
-    gl.shaderSource(sh, src);
-    gl.compileShader(sh);
-    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) { console.warn(gl.getShaderInfoLog(sh)); return null; }
-    gl.attachShader(prog, sh);
-  }
-  gl.bindAttribLocation(prog, 0, 'p');
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
-  gl.useProgram(prog);
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);   // one big triangle
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  const U = (name: string) => gl.getUniformLocation(prog, name);
-  const uRes = U('uRes'), uPx = U('uPx'), uTime = U('uTime'), uHero = U('uHero'), uHeroR = U('uHeroR'), uBlob = U('uBlob'), uGloss = U('uGloss');
+  let u: Record<string, WebGLUniformLocation | null> = {};
+  const build = () => {   // the program and its buffer: again after the browser gives a lost context back
+    const prog = gl.createProgram()!;
+    for (const [type, src] of [[gl.VERTEX_SHADER, VERT], [gl.FRAGMENT_SHADER, FRAG]] as const) {
+      const sh = gl.createShader(type)!;
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) { console.warn(gl.getShaderInfoLog(sh)); return false; }
+      gl.attachShader(prog, sh);
+    }
+    gl.bindAttribLocation(prog, 0, 'p');
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return false;
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);   // one big triangle
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    u = Object.fromEntries(['uRes', 'uPx', 'uTime', 'uHero', 'uHeroR', 'uBlob', 'uGloss'].map(n => [n, gl.getUniformLocation(prog, n)]));
+    return true;
+  };
+  if (!build()) return null;
   const blobs = new Float32Array(N * 3);
   let raf = 0;
   const draw = (ms: number) => {
@@ -82,15 +86,20 @@ export function startLiquid(canvas: HTMLCanvasElement, read: () => Scene): (() =
     const { hero, blobs: bs, breath } = read(), t = ms / 1000;
     const swell = 1 + .03 * Math.sin(t * 1.3) * breath;               // the hero breathes
     bs.forEach((b, i) => blobs.set([b.x, b.y, b.w / 2], i * 3));
-    gl.uniform2f(uRes, canvas.width, canvas.height);
-    gl.uniform1f(uPx, px);
-    gl.uniform1f(uTime, t);
-    gl.uniform4f(uHero, hero.x, hero.y, hero.w / 2 * swell, hero.h / 2 * swell);
-    gl.uniform1f(uHeroR, hero.r * swell);
-    gl.uniform1f(uGloss, .12 + .88 * breath);                           // the last card is calmer
-    gl.uniform3fv(uBlob, blobs);
+    gl.uniform2f(u.uRes, canvas.width, canvas.height);
+    gl.uniform1f(u.uPx, px);
+    gl.uniform1f(u.uTime, t);
+    gl.uniform4f(u.uHero, hero.x, hero.y, hero.w / 2 * swell, hero.h / 2 * swell);
+    gl.uniform1f(u.uHeroR, hero.r * swell);
+    gl.uniform1f(u.uGloss, .12 + .88 * breath);                         // the last card is calmer
+    gl.uniform3fv(u.uBlob, blobs);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
   raf = requestAnimationFrame(draw);
-  return () => cancelAnimationFrame(raf);
+  // iOS Safari drops the context under memory pressure or in a background tab: stop, and start again when it is back.
+  const lost = (e: Event) => { e.preventDefault(); cancelAnimationFrame(raf); };
+  const back = () => { if (build()) raf = requestAnimationFrame(draw); };
+  canvas.addEventListener('webglcontextlost', lost);
+  canvas.addEventListener('webglcontextrestored', back);
+  return () => { cancelAnimationFrame(raf); canvas.removeEventListener('webglcontextlost', lost); canvas.removeEventListener('webglcontextrestored', back); };
 }

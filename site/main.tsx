@@ -33,23 +33,24 @@ const place = (b: Box): CSSProperties =>
 
 /** Every blob's box at scroll step s, in a w × h window. */
 function layout(s: number, w: number, h: number) {
-  const narrow = w < 1020;
-  const D = narrow ? 132 : 208;                       // the hero
-  const S = narrow ? Math.min(304, w - 36) : 328;     // a blob with a line in it
-  const GAP = narrow ? 40 : 52;                       // between the hero and the blob it is showing
+  const short = w < 1020 && h < 520 && w > h;         // a phone on its side: side by side like the wide page, sized to the height
+  const narrow = w < 1020 && !short;
+  const D = short ? 96 : narrow ? 132 : 208;          // the hero
+  const S = short ? Math.min(304, h - 40) : narrow ? Math.min(304, w - 36) : 328;   // a blob with a line in it
+  const GAP = short ? 24 : narrow ? 40 : 52;          // between the hero and the blob it is showing
   const end = span(s, LAST - 0.6, LAST);              // everything flows back into one
   const settle = span(s, 0.1, 0.8) * (1 - end);       // the hero makes room for the blob it is showing
-  const cx = w / 2 - (narrow ? 0 : (GAP + S) / 2 * settle);
+  const cx = Math.max(w / 2 - (narrow ? 0 : (GAP + S) / 2 * settle), short ? 166 * settle : 0);   // short: the droplets stay clear of the wordmark
   const top = h / 2 - (narrow ? 44 : 56);             // the first screen: the tagline sits under the hero
   const cy = mix(mix(top, narrow ? h / 2 + 18 - (GAP + S) / 2 : h / 2, settle), h / 2, end);
-  const card = { w: Math.min(480, w - 28), h: 348 };
-  const hero: Box = { x: cx, y: cy - 14 * end, w: mix(D, card.w, end), h: mix(D, card.h, end), r: mix(D / 2, 56, end) };
+  const card = { w: Math.min(480, w - 28), h: short ? h - 76 : 348 };   // short: from under the bar to the bottom edge
+  const hero: Box = { x: cx, y: cy + (short ? 20 : -14) * end, w: mix(D, card.w, end), h: mix(D, card.h, end), r: mix(D / 2, 56, end) };
   const blobs = LINES.map((_, k) => {
     const i = k + 1;
     const out = span(s, i - 0.75, i - 0.2);           // buds off the hero
     const back = span(s, i + 0.2, i + 0.7);           // read: shrinks into a droplet
     const side = k % 2 ? -1 : 1;
-    const slot = narrow ? { x: side * 10, y: D / 2 + GAP + S / 2 } : { x: D / 2 + GAP + S / 2, y: side * ((k % 3) - 1) * 26 };
+    const slot = narrow ? { x: side * 10, y: D / 2 + GAP + S / 2 } : { x: D / 2 + GAP + S / 2, y: short ? 0 : side * ((k % 3) - 1) * 26 };
     const [deg, d, far] = (narrow ? DROPS_NARROW : DROPS_WIDE)[k];
     const reach = D / 2 + 30 + d / 2 + far, a = deg * Math.PI / 180;
     const size = mix(mix(40, S, out), d, back);
@@ -60,13 +61,14 @@ function layout(s: number, w: number, h: number) {
     };
     return { box, text: span(s, i - 0.4, i - 0.12) * (1 - span(s, i + 0.12, i + 0.36)) };
   });
-  return { D, S, hero, blobs, end, card, top };
+  return { D, S, hero, blobs, end, card, top, short };
 }
 
 function useWindow() {
   const read = () => {
-    const max = document.documentElement.scrollHeight - innerHeight;
-    return { w: document.documentElement.clientWidth, h: innerHeight, s: max > 0 ? clamp(scrollY / max) * LAST : 0 };
+    // iOS Safari: clientHeight and the track's 100vh steps stay the same while the toolbar slides in and out (innerHeight does not).
+    const { clientWidth: w, clientHeight: h, scrollHeight } = document.documentElement;
+    return { w, h, s: clamp(scrollY / (scrollHeight * LAST / (LAST + 1))) * LAST };
   };
   const [v, set] = useState(read);
   useEffect(() => {
@@ -168,33 +170,29 @@ const Foot = ({ style }: { style?: CSSProperties }) => (
 function Get({ on, calm }: { on: boolean; calm: boolean }) {
   return <>
     <Display as="h2" text="Get theblob" on={on} calm={calm} />
-    <pre>{`git clone ${REPO}\ncd blob\nnpm install\nnpm start`}</pre>
+    <pre>{[`git clone ${REPO}`, 'cd blob', 'npm install', 'npm start'].map(c => <span key={c}>{c}</span>)}</pre>{/* one block per command: one that wraps hangs in */}
     <a className="cta" href={REPO}>Open on GitHub</a>
     <small>Needs Node.js 20 or newer.</small>
   </>;
 }
 
-/** Reduced motion: the same blobs, still, one under the other. */
+/** Reduced motion, or a phone without WebGL: the same blobs, still, one under the other. Nothing merges here, so they are
+    plain shapes: a goo filter as tall as this page is over WebKit's size limit on a 3x phone, and draws nothing. */
 function Calm({ w, h }: { w: number; h: number }) {
   const { D, S, card } = layout(0, w, h);
-  const round = (d: number) => ({ width: d, height: d, borderRadius: d / 2 });
+  const lit = { background: GOO.fill, boxShadow: SHADOW };
+  const round = (d: number) => ({ ...lit, width: d, height: d, borderRadius: d / 2 });
   return (
     <div className="calm">
       <Bar calm />
-      <Liquid {...GOO} shadow={SHADOW} className="goo">
-        <Liquid.Item observe>
-          <div className="b" style={round(D)}><span className="ring"><Ring size={D * 1.5} paused /></span></div>
-        </Liquid.Item>
+      <div className="goo">
+        <div className="b" style={round(D)}><span className="ring"><Ring size={D * 1.5} paused /></span></div>
         <Display as="h1" text="Say it. It’s done." on calm />
         {LINES.map((_, k) => (
-          <Liquid.Item observe key={k}>
-            <div className="b" style={round(S)}><div className="txt" style={{ width: S * 0.66 }}><Line k={k} on calm /></div></div>
-          </Liquid.Item>
+          <div className="b" key={k} style={round(S)}><div className="txt" style={{ width: S * 0.66 }}><Line k={k} on calm /></div></div>
         ))}
-        <Liquid.Item observe>
-          <div className="b" style={{ width: card.w, height: card.h, borderRadius: 56 }}><div className="get" style={{ width: card.w - (w < 1020 ? 48 : 64) }}><Get on calm /></div></div>
-        </Liquid.Item>
-      </Liquid>
+        <div className="b" style={{ ...lit, width: card.w, height: card.h, borderRadius: 56 }}><div className="get" style={{ width: card.w - (w < 1020 ? 48 : 64) }}><Get on calm /></div></div>
+      </div>
       <Foot />
     </div>
   );
@@ -202,21 +200,21 @@ function Calm({ w, h }: { w: number; h: number }) {
 
 function Site() {
   const { w, h, s } = useWindow();
-  const calm = useCalm();
   const [gl, setGl] = useState(() => !new URLSearchParams(location.search).has('goo'));   // ?goo shows the 2D fallback
+  const still = useCalm() || (!gl && matchMedia('(pointer: coarse)').matches);   // the moving 2D goo is too slow for a phone
   const canvas = useRef<HTMLCanvasElement>(null);
   const scene = useRef<Scene>(null!);
   const L = layout(s, w, h);
   scene.current = { hero: L.hero, blobs: L.blobs.map(b => b.box), breath: 1 - L.end };
   useEffect(() => {
-    if (calm || !gl || !canvas.current) return;
+    if (still || !gl || !canvas.current) return;
     const stop = startLiquid(canvas.current, () => scene.current);
     if (!stop) setGl(false);   // no WebGL: the 2D goo
     return stop ?? undefined;
-  }, [calm, gl]);
-  if (calm) return <><Defs /><Calm w={w} h={h} /></>;
+  }, [still, gl]);
+  if (still) return <><Defs /><Calm w={w} h={h} /></>;
 
-  const { D, S, hero, blobs, end, card } = L;
+  const { D, S, hero, blobs, end, card, short } = L;
   const items: ReactElement[] = LINES.map((_, k) => {
     return (
       <div className="b" key={k} style={place(blobs[k].box)}>
@@ -240,7 +238,7 @@ function Site() {
           : <Liquid {...GOO} shadow={SHADOW} className="goo">{items.map(el => <Liquid.Item observe key={el.key}>{el}</Liquid.Item>)}</Liquid>}
         <Display as="h1" text="Say it. It’s done." on={s < 0.18} calm={false} style={{ top: L.top + D / 2 + (w < 1020 ? 34 : 44), opacity: clamp(3 - 3 * span(s, 0, 0.35)) }} />
         <p className="hint" style={{ opacity: 1 - span(s, 0, 0.2) }}>Scroll</p>
-        <Foot style={{ opacity: span(end, 0.6, 1), visibility: end > 0.6 ? 'visible' : 'hidden' }} />
+        <Foot style={{ opacity: span(end, 0.6, 1), visibility: end > 0.6 && !short ? 'visible' : 'hidden' }} />
       </div>
       <div className="track" />
     </>
