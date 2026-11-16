@@ -255,7 +255,7 @@ function App() {
         {!over && open && <button className="unpair" onClick={unpair}>{sure ? 'Tap again to unpair' : 'Unpair'}</button>}
       </header>
 
-      <div className={`words${mode === 'working' && !ask && live ? ' dim' : ''}`}><p>{words}</p></div>
+      <div className={`words${mode === 'working' && !ask && live ? ' dim' : ''}`}><p className={!!heard && words === heard ? 'you' : undefined}>{words}</p></div>
 
       <Liquid {...GOO} className="goo" style={{ height: gooH }}>
         <Liquid.Item className="it-side" x={side && mode !== 'working' && Recognition ? -128 : 0} y={side && mode !== 'working' && Recognition ? 70 : 0} transition={T}>

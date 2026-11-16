@@ -49,10 +49,7 @@ await build({
 cpSync('src/ui/index.html', 'dist/index.html');
 cpSync('src/ui/pill.html', 'dist/pill.html');
 cpSync('src/ui/style.css', 'dist/style.css');
-mkdirSync('dist/fonts', { recursive: true });
-for (const f of ['inter-latin-wght-normal.woff2', 'inter-latin-ext-wght-normal.woff2']) {
-  cpSync(`node_modules/@fontsource-variable/inter/files/${f}`, `dist/fonts/${f}`);
-}
+cpSync('site/fonts', 'dist/fonts', { recursive: true });   // Fraunces, Geist, Geist Mono (latin + latin-ext) and their licence: the website's own
 for (const f of ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm']) {
   cpSync(`node_modules/onnxruntime-web/dist/${f}`, `dist/ort/${f}`);
 }

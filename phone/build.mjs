@@ -21,6 +21,4 @@ await build({
 });
 cpSync(join(here, 'index.html'), join(out, 'index.html'));
 cpSync(join(here, 'style.css'), join(out, 'style.css'));
-for (const f of ['inter-latin-wght-normal.woff2', 'inter-latin-ext-wght-normal.woff2']) {
-  cpSync(join(here, '..', 'node_modules/@fontsource-variable/inter/files', f), join(out, 'fonts', f));
-}
+cpSync(join(here, '..', 'site', 'fonts'), join(out, 'fonts'), { recursive: true });   // Fraunces, Geist, Geist Mono and their licence

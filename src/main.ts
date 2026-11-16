@@ -12,6 +12,7 @@ import { createInterface } from 'node:readline';
 import { Application } from '@webviewjs/webview';
 import { Brain, callLabel, mcpConfig, mcpServers, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
 import { MAX_DETAIL, Questions } from './ask.ts';
+import { clickThrough, cursorReader, follower, type ClickThrough } from './clickthrough.ts';
 import { setAutostart, supported as autostartSupported, systemAutostart } from './autostart.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
@@ -68,6 +69,10 @@ function send(e: object): void {
   if (history.length > 500) history.shift();
   for (const c of clients) c.write(data);
 }
+/** For the page that is open now only: not replayed to one that connects later. */
+function tell(e: object): void {
+  for (const c of clients) c.write(`data: ${JSON.stringify(e)}\n\n`);
+}
 
 /** A log row: to the page and to today's file. */
 function row(r: LogBody): void {
@@ -95,6 +100,7 @@ function sendSettings(): void {
 // ── state ────────────────────────────────────────────────────────────────────
 let brain!: Brain;
 let focus: FocusKeeper = { restore() {}, stop() {} };
+let through: ClickThrough | undefined;             // the bubble's window lets clicks through its empty pixels
 let filesServer!: ServerCommand;
 let request = '';                                   // the current run's request
 let last: ReturnType<typeof saveOffer> = null;      // what the last finished run can be saved as ("save that as a shortcut")
@@ -462,7 +468,8 @@ async function post(path: string, body: any): Promise<void> {
       return;
     }
     case '/cancel': brain.cancel(); return;
-    case '/size': resize(Number(body.w), Number(body.h)); return;
+    case '/size': resize(Number(body.w), Number(body.h), Number(body.r), Number(body.b)); return;
+    case '/hit': through?.set(body); return;                          // which pixels of the window are Blob
     case '/focus-back': focus.restore(); return;
     case '/run': {
       const text = str(body.text);
@@ -561,6 +568,12 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ yes, shown: !!detail }));
       return;
     }
+    if (url.pathname === '/move') {                 // Speak is dragged: Blob's own window follows, and says how far it went
+      let went: { dx: number; dy: number } | undefined;
+      try { went = moveBy(Number(body.dx), Number(body.dy), body.start); } catch { /* it stays where it is */ }
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(went ?? {}));
+      return;
+    }
     try { await post(url.pathname, body); } catch (e) { caption(`Error: ${(e as Error).message}`); }
     res.writeHead(204).end();
     return;
@@ -644,16 +657,40 @@ const win = app.createBrowserWindow({
 }
 // The page asks for the size it needs. Keep the bottom-right corner where it is (the user may have dragged the bubble)
 // and grow up and left.
-let current = START;
-function resize(w: number, h: number): void {
+// `r` and `b`: the empty room the page keeps right of and under the bubble (its stage). The bubble, not the window's
+// corner, is what stays where it is.
+let current = { ...START, r: 8, b: 8 };
+function resize(w: number, h: number, r: number, b: number): void {
   if (!Number.isFinite(w) || !Number.isFinite(h)) return;
-  const next = { w: Math.round(Math.min(480, Math.max(200, w))), h: Math.round(Math.min(700, Math.max(200, h))) };   // room for a whole command on a Yes card
-  if (next.w === current.w && next.h === current.h) return;
+  const pad = (v: number) => (Number.isFinite(v) ? Math.round(Math.min(120, Math.max(0, v))) : 8);
+  const next = { w: Math.round(Math.min(560, Math.max(200, w))), h: Math.round(Math.min(830, Math.max(200, h))), r: pad(r), b: pad(b) };   // room for a whole command on a Yes card
+  if (next.w === current.w && next.h === current.h && next.r === current.r && next.b === current.b) return;
   const p = win.getPosition(true);
   win.setSize(next.w, next.h, true);
-  win.setPosition(p.x + current.w - next.w, p.y + current.h - next.h, true);
+  win.setPosition(p.x + (current.w - current.r) - (next.w - next.r), p.y + (current.h - current.b) - (next.h - next.b), true);
   current = next;
 }
+// The page drags Speak: the window follows the cursor itself (`start`: the press begins), which stays right across
+// screens with different scaling. Where the cursor can't be read it follows by the page's own CSS px: whole screen
+// pixels are moved; what is left over is carried to the next call, so the bubble never drifts from the pointer.
+let carry = { x: 0, y: 0 };
+function moveBy(dx: number, dy: number, start: unknown): { dx: number; dy: number } | undefined {
+  if (start === 'mouse') dragged.start(); else if (start) dragged.stop();
+  const went = dragged.move();
+  if (went) return went;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+  const s = win.scaleFactor() || 1, lim = (v: number) => Math.max(-400, Math.min(400, v));
+  const fx = lim(dx) * s + carry.x, fy = lim(dy) * s + carry.y, ix = Math.round(fx), iy = Math.round(fy);
+  carry = { x: fx - ix, y: fy - iy };
+  if (!ix && !iy) return;
+  const p = win.getPosition(false);
+  win.setPosition(p.x + ix, p.y + iy, false);
+}
+// Empty pixels of the bubble's window let clicks through to the desktop (clickthrough.ts); the page is told whether
+// they do (it keeps the window small when not) and when the cursor comes onto Blob or leaves it.
+const readCursor = cursorReader(win), dragged = follower(win, readCursor);
+through = clickThrough(win, { over: on => tell({ type: 'over', on }), gone: () => send({ type: 'stage', clickThrough: false }) }, readCursor);
+send({ type: 'stage', clickThrough: through.available });
 
 // WebView2 reads extra browser flags from this variable when the webview is created: grant the page's microphone
 // request without a prompt. Removed right after, so nothing claude or clawdcursor starts inherits it.
@@ -703,7 +740,10 @@ pillView.setBackgroundColor(0, 0, 0, 0);
 placePill(PILL.w, PILL.h);
 pillUi = overlay(pillWin);
 // The bubble and its cards (a question, the phone's QR code) are for the person at the screen: not in any capture.
-if (!hideFromCapture(win)) console.log('Blob: the bubble shows in screen captures on this system');
+// BLOB_CAPTURE=1 (development only): the bubble stays in captures, so a screenshot can check how it looks. Never set
+// it otherwise: a question or the phone's QR code would be in every capture too.
+if (process.env.BLOB_CAPTURE === '1') console.log('Blob: BLOB_CAPTURE=1, the bubble shows in screen captures (development only)');
+else if (!hideFromCapture(win)) console.log('Blob: the bubble shows in screen captures on this system');
 win.show();
 focus = focusKeeper(win.getNativeHandle());
 void check();
@@ -719,6 +759,7 @@ function quit(): void {
   pairing?.close();
   settings.unwatch();
   focus.stop();
+  through?.stop();
   rmSync(tmp, { recursive: true, force: true });
   try { app.exit(); } catch { /* already closed */ }
   process.exit(0);

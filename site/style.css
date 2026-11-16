@@ -6,7 +6,7 @@
 @font-face { font-family: "Geist Mono"; font-style: normal; font-display: swap; font-weight: 100 900;
   src: url(fonts/geist-mono-latin-wght-normal.woff2) format("woff2-variations"); }
 
-:root { --ink: #1c1c1e; --quiet: #6a6a70; --page: #f7f7f7; --edge: max(20px, env(safe-area-inset-left)); }
+:root { --ink: #1c1c1e; --quiet: #5c5c62; --page: #f7f7f7; --edge: max(20px, env(safe-area-inset-left)); }
 html, body { margin: 0; background: var(--page); overflow-x: hidden; }
 body { font: 400 15px/1.5 "Geist", system-ui, sans-serif; letter-spacing: -0.005em; color: var(--ink);
   -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
@@ -20,8 +20,24 @@ h1, h2, .wm { font-family: "Fraunces", Georgia, serif; font-optical-sizing: none
 /* the bar: the wordmark left, GitHub right */
 .bar { position: fixed; z-index: 2; top: 0; left: 0; right: 0; padding: 20px var(--edge); display: flex; justify-content: space-between; align-items: center;
   font-size: 14px; font-weight: 500; }
-.wm { font-size: 25px; font-weight: 620; letter-spacing: -0.035em; line-height: 1; white-space: nowrap; }
+.wm { display: inline-block; font-size: 25px; font-weight: 620; letter-spacing: -0.035em; line-height: 1; white-space: nowrap; }
+.wm .g { display: inline-block; }
+.wm .g:first-child { transform-origin: 100% 60%; }
+.wm .g:last-child { transform-origin: 0 60%; }
 .mark { width: .62em; height: .62em; margin: 0 .02em 0 .03em; vertical-align: -.06em; filter: drop-shadow(.03em .06em .05em rgba(28, 28, 30, .35)); }
+
+/* display type (h1, h2, the wordmark; site/type.ts): a line waits hidden, condenses out of goo word by word, then rests
+   with its letters fused. Full stops and the dots of "i" are the mark, as droplets. Body copy, buttons and commands stay plain. */
+.pre { visibility: hidden; }
+.w { display: inline-block; }
+.dot, .ij-p { font-size: 0; }
+.drop { display: inline-block; width: .28em; height: .28em; margin-left: .05em; overflow: visible; }
+/* the droplet "i": the real letter stays in the text at no size; a dotless one is drawn in its place with the droplet above it.
+   Both share one grid cell, centred and baseline-aligned, so no font metrics are hard-coded. */
+.ij-d { display: inline-grid; justify-items: center; align-items: baseline; user-select: none; }
+.ij-d::before { content: "\131"; grid-area: 1 / 1; }
+.ij-d > i { grid-area: 1 / 1; line-height: 0; font-style: normal; }
+.tittle { display: inline-block; width: .19em; height: .19em; vertical-align: .6em; overflow: visible; }
 
 /* the stage stays put; the track behind it is what scrolls */
 .track { height: 900vh; }
@@ -33,7 +49,8 @@ h1, h2, .wm { font-family: "Fraunces", Georgia, serif; font-optical-sizing: none
 /* one line per blob */
 .txt, .get, .ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; }
 h2 { font-size: 31px; line-height: 1.04; letter-spacing: -0.028em; }
-.txt p { margin-top: 10px; font-size: 14.5px; line-height: 1.45; color: var(--quiet); text-wrap: pretty; }
+.txt p { margin-top: 10px; font-size: 14.5px; line-height: 1.45; color: var(--quiet); text-wrap: pretty; transition: opacity .3s ease, visibility .3s; }
+.txt p.off { opacity: 0; visibility: hidden; }
 
 /* the first screen */
 h1 { position: absolute; left: 0; right: 0; padding: 0 var(--edge); text-align: center; font-size: clamp(42px, 6.2vw, 84px); line-height: 1;
