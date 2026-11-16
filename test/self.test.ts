@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { outcomeOf } from '../src/brain.ts';
 import { persona } from '../src/persona.ts';
 import { question, selfTools, type HostAction } from '../src/self-mcp.ts';
-import { DEFAULTS, SettingsStore, loadSettings, parseValue } from '../src/settings.ts';
+import { DEFAULTS, SettingsStore, loadSettings, offerPair, parseValue } from '../src/settings.ts';
 
 let dir = '';
 let file = '';
@@ -41,7 +41,16 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe('settings', () => {
   it('starts with the defaults: nothing that learns is on, not onboarded', () => {
     expect(loadSettings(file)).toEqual(DEFAULTS);
-    expect(DEFAULTS).toEqual({ brain: 'claude', model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false });
+    expect(DEFAULTS).toEqual({ brain: 'claude', model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false, pairOffered: false });
+  });
+
+  it('offers the phone card once, also to someone onboarded before phones were on', () => {
+    writeFileSync(file, JSON.stringify({ onboarded: true, phonePaired: false }));   // a file from before pairOffered
+    const s = loadSettings(file);
+    expect(offerPair(s, true)).toBe(true);
+    expect(offerPair(s, false)).toBe(false);                                      // no relay: no card
+    expect(offerPair({ ...s, pairOffered: true }, true)).toBe(false);            // answered (Show QR or Later)
+    expect(offerPair({ ...s, phonePaired: true }, true)).toBe(false);            // a phone is paired already
   });
 
   it('tolerates junk: a broken file, wrong types and unknown keys fall back to the defaults', () => {

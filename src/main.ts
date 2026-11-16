@@ -24,7 +24,7 @@ import { persona } from './persona.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
 import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } from './schedule.ts';
-import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, parseValue, type BrainName, type Model } from './settings.ts';
+import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, type BrainName, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
 import { fix, macNeeds, openPane, pickBrain, runChecks, type Check } from './setup.ts';
@@ -87,7 +87,7 @@ const brainNow = () => pickBrain(settings.get().brain, ready);
 function sendSettings(): void {
   const s = settings.get();
   send({
-    type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, canPair: !!RELAY,
+    type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, offerPair: offerPair(s, !!RELAY),
     firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || autostartSupported()).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
   });
 }
@@ -349,6 +349,7 @@ function showQr(): { ok: boolean; text: string } {
   const info = createRoom(RELAY);
   connectPhone(info, false);
   send({ type: 'qr', svg: qrSvg(qrUrl(info)) });
+  try { settings.set('pairOffered', true); } catch { /* the card may show once more */ }
   clearTimeout(qrTimer);
   qrTimer = setTimeout(() => closeQr('The code expired. Ask me to pair your phone again.'), QR_MS);
   return { ok: true, text: 'The QR code is on the bubble for 2 minutes. The user scans it with their phone\'s camera.' };
@@ -494,14 +495,16 @@ async function post(path: string, body: any): Promise<void> {
     case '/firstrun': {                             // a first-run card: the user's own tap, no question
       focus.restore();
       const key = FIRST_RUN.find(k => k === body.key);
-      if (body.done === true) settings.set('onboarded', true);
+      if (body.key === 'pair') {                    // the phone's card: answered once, Show QR or Later
+        settings.set('pairOffered', true);
+        if (body.value === true) { const r = showQr(); if (!r.ok) caption(r.text); }
+      } else if (body.done === true) settings.set('onboarded', true);
       else if (key && typeof body.value === 'boolean') {
         settings.set(key, body.value);
         if (key === 'startAtLogin' && !body.value) void applyAutostart(false);   // No: make sure nothing is left
       }
       return;
     }
-    case '/pair/show': { focus.restore(); const r = showQr(); if (!r.ok) caption(r.text); return; }
     case '/setup/mic': openMicSettings(); return;
     case '/pill/answer': answerPill(body); return;
     case '/pill/size': placePill(Number(body.w), Number(body.h)); return;

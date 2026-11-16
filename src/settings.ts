@@ -20,12 +20,13 @@ export interface Settings {
   startAtLogin: boolean;    // start Blob when the user signs in, so schedules work (autostart.ts)
   phonePaired: boolean;     // status only: the host sets it, nobody asks for it
   onboarded: boolean;       // the first-run questions were answered; the host sets it
+  pairOffered: boolean;     // the "Pair your phone?" card was answered, or a QR was shown; the host sets it
 }
 export type Key = keyof Settings;
 
 /** Before the first-run questions: nothing that learns about the user is on until they say Yes. */
 export const DEFAULTS: Settings = {
-  brain: 'claude', model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false,
+  brain: 'claude', model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false, pairOffered: false,
 };
 
 /** What the user can change by asking. The rest is set by the host. */
@@ -46,7 +47,12 @@ export const WHAT: Record<Key, string> = {
   startAtLogin: 'Blob opens by itself when you sign in to this computer, so reminders and scheduled tasks are not missed.',
   phonePaired: 'Whether a phone is paired (status only; "pair my phone" shows the QR).',
   onboarded: 'Whether the first-run questions were answered (status only).',
+  pairOffered: 'Whether the "Pair your phone?" card was answered (status only).',
 };
+
+/** The "Pair your phone?" card shows once, also to someone onboarded before phones were on: while no phone is
+ *  paired, a relay is set up, and the card was never answered. */
+export const offerPair = (s: Settings, relay: boolean): boolean => relay && !s.phonePaired && !s.pairOffered;
 
 /** The first-run cards' questions, one per FIRST_RUN key. The card's text is WHAT. */
 export const ASK: Record<typeof FIRST_RUN[number], string> = {

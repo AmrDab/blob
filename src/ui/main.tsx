@@ -101,7 +101,8 @@ function App() {
       if (e.type === 'ask-done') setAsks(a => a.filter(x => x.id !== e.id));
       if (e.type === 'settings') {
         setModel(e.model); setCodex(e.brain === 'codex'); setVoice(e.voice);
-        setFirst({ onboarded: e.onboarded, cards: [...e.firstRun, ...(e.canPair ? [PAIR_CARD] : [])] });
+        // the phone's card comes once, also after the first run (for someone onboarded before phones were on)
+        setFirst({ onboarded: e.onboarded, cards: [...(e.onboarded ? [] : e.firstRun), ...(e.offerPair ? [PAIR_CARD] : [])] });
       }
       if (e.type === 'qr') setQr(e.svg);
     };
@@ -110,7 +111,7 @@ function App() {
 
   // Setup comes first, one card at a time; then the first-run questions, one at a time.
   const need = checks.find(c => !c.ok);
-  const ready = !first.onboarded && checks.length > 0 && !need;
+  const ready = (!first.onboarded || first.cards.length > 0) && checks.length > 0 && !need;
   const asking = ready ? first.cards[step] : undefined;
   useEffect(() => { if (ready && step >= first.cards.length) void post('/firstrun', { done: true }); }, [ready, step, first.cards.length]);
   // What can be tapped on the cards: when it changes, taps wait a moment (settle.ts).
@@ -279,9 +280,7 @@ function App() {
   /** A first-run card's answer: a feature on or off, or the phone's QR now or later. */
   function pick(card: FirstRun, yes: boolean) {
     if (!settled()) return;
-    if (card.key !== 'pair') void post('/firstrun', { key: card.key, value: yes });
-    else if (yes) void post('/pair/show');
-    else back();
+    void post('/firstrun', { key: card.key, value: yes });   // 'pair' with Yes: the host shows the QR
     setStep(s => s + 1);
   }
 
