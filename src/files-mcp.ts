@@ -187,12 +187,16 @@ function windowsTrash(path: string): void {
   if (existsSync(path)) throw new Error('it is still there');
 }
 
-export async function osTrash(path: string, platform: string = process.platform): Promise<void> {
+// macOS: NSFileManager moves the item itself to the Trash. (Asking Finder would follow a link and trash what it
+// points at, and needs the user's OK to control Finder.) isDirectory=false stops NSURL looking at the disk, which
+// would add a trailing slash to a link to a folder and so name the folder it points at.
+const MAC_TRASH = 'function run(a){var e=Ref();if(!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError($.NSURL.fileURLWithPathIsDirectory(a[0],false),null,e))'
+  + 'throw new Error(e[0]?ObjC.unwrap(e[0].localizedDescription):"could not move it to the Trash")}';
+
+export async function osTrash(path: string, platform: string = process.platform, exec: (cmd: string, args: string[]) => Promise<void> = run): Promise<void> {
   if (platform === 'win32') return windowsTrash(path);
-  if (platform === 'darwin') {
-    return run('osascript', ['-e', 'on run argv', '-e', 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)', '-e', 'end run', path]);
-  }
-  return run('gio', ['trash', '--', path]);
+  if (platform === 'darwin') return exec('osascript', ['-l', 'JavaScript', '-e', MAC_TRASH, path]);
+  return exec('gio', ['trash', '--', path]);
 }
 
 let shOpen: ((...a: unknown[]) => unknown) | undefined;

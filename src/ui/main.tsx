@@ -12,7 +12,7 @@ import { Bubble, type Item } from './liquid/Bubble.tsx';
 import { BOX, FAN, GAP_LIQUID, SLOTS, stage } from './liquid/stage.ts';
 import { useSettled } from './settle.ts';
 import { Command, Title, Words, useSwap, type Line } from './text.tsx';
-import { DOWNLOAD_MB, Recorder, isDownloaded, load, transcribe } from './speech.ts';
+import { DOWNLOAD_MB, Recorder, isDownloaded, load, micProblemText, transcribe } from './speech.ts';
 
 declare global { interface Window { webviewjs?: { startDragging(): void } } }
 
@@ -192,8 +192,8 @@ function App() {
     if (!(await isDownloaded())) { setPhase('ask'); return false; }
     const recorder = new Recorder();
     try { await recorder.start(); } catch (err) {
-      const name = (err as Error).name;
-      setMicProblem(name === 'NotFoundError' ? 'No microphone found. Plug one in, then try Speak again.' : `Blob can't use the microphone (${(err as Error).message}).`);
+      console.log('microphone refused:', (err as Error).name, (err as Error).message);
+      setMicProblem(micProblemText(err as Error, /Mac/.test(navigator.platform)));
       return false;
     }
     setMicProblem(null);

@@ -48,6 +48,17 @@ export async function transcribe(audio: Float32Array): Promise<string> {
   return (text?.text ?? '').trim();
 }
 
+/** What the card says when the microphone could not be opened. On macOS a refusal comes with no system prompt:
+ *  the microphone belongs to the app Blob was started from, and WebKit keeps its answer until Blob restarts. */
+export function micProblemText(err: { name?: string; message?: string }, mac: boolean): string {
+  if (err.name === 'NotFoundError') return 'No microphone found. Plug one in, then try Speak again.';
+  if (mac && err.name === 'NotAllowedError') {
+    return 'macOS has not given the microphone to the app Blob was started from. In System Settings, Privacy & Security, ' +
+      'Microphone, turn it on for that app (Terminal or iTerm), then restart Blob.';
+  }
+  return `Blob can't use the microphone (${err.message ?? err.name ?? 'unknown error'}).`;
+}
+
 /** Records from the microphone; stop() gives 16 kHz mono samples. */
 export class Recorder {
   /** The live microphone stream while recording (the voice ring reads its level). */

@@ -166,12 +166,33 @@ export function shellArgv(command: string, platform: string = process.platform, 
   return [env.SHELL || '/bin/sh', ['-lc', command]];
 }
 
-/** Runs it in the home folder, stdout and stderr together, and stops the whole tree at the timeout. */
+/** macOS/Linux: the commands running now. Each is in its own process group, so a signal to Blob's group misses it. */
+export const live = new Set<number>();
+
+/** Stops every running command, whole group. */
+export function killLive(kill: (pid: number, signal: string) => void = (pid, s) => { process.kill(pid, s); }): void {
+  for (const pid of live) try { kill(-pid, 'SIGKILL'); } catch { /* already gone */ }
+  live.clear();
+}
+
+// Stop (or quit) ends this process with a signal, and the timeout below dies with it: take the commands along.
+let hooked = false;
+function hookExit(): void {
+  if (hooked || process.platform === 'win32') return;
+  hooked = true;
+  try {
+    for (const s of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.once(s, () => { killLive(); process.exit(143); });
+    process.stdin.once('end', () => killLive());    // the parent went away without a signal to this group
+  } catch (e) { console.error(`Blob: could not watch for Stop: ${(e as Error).message}`); }
+}
+
+/** Runs it in the home folder, stdout and stderr together, and stops the whole tree at the timeout (or when Blob is stopped). */
 export const systemExec: Exec = (command, timeoutMs) => new Promise((res, rej) => {
   const [exe, args] = shellArgv(command);
   const p = spawn(exe, args, {
     cwd: homedir(), env: shellEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
   });
+  if (process.platform !== 'win32' && p.pid) { live.add(p.pid); hookExit(); }
   let out = '', timedOut = false;
   const take = (d: Buffer) => { if (out.length < 200_000) out += d.toString('utf8'); };
   p.stdout.on('data', take);
@@ -181,6 +202,6 @@ export const systemExec: Exec = (command, timeoutMs) => new Promise((res, rej) =
     if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
     else try { process.kill(-p.pid!, 'SIGKILL'); } catch { /* already gone */ }
   }, timeoutMs);
-  p.on('error', e => { clearTimeout(timer); rej(e); });
-  p.on('close', code => { clearTimeout(timer); res({ code, out, timedOut }); });
+  p.on('error', e => { clearTimeout(timer); live.delete(p.pid!); rej(e); });
+  p.on('close', code => { clearTimeout(timer); live.delete(p.pid!); res({ code, out, timedOut }); });
 });

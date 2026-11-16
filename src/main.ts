@@ -19,6 +19,7 @@ import { setAutostart, supported as autostartSupported, systemAutostart } from '
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
+import { macSetup } from './mac.ts';
 import { memoryBrief, memoryFile } from './memory.ts';
 import { hideFromCapture, overlay, type Overlay } from './overlay.ts';
 import { keepOwnUiFile, processLister } from './own-ui.ts';
@@ -30,7 +31,7 @@ import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } fro
 import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, type BrainName, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
-import { fix, macNeeds, openPane, pickBrain, runChecks, type Check } from './setup.ts';
+import { fix, fixNote, macNeeds, openPane, pickBrain, runChecks, type Check } from './setup.ts';
 import { Watcher, activityFile, clawdcursorReader, windowsFront } from './watch.ts';
 
 const HOME = blobHome();
@@ -446,6 +447,7 @@ async function setupFix(id: string): Promise<void> {
   const still = (await check()).find(c => c.id === id && !c.ok);
   if (still && id === 'mac') watchMac();
   else if (still && ok) caption(`${still.label}: not done yet.`);
+  else if (still && fixNote) caption(fixNote);       // Blob knows why (macOS: npm can't write its global folder)
   else if (still) {
     caption(`That didn't work. Tap ${still.tap ?? 'it'} to try again.`);
     console.log(`Blob: setup step "${still.id}" failed; in a terminal, run: ${still.fix}`);
@@ -672,9 +674,9 @@ const app = new Application();
 const win = app.createBrowserWindow({
   title: 'Blob',
   width: START.w, height: START.h, logical: true,
-  transparent: true, decorations: false, alwaysOnTop: true,
+  transparent: true, decorations: false, alwaysOnTop: true, visibleOnAllWorkspaces: true,
   resizable: false, maximizable: false, minimizable: false,
-  windowsUndecoratedShadow: false,
+  windowsUndecoratedShadow: false, macosHasShadow: false,
   visible: false,
 });
 {
@@ -683,7 +685,7 @@ const win = app.createBrowserWindow({
   const s = m?.scaleFactor ?? 1;
   const right = m ? (m.position.x + m.size.width) / s : 1280;
   const bottom = m ? (m.position.y + m.size.height) / s : 800;
-  win.setPosition(Math.round(right - START.w - 16), Math.round(bottom - START.h - 56), true);
+  win.setPosition(Math.round(right - START.w - 16), Math.round(bottom - START.h - (process.platform === 'darwin' ? 90 : 56)), true);   // a Dock is taller
 }
 // The page asks for the size it needs. Keep the bottom-right corner where it is (the user may have dragged the bubble)
 // and grow up and left.
@@ -737,15 +739,17 @@ const view = win.createWebview({
   navigationHandler: u => u.startsWith(`http://127.0.0.1:${port}/`),
   newWindowHandler: () => false,
 });
+// macOS: the Edit menu, the first click, Cmd+Q through quit(), no Dock icon, every Space (mac.ts). Nothing elsewhere.
+macSetup(app, quit);
 // clawdcursor's pill: a second window at the top centre of the primary display, as big as the page says its
 // content is, shown only while a relay is connected. Made here so it shares the first webview's browser flags.
 const PILL = { w: 320, h: 64 };
 const pillWin = app.createBrowserWindow({
   title: 'Blob pill',
   width: PILL.w, height: PILL.h, logical: true,
-  transparent: true, decorations: false, alwaysOnTop: true, focused: false,
+  transparent: true, decorations: false, alwaysOnTop: true, visibleOnAllWorkspaces: true, focused: false,
   resizable: false, maximizable: false, minimizable: false,
-  windowsUndecoratedShadow: false, windowsSkipTaskbar: true,
+  windowsUndecoratedShadow: false, macosHasShadow: false, windowsSkipTaskbar: true,
   visible: false,
 });
 function placePill(w: number, h: number): void {
@@ -753,7 +757,7 @@ function placePill(w: number, h: number): void {
   const next = { w: Math.round(Math.min(520, Math.max(120, w))), h: Math.round(Math.min(700, Math.max(40, h))) };
   const m = pillWin.getPrimaryMonitor();
   const s = m?.scaleFactor ?? 1;
-  const left = m ? m.position.x / s : 0, width = m ? m.size.width / s : 1280, top = m ? m.position.y / s : 0;
+  const left = m ? m.position.x / s : 0, width = m ? m.size.width / s : 1280, top = (m ? m.position.y / s : 0) + (process.platform === 'darwin' ? 40 : 0);   // below the menu bar and the notch
   pillWin.setSize(next.w, next.h, true);
   pillWin.setPosition(Math.round(left + (width - next.w) / 2), Math.round(top), true);
 }
@@ -801,4 +805,4 @@ process.on('SIGINT', quit);
 process.on('SIGTERM', quit);
 process.on('exit', () => brain.stop());
 app.run();
-console.log(`Blob: http://127.0.0.1:${port} (close the bubble from the taskbar, or Ctrl+C here)`);
+console.log(`Blob: http://127.0.0.1:${port} (${process.platform === 'darwin' ? 'Cmd+Q on the bubble' : 'close the bubble from the taskbar'}, or Ctrl+C here)`);

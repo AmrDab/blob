@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as setup from '../src/setup.ts';
 import { MAC_PANES, fix, macNeeds, parseAuthStatus, parseMacStatus, pickBrain, runChecks, type Runner } from '../src/setup.ts';
 
 describe('first-run check', () => {
@@ -15,7 +16,10 @@ describe('first-run check', () => {
   it('reads the macOS permissions from `clawdcursor status`', () => {
     const both = '\x1b[32m✓\x1b[39m Consent: Granted\n\x1b[32m✓\x1b[39m Accessibility: Granted\n\x1b[32m✓\x1b[39m Screen Recording: Granted \n';
     expect(parseMacStatus(both)).toEqual({ accessibility: true, screenRecording: true });
-    expect(parseMacStatus('✗ Accessibility: Not granted\n⚠ Screen Recording: Could not check')).toEqual({ accessibility: false, screenRecording: false });
+    // "Could not check" is not "Not granted": the screen is still read, so it does not hold setup up
+    expect(parseMacStatus('✗ Accessibility: Not granted\n⚠ Screen Recording: Could not check (optional)')).toEqual({ accessibility: false, screenRecording: true });
+    expect(parseMacStatus('✓ Accessibility: Granted\n⚠ Screen Recording: Not granted (optional)')).toEqual({ accessibility: true, screenRecording: false });
+    expect(parseMacStatus('✓ Accessibility: Granted\n')).toEqual({ accessibility: true, screenRecording: false });   // no line: status failed
   });
 });
 
@@ -40,7 +44,7 @@ describe('one-tap setup, with a fake runner', () => {
     }
     return { ok: true, out: line === 'clawdcursor status' ? pc.mac : '' };
   };
-  const failing = async (platform: string) => (await runChecks(platform, run, home, codex)).filter(c => !c.ok).map(c => c.id);
+  const failing = async (platform: string) => (await runChecks(platform, run, home, codex, 'claude')).filter(c => !c.ok).map(c => c.id);
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'blob-setup-'));
@@ -61,20 +65,20 @@ describe('one-tap setup, with a fake runner', () => {
 
   it('keeps the brain as commands to copy, both of them: no tap, and nothing is run for them', async () => {
     pc.claude = false;
-    const checks = await runChecks('win32', run, home, codex);
+    const checks = await runChecks('win32', run, home, codex, 'claude');
     expect(checks[0]).toMatchObject({ id: 'brain', ok: false, label: 'Install Claude Code or Codex', fix: 'irm https://claude.ai/install.ps1 | iex', alt: 'npm i -g @openai/codex', ready: [] });
     expect(checks[0].tap).toBeUndefined();
     expect(checks.some(c => c.id === 'signin')).toBe(false);          // sign-in comes after the install
     expect(await fix('brain', run, 'win32')).toBe(false);
     pc.claude = true; pc.signedIn = false;
-    const signin = (await runChecks('darwin', run, home, codex)).find(c => c.id === 'signin');
+    const signin = (await runChecks('darwin', run, home, codex, 'claude')).find(c => c.id === 'signin');
     expect(signin).toMatchObject({ ok: false, label: 'Sign in to Claude Code', fix: 'claude auth login' });
     expect(signin?.alt).toBeUndefined();                              // Codex is not installed: only Claude Code's sign-in
     expect(ran.join('\n')).not.toMatch(/install\.(ps1|sh)|auth login|npm i -g @openai|codex login$/);
   });
 
   it('needs one brain, either one: finds which are installed and signed in', async () => {
-    const brain = async () => (await runChecks('win32', run, home, codex)).filter(c => c.id === 'brain' || c.id === 'signin');
+    const brain = async () => (await runChecks('win32', run, home, codex, 'claude')).filter(c => c.id === 'brain' || c.id === 'signin');
     expect(await brain()).toMatchObject([{ ok: true, ready: ['claude'] }, { ok: true }]);                       // Claude Code only
     pc = { ...pc, claude: false, codex: true, codexSignedIn: true };
     expect(await brain()).toMatchObject([{ ok: true, ready: ['codex'] }, { ok: true }]);                        // Codex only: enough
@@ -88,7 +92,7 @@ describe('one-tap setup, with a fake runner', () => {
     expect(await brain()).toMatchObject([{ ok: true, ready: ['claude', 'codex'] }, { ok: true }]);
     // Codex is started the way the Brain starts it: here through Node, with the script npm's shim names
     ran = [];
-    await runChecks('win32', run, home, { command: 'node.exe', args: ['codex.js'] });
+    await runChecks('win32', run, home, { command: 'node.exe', args: ['codex.js'] }, 'claude');
     expect(ran).toEqual(expect.arrayContaining(['node.exe codex.js --version']));
   });
 
@@ -98,6 +102,31 @@ describe('one-tap setup, with a fake runner', () => {
     expect(pickBrain('claude', ['codex'])).toBe('codex');             // only Codex is ready: Blob uses it
     expect(pickBrain('codex', ['claude'])).toBe('claude');
     expect(pickBrain('codex', [])).toBe('codex');                     // none ready (or not checked yet): the setting stands
+  });
+
+  it('macOS: starts Claude Code by its full path when it is not on PATH, and the sign-in command names it too', async () => {
+    const at = '/Users/a/.local/bin/claude';
+    const there: Runner = async (command, args) => {
+      ran.push([command, ...args].join(' '));
+      return command === at ? { ok: true, out: '{"loggedIn":false}' } : { ok: false, out: '' };
+    };
+    const checks = await runChecks('darwin', there, home, codex, at);
+    expect(checks[0]).toMatchObject({ id: 'brain', ok: true });
+    expect(checks[1]).toMatchObject({ id: 'signin', ok: false, fix: `${at} auth login` });
+    expect(ran).toEqual(expect.arrayContaining([`${at} --version`, `${at} auth status --json`]));
+    const spaced = (await runChecks('darwin', async c => ({ ok: c.endsWith('claude'), out: '' }), home, codex, '/Users/a b/.local/bin/claude'))[1];
+    expect(spaced.fix).toBe('"/Users/a b/.local/bin/claude" auth login');
+  });
+
+  it('macOS: says why when npm may not write to its global folder (EACCES), and only then', async () => {
+    const denied: Runner = async () => ({ ok: false, out: '', err: 'npm error code EACCES\nnpm error syscall mkdir' });
+    expect(await fix('clawdcursor', denied, 'darwin')).toBe(false);
+    expect(setup.fixNote).toMatch(/sudo/);
+    expect(setup.fixNote).not.toMatch(/clawdcursor/i);
+    expect(await fix('clawdcursor', denied, 'win32')).toBe(false);
+    expect(setup.fixNote).toBe('');
+    expect(await fix('clawdcursor', async () => ({ ok: false, out: '', err: 'npm error network' }), 'darwin')).toBe(false);
+    expect(setup.fixNote).toBe('');
   });
 
   it('says a failed install failed', async () => {
@@ -118,6 +147,8 @@ describe('one-tap setup, with a fake runner', () => {
     expect(await macNeeds(run)).toEqual({ ok: false, pane: MAC_PANES.screenRecording });
     pc.mac = 'Accessibility: Granted\nScreen Recording: Granted';
     expect(await macNeeds(run)).toEqual({ ok: true });
+    pc.mac = 'Accessibility: Granted\nScreen Recording: Could not check (optional)';
+    expect(await macNeeds(run)).toEqual({ ok: true });                // the card clears
     expect(MAC_PANES.accessibility).toMatch(/^x-apple\.systempreferences:.*Privacy_Accessibility$/);
     expect(MAC_PANES.screenRecording).toMatch(/^x-apple\.systempreferences:.*Privacy_ScreenCapture$/);
   });

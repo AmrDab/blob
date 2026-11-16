@@ -5,6 +5,9 @@
   "description": "A tiny floating bubble: tell your computer what to do, by voice or text. Runs your own Claude Code with clawdcursor as its hands.",
   "type": "module",
   "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "node build.mjs",
     "build:phone": "node phone/build.mjs",

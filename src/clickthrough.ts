@@ -7,8 +7,12 @@ import { createRequire } from 'node:module';
 import type { BrowserWindow } from '@webviewjs/webview';
 import { ignoreNext, parseShapes, type HitShape } from './ui/liquid/hit.ts';
 
-/** The cursor in physical screen px; `down`: a mouse button is held (where that can be read). */
-export type Cursor = { x: number; y: number; down?: boolean };
+/**
+ * The cursor in physical screen px; `down`: a mouse button is held (where that can be read). `points`: x and y are
+ * in logical points instead (macOS, where screens of different scale share points, not pixels), so the window's
+ * position is read and set in points too.
+ */
+export type Cursor = { x: number; y: number; down?: boolean; points?: boolean };
 type Win = Pick<BrowserWindow, 'getPosition' | 'getInnerSize' | 'scaleFactor' | 'setIgnoreCursorEvents' | 'getCursorPosition'>;
 
 /**
@@ -30,8 +34,8 @@ export function follower(win: Pick<BrowserWindow, 'getPosition' | 'setPosition' 
         const dx = c.x - last.x, dy = c.y - last.y;
         last = c;
         if (!dx && !dy) return { dx: 0, dy: 0 };
-        const p = win.getPosition(false), s = win.scaleFactor() || 1;
-        win.setPosition(p.x + dx, p.y + dy, false);
+        const lg = !!c.points, p = win.getPosition(lg), s = lg ? 1 : (win.scaleFactor() || 1);
+        win.setPosition(p.x + dx, p.y + dy, lg);
         return { dx: dx / s, dy: dy / s };
       } catch { last = undefined; return undefined; }
     },
@@ -42,7 +46,7 @@ const NEAR_MS = 25, FAR_MS = 100;      // how often to look: the cursor on or ne
 const NEAR_PX = 200;
 
 /** How to read the cursor here: user32 on Windows, the window library on macOS, undefined elsewhere or when it fails. */
-export function cursorReader(win: Win, platform: string = process.platform): (() => Cursor) | undefined {
+export function cursorReader(win: Win & Partial<Pick<BrowserWindow, 'getPrimaryMonitor'>>, platform: string = process.platform, now: () => number = Date.now): (() => Cursor) | undefined {
   try {
     if (platform === 'win32') {
       const koffi = createRequire(import.meta.url)('koffi');
@@ -57,8 +61,20 @@ export function cursorReader(win: Win, platform: string = process.platform): (()
       };
     }
     if (platform === 'darwin' && typeof win.getCursorPosition === 'function') {
-      win.getCursorPosition(false);                // throws now if it can't
-      return () => win.getCursorPosition(false);
+      // the library gives the cursor in the primary screen's pixels, whatever screen it is on: back to points.
+      // Asking for the primary screen lists all its display modes, so its scale is kept for 2 s, not asked each read.
+      let k = 0, at = 0;
+      const scale = (): number => {
+        const t = now();
+        if (!k || t - at > 2000) { k = win.getPrimaryMonitor?.()?.scaleFactor || 1; at = t; }
+        return k;
+      };
+      const read = (): Cursor => {
+        const c = win.getCursorPosition(false), s = scale();
+        return { x: c.x / s, y: c.y / s, points: true };
+      };
+      read();                                      // throws now if it can't
+      return read;
     }
   } catch { /* below */ }
   return undefined;
@@ -98,7 +114,7 @@ export function clickThrough(win: Win, on: { over(on: boolean): void; gone(): vo
     if (!shapes || !read) return;
     let wait = FAR_MS;
     try {
-      const c = read(), p = win.getPosition(false), size = win.getInnerSize(true), s = win.scaleFactor() || 1;
+      const c = read(), p = win.getPosition(!!c.points), size = win.getInnerSize(true), s = c.points ? 1 : (win.scaleFactor() || 1);
       const x = (c.x - p.x) / s, y = (c.y - p.y) / s;
       if (x > -NEAR_PX && y > -NEAR_PX && x < size.width + NEAR_PX && y < size.height + NEAR_PX) wait = NEAR_MS;
       apply(ignoreNext(ignoring, { shapes, capture, down: c.down, x, y }));

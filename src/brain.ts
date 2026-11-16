@@ -2,6 +2,7 @@
 // its desk tools (Windows: an open window worked in the background) and its self tools.
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -101,6 +102,20 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: str
 }
 
 // ── Codex ────────────────────────────────────────────────────────────────────
+
+/**
+ * How to start Claude Code. Its macOS/Linux installer puts it in ~/.local/bin (an older one in ~/.claude/local) and
+ * does not add that folder to PATH, so when PATH has no `claude` Blob looks there itself.
+ */
+export function claudeCommand(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(), exists: (p: string) => boolean = existsSync): string {
+  if (platform === 'win32') return 'claude';
+  try {
+    if ((env.PATH ?? '').split(delimiter).some(d => d && exists(join(d, 'claude')))) return 'claude';
+    for (const p of [join(home, '.local', 'bin', 'claude'), join(home, '.claude', 'local', 'claude')]) if (exists(p)) return p;
+  } catch (e) { console.log(`Blob: could not look for Claude Code: ${(e as Error).message}`); }
+  return 'claude';                                  // not found: starting it fails, and the first-run check says so
+}
 
 /**
  * How to start Codex with no shell in between (the brief and the servers' tokens are arguments). On Windows npm
@@ -415,7 +430,7 @@ export class Brain {
     const moved = !!this.session && this.session.brain !== brain;
     if (moved) this.session = undefined;
     const resume = this.session?.id, persona = this.o.persona?.(brain, tier), codex = brain === 'codex', name = BRAIN_NAME[brain];
-    const cmd = codex ? codexCommand() : { command: 'claude', args: [] };
+    const cmd = codex ? codexCommand() : { command: claudeCommand(), args: [] };
     const args = codex ? codexArgs({ servers: this.o.servers, resume, persona })      // Codex runs its own default model
       : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model: tier, resume, persona, maxTurns: model === 'auto' ? MAX_TURNS[tier] : undefined });
     const p = spawn(cmd.command, [...cmd.args, ...args], {

@@ -10,7 +10,11 @@ import { MAX_FACT, SECRET, UNSAFE_FACT, facts, forget, matching, memoryBrief, me
 import { persona } from './persona.ts';
 import { MAX_TEXT, addEntry, describe, loadSchedule, nextDue, parseWhen, removeEntry, scheduleFile, stamp } from './schedule.ts';
 import { BRAINS, BRAIN_NAME, CHANGEABLE, DEFAULTS, MODELS, SettingsStore, WHAT, parseValue, type BrainName, type Key, type Settings } from './settings.ts';
+import { claudeCommand } from './brain.ts';
 import { brains } from './setup.ts';
+
+/** Claude Code's sign-in, by its full path when its folder is not on PATH (macOS installs it in ~/.local/bin). */
+const signinCommand = (claude: string = claudeCommand()) => `${/\s/.test(claude) ? `"${claude}"` : claude} auth login`;
 import { activityFile, forgetActivity, topActivity } from './watch.ts';
 
 /** What only the host can do. The host answers with a line for the model. */
@@ -105,7 +109,7 @@ export function selfTools(d: SelfDeps) {
       if (key === 'brain' && !(await d.brainReady(value as BrainName))) {
         return failed('NOT_READY', value === 'codex'
           ? 'Codex is not installed or not signed in on this computer. Tell the user to run, in a terminal: npm i -g @openai/codex, then: codex login'
-          : 'Claude Code is not installed or not signed in on this computer. Tell the user to install it, then run in a terminal: claude auth login');
+          : `Claude Code is not installed or not signed in on this computer. Tell the user to install it, then run in a terminal: ${signinCommand()}`);
       }
       if (!(await d.ask(question(key as typeof CHANGEABLE[number], value)))) return NO();
       try { d.settings.set(key, value); } catch (e) { return failed('CANT_SAVE', (e as Error).message); }

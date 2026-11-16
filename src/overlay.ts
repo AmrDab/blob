@@ -1,10 +1,14 @@
 // The pill window's native side. It appears while clawdcursor types and clicks, so it must not take the keyboard.
 // It is left out of screen captures. On Windows (user32 through koffi) it is also shown without activating, not activated by
 // a click, and takes the keyboard only while the user types a reply. Elsewhere there is only the window library's
-// own show, hide and content protection: there the pill can take the front when it is shown or clicked.
+// own show, hide and content protection: there the pill can take the front when it is shown or clicked. On macOS the
+// front is given back to the app the user was in when the reply box or the pill closes while the pill has the keyboard
+// (not while the user types in the bubble), and the pause card has a sound.
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import type { BrowserWindow } from '@webviewjs/webview';
-import { focusKeeper } from './focus.ts';
+import { focusKeeper, type FocusKeeper } from './focus.ts';
+import { loadFrontApp } from './mac.ts';
 
 export interface Overlay {
   show(): void;
@@ -30,8 +34,36 @@ export function hideFromCapture(win: BrowserWindow, platform: string = process.p
   } catch { return false; }
 }
 
-export function overlay(win: BrowserWindow, platform: string = process.platform): Overlay {
-  const plain: Overlay = { show: () => win.show(), hide: () => win.hide(), keyboard: on => { if (on) win.focus(); }, beep() {}, asksRefocus: platform === 'linux' };
+/** The sound reminders play on a Mac. */
+function chime(): void {
+  try { spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore' }).on('error', () => {}); }
+  catch (e) { console.log(`Blob: no pause sound (${(e as Error).message})`); }
+}
+
+const PILL_TITLE = 'Blob pill';   // the pill window's title, as main.ts makes it
+
+/** macOS: does the pill window have the keyboard? False where that can't be read (then nothing is handed back). */
+function pillHasKeyboard(): () => boolean {
+  try {
+    const front = loadFrontApp();
+    return () => { try { return front.keyTitle() === PILL_TITLE; } catch { return false; } };
+  } catch (e) {
+    console.log(`Blob: the pill can't hand the front back (${(e as Error).message})`);
+    return () => false;
+  }
+}
+
+/** `mac`: the macOS parts, for tests (the keeper that hands the front back, whether the pill has the keyboard, and the sound). */
+export function overlay(win: BrowserWindow, platform: string = process.platform, mac: { keeper?: FocusKeeper; mine?: () => boolean; chime?: () => void } = {}): Overlay {
+  const darwin = platform === 'darwin';
+  const back = darwin ? mac.keeper ?? focusKeeper(0, platform) : undefined;   // remembers the user's app, to hand the front back to
+  const mine = darwin ? mac.mine ?? pillHasKeyboard() : undefined;            // the pill also closes while the user types in the bubble: not then
+  const plain: Overlay = {
+    show: () => win.show(), hide: () => win.hide(),
+    keyboard: on => { if (on) win.focus(); else if (mine?.()) back?.restore(); },
+    beep: () => { if (darwin) (mac.chime ?? chime)(); },
+    asksRefocus: platform === 'linux',
+  };
   hideFromCapture(win, platform);
   if (platform !== 'win32') return plain;
   const h = Number(win.getNativeHandle());

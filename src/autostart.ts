@@ -3,7 +3,7 @@
 //   macOS:   ~/Library/LaunchAgents/com.blob.start.plist (read by launchd at the next sign-in).
 // Both start Blob the way this one was started. Everything that touches the system is passed in, so tests use fakes.
 import { execFile } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { blobHome } from './settings.ts';
@@ -12,6 +12,15 @@ import { blobHome } from './settings.ts';
 export interface StartCommand { exe: string; args: string[]; cwd: string }
 export const startCommand = (p: { execPath: string; execArgv: string[]; argv: string[]; cwd(): string } = process): StartCommand =>
   ({ exe: p.execPath, args: [...p.execArgv, ...p.argv.slice(1)], cwd: p.cwd() });
+
+/**
+ * macOS: a path to this Node that lasts. execPath is the real file (Homebrew: Cellar/node/<version>/bin/node), which
+ * the next upgrade deletes; the first `node` on PATH that is a link to it (/opt/homebrew/bin/node) stays.
+ */
+export function stableNode(execPath: string, path: string, real: (p: string) => string = realpathSync): string {
+  const same = (f: string) => { try { return real(f) === execPath; } catch { return false; } };
+  return path.split(':').filter(Boolean).map(d => join(d, 'node')).find(same) ?? execPath;
+}
 
 export interface AutostartDeps {
   platform: string;
@@ -40,6 +49,7 @@ export function windowsRunValue(script: string): string {
   return `powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath '${script.replace(/'/g, "''")}'"`;
 }
 
+/** ProcessType Interactive: without it launchd throttles the job like a background one. */
 export function macPlist(c: StartCommand, path: string): string {
   const x = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -55,6 +65,7 @@ ${[c.exe, ...c.args].map(a => `    <string>${x(a)}</string>`).join('\n')}
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>${x(path)}</string></dict>
   <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
 </dict>
 </plist>
 `;
@@ -85,8 +96,10 @@ export async function setAutostart(on: boolean, d: AutostartDeps): Promise<{ ok:
 
 /** The real system. */
 export function systemAutostart(): AutostartDeps {
+  const path = process.env.PATH ?? '', command = startCommand();
+  if (process.platform === 'darwin') command.exe = stableNode(command.exe, path);
   return {
-    platform: process.platform, home: homedir(), blobHome: blobHome(), command: startCommand(), path: process.env.PATH ?? '',
+    platform: process.platform, home: homedir(), blobHome: blobHome(), command, path,
     run: (command, args) => new Promise(res => execFile(command, args, { windowsHide: true, timeout: 20_000 }, err => res(!err))),
     write: (file, text) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); },
     remove: file => rmSync(file, { force: true }),

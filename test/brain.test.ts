@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isAbsolute } from 'node:path';
-import { PILL_HOST, StreamParser, callLabel, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, mcpServers, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
+import { delimiter, isAbsolute, join } from 'node:path';
+import { PILL_HOST, StreamParser, callLabel, claudeArgs, claudeCommand, cleanEnv, clawdcursorCommand, mcpConfig, mcpServers, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
 
 describe('claude command line', () => {
   it('runs stream-json print mode with clawdcursor, the files (and shell), desk and self servers and the read-only built-ins', () => {
@@ -243,5 +243,20 @@ describe('stream-json parsing', () => {
     expect(outcomeOf('[refused · PAUSED]', false).outcome).toBe('refused');
     expect(outcomeOf('[confirmed]\nmore text after', false)).toEqual({ outcome: 'ok', line: '[confirmed]' });
     expect(outcomeOf('boom', true)).toEqual({ outcome: 'error', line: 'boom' });
+  });
+});
+
+describe('where Claude Code is', () => {
+  it('macOS: uses the one on PATH, else the folder its installer uses (which is not on PATH), else the older one', () => {
+    const home = join('/Users', 'a'), bin = join('/opt', 'bin');
+    const native = join(home, '.local', 'bin', 'claude'), old = join(home, '.claude', 'local', 'claude');
+    const env = { PATH: ['/usr/bin', bin].join(delimiter) };
+    const has = (...files: string[]) => (p: string) => files.includes(p);
+    expect(claudeCommand('darwin', env, home, has(join(bin, 'claude'), native))).toBe('claude');
+    expect(claudeCommand('darwin', env, home, has(native, old))).toBe(native);
+    expect(claudeCommand('darwin', env, home, has(old))).toBe(old);
+    expect(claudeCommand('darwin', {}, home, has())).toBe('claude');           // not installed: starting it fails
+    expect(claudeCommand('darwin', env, home, () => { throw new Error('EPERM'); })).toBe('claude');
+    expect(claudeCommand('win32', env, home, has(native))).toBe('claude');     // Windows: its installer sets PATH
   });
 });

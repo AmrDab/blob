@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { Questions, askUser, MAX_DETAIL } from '../src/ask.ts';
 import { outcomeOf } from '../src/brain.ts';
-import { MAX_COMMAND, classify, runTool, shellArgv, shellEnv, systemExec, type ExecResult } from '../src/shell.ts';
+import { MAX_COMMAND, classify, killLive, live, runTool, shellArgv, shellEnv, systemExec, type ExecResult } from '../src/shell.ts';
 
 const win = (c: string) => classify(c, 'win32');
 const unix = (c: string) => classify(c, 'darwin');
@@ -168,8 +168,20 @@ describe('run', () => {
   it('really runs a harmless echo, quotes and all', async () => {
     const r = await systemExec(process.platform === 'win32' ? `Write-Output "a b" 'c|d'` : `echo "a b" 'c|d'`, 30_000);
     expect(r.code).toBe(0);
+    expect(live.size).toBe(0);                                        // a finished command is no longer tracked
     expect(r.out.trim().split(/\s*\n\s*|\s(?=c)/)).toEqual(process.platform === 'win32' ? ['a b', 'c|d'] : ['a b', 'c|d']);
   }, 40_000);
+});
+
+describe('Stop takes running commands along', () => {
+  it('kills the whole group of every running command, and forgets them', () => {
+    const killed: [number, string][] = [];
+    live.add(11); live.add(22);
+    killLive((pid, signal) => { killed.push([pid, signal]); if (pid === -11) throw new Error('ESRCH'); });   // one already gone
+    expect(killed).toEqual([[-11, 'SIGKILL'], [-22, 'SIGKILL']]);
+    expect(live.size).toBe(0);
+    killLive(() => { throw new Error('nothing to kill'); });          // none running: nothing happens
+  });
 });
 
 describe('a question with a command under it', () => {

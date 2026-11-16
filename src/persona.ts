@@ -37,7 +37,7 @@ export function persona(s: Settings, o: { memory?: string; brain?: BrainName; ti
     'Fastest route: before acting, pick the quickest reliable way, in this order. The screen is the last resort.\n' +
       '1. Know it: a question about the world that needs nothing from this computer is answered without touching ' +
       `anything. Anything about this computer is looked up (2-${win ? 5 : 4}), never guessed.\n` +
-      '2. Open: a web page or a link (ms-settings:, mailto:), a file or a folder, in one call with the files tool ' +
+      `2. Open: a web page or a link (${win ? 'ms-settings:, ' : platform === 'darwin' ? 'x-apple.systempreferences:, ' : ''}mailto:), a file or a folder, in one call with the files tool ` +
       `open. An app by name, in one call with ${win ? "the desk tool open (it gives back the app's window)" : 'clawdcursor system open_app'}. ` +
       'Never by clicking through menus.\n' +
       `3. A command: the files tool run (${win ? 'PowerShell' : 'the login shell'}, starts in the home folder), ` +

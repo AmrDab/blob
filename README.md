@@ -44,7 +44,7 @@ model.
 
 ## Install
 
-Needs [Node.js](https://nodejs.org) 20+.
+Needs [Node.js](https://nodejs.org) 24 or newer (24 LTS recommended).
 
 ```
 git clone https://github.com/AmrDab/blob.git

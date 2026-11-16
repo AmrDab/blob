@@ -7,6 +7,7 @@ import { outcomeOf } from '../src/brain.ts';
 import { persona } from '../src/persona.ts';
 import { question, selfTools, type HostAction } from '../src/self-mcp.ts';
 import { DEFAULTS, SettingsStore, loadSettings, offerPair, parseValue } from '../src/settings.ts';
+import { micProblemText } from '../src/ui/speech.ts';
 
 let dir = '';
 let file = '';
@@ -379,6 +380,16 @@ describe('the brief', () => {
     expect(persona(DEFAULTS, { now, platform: 'darwin' })).toMatch(/\(macOS\)[^]*run \(the login shell/);
   });
 
+  it('names only the settings link this system opens', () => {
+    expect(persona(DEFAULTS, { now, platform: 'win32' })).toContain('(ms-settings:, mailto:)');
+    const mac = persona(DEFAULTS, { now, platform: 'darwin' });
+    expect(mac).toContain('(x-apple.systempreferences:, mailto:)');
+    expect(mac).not.toContain('ms-settings:');
+    const linux = persona(DEFAULTS, { now, platform: 'linux' });
+    expect(linux).toContain('a link (mailto:)');
+    expect(linux).not.toMatch(/ms-settings:|x-apple/);
+  });
+
   it('reflects the settings, and keeps the facts about watching true', () => {
     const off = persona({ ...DEFAULTS, model: 'sonnet' }, { now });
     expect(off).toMatch(/change_setting/);
@@ -417,5 +428,23 @@ describe('the brief', () => {
     expect(p).toMatch(/<saved_facts>\n- Uses Outlook for mail\.\n<\/saved_facts>$/);
     expect(persona(DEFAULTS, { now })).toMatch(/<saved_facts>\n\(nothing yet\)\n<\/saved_facts>$/);
     expect(persona(DEFAULTS, { now, platform: 'win32' }).length).toBeLessThan(6000);   // Windows has the longest brief: the desk route
+  });
+});
+
+describe('the microphone message', () => {
+  const refused = { name: 'NotAllowedError', message: 'The request is not allowed by the user agent' };
+
+  it('on macOS a refusal names the settings pane, the app to allow, and the restart', () => {
+    const text = micProblemText(refused, true);
+    expect(text).toMatch(/System Settings, Privacy & Security, Microphone/);
+    expect(text).toMatch(/Terminal or iTerm/);
+    expect(text).toMatch(/then restart Blob\.$/);
+    expect(text).not.toMatch(/clawdcursor|node\b/i);
+  });
+
+  it('elsewhere, and for other errors on macOS, it stays as it was', () => {
+    expect(micProblemText(refused, false)).toBe("Blob can't use the microphone (The request is not allowed by the user agent).");
+    expect(micProblemText({ name: 'NotReadableError', message: 'busy' }, true)).toBe("Blob can't use the microphone (busy).");
+    for (const mac of [true, false]) expect(micProblemText({ name: 'NotFoundError', message: 'x' }, mac)).toBe('No microphone found. Plug one in, then try Speak again.');
   });
 });

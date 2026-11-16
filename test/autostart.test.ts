@@ -1,7 +1,7 @@
 // Starting at sign-in, with a fake system: nothing here touches the registry, the Startup folder or LaunchAgents.
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RUN_KEY, macPlist, setAutostart, startCommand, supported, windowsRunValue, windowsScript, type AutostartDeps } from '../src/autostart.ts';
+import { RUN_KEY, macPlist, setAutostart, stableNode, startCommand, supported, windowsRunValue, windowsScript, type AutostartDeps } from '../src/autostart.ts';
 
 function fake(platform: string, regOk = true) {
   const ran: string[][] = [], files = new Map<string, string>();
@@ -59,9 +59,18 @@ describe('start at sign-in', () => {
     expect(text).toMatch(/<key>WorkingDirectory<\/key><string>\/Users\/a\/blob<\/string>/);
     expect(text).toMatch(/<key>PATH<\/key><string>\/opt\/homebrew\/bin:\/usr\/bin<\/string>/);
     expect(text).toMatch(/<key>RunAtLoad<\/key><true\/>/);
+    expect(text).toMatch(/<key>ProcessType<\/key><string>Interactive<\/string>/);   // not throttled as a background job
     expect(f.ran).toEqual([]);
     await setAutostart(false, f.deps);
     expect(f.files.size).toBe(0);
+  });
+
+  it('macOS: starts Node by a path that outlives an upgrade (the link on PATH, not the versioned file)', () => {
+    const cellar = '/opt/homebrew/Cellar/node/24.1.0/bin/node', link = join('/opt/homebrew/bin', 'node');
+    const real = (p: string) => { if (p === link) return cellar; if (p === join('/usr/bin', 'node')) return '/usr/bin/node'; throw new Error('ENOENT'); };
+    expect(stableNode(cellar, '/nowhere:/usr/bin::/opt/homebrew/bin', real)).toBe(link);
+    expect(stableNode(cellar, '/nowhere:/usr/bin', real)).toBe(cellar);              // no link to it (nvm): as it was started
+    expect(stableNode(cellar, '', real)).toBe(cellar);
   });
 
   it('says so where it is not built, and when the system refuses', async () => {

@@ -1,13 +1,37 @@
 // Keyboard focus hand-back. Clicking the bubble makes Blob the window in front, and clawdcursor then refuses keys
 // (the window in front is the app driving it). So Blob keeps note of the last other window in front and gives the
-// front back to it after a click. Windows only for now (user32 through koffi); elsewhere it does nothing.
+// front back to it after a click. Windows: user32 through koffi. macOS: the app in front, through the Objective-C
+// runtime (mac.ts). Elsewhere it does nothing.
 import { createRequire } from 'node:module';
+import { loadFrontApp, type FrontApp } from './mac.ts';
 
 export interface FocusKeeper { restore(): void; stop(): void }
 
 const NONE: FocusKeeper = { restore() {}, stop() {} };
 
-export function focusKeeper(own: bigint | number, platform: string = process.platform): FocusKeeper {
+/** macOS: whole apps, not windows. `own` (a window pointer there) is not used: Blob is this process. */
+function macKeeper(load: () => FrontApp, me: number): FocusKeeper {
+  let mac: FrontApp;
+  try { mac = load(); mac.frontPid(); } catch (e) {
+    console.log(`Blob: focus hand-back unavailable (${(e as Error).message})`);
+    return NONE;
+  }
+  let last = 0;
+  const timer = setInterval(() => {
+    try { const p = mac.frontPid(); if (p && p !== me) last = p; } catch { /* the next look */ }
+  }, 150);
+  timer.unref();
+  return {
+    restore() {
+      try { if (last && mac.selfActive()) mac.activate(last); }   // Blob's own state: the system's "app in front" can lag a click
+      catch (e) { console.log(`Blob: focus hand-back failed (${(e as Error).message})`); }
+    },
+    stop() { clearInterval(timer); },
+  };
+}
+
+export function focusKeeper(own: bigint | number, platform: string = process.platform, mac: () => FrontApp = loadFrontApp, pid: number = process.pid): FocusKeeper {
+  if (platform === 'darwin') return macKeeper(mac, pid);
   if (platform !== 'win32') return NONE;
   let f: {
     GetForegroundWindow: () => number; SetForegroundWindow: (h: number) => number; IsWindow: (h: number) => number;

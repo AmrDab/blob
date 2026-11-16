@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fileTools, osLocal } from '../src/files-mcp.ts';
+import { fileTools, osLocal, osTrash } from '../src/files-mcp.ts';
 import { Questions, askUser } from '../src/ask.ts';
 import { outcomeOf } from '../src/brain.ts';
 
@@ -164,8 +164,20 @@ describe('files tools', () => {
     expect(launched).toHaveLength(1);
   });
 
-  it.runIf(process.platform === 'win32')('knows a fixed disk is on this computer', () => {
+  it('knows a temp folder is on this computer', () => {
     expect(osLocal(tmpdir())).toBe(true);
+  });
+
+  it('macOS: trashes the item itself, without Finder (a link stays a link, and no "control Finder" prompt)', async () => {
+    const ran: string[][] = [];
+    await osTrash('/Users/a/link to docs', 'darwin', async (cmd, args) => { ran.push([cmd, ...args]); });
+    expect(ran).toHaveLength(1);
+    expect(ran[0].slice(0, 4)).toEqual(['osascript', '-l', 'JavaScript', '-e']);
+    expect(ran[0][4]).toMatch(/trashItemAtURL/);
+    expect(ran[0][4]).toContain('fileURLWithPathIsDirectory(a[0],false)');   // no look at the disk: a link to a folder gets no trailing slash
+    expect(ran[0][4]).not.toMatch(/Finder|alias/);
+    expect(ran[0][5]).toBe('/Users/a/link to docs');                  // an argument, never part of the script
+    await expect(osTrash('/x', 'darwin', async () => { throw new Error('no Trash on this disk'); })).rejects.toThrow('no Trash on this disk');
   });
 
   it('says so when the system could not open it', async () => {
