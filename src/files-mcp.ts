@@ -1,11 +1,11 @@
 // Blob's files server (stdio MCP): list_dir, make_folder, move (also renames), trash, open, and run (a shell command,
 // shell.ts). Claude Code starts it from the --mcp-config Blob writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
 // onto an existing file ask the user on the bubble first (No, or no answer in 60 s, refuses).
-import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
-import { execFile } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync, statfsSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, parse, resolve } from 'node:path';
 import { askUser } from './ask.ts';
 import { MAX_COMMAND, runTool, systemExec } from './shell.ts';
 
@@ -14,6 +14,8 @@ export interface FileDeps {
   trash: (path: string) => Promise<void>;
   /** Opens a URL or a path in its usual app. */
   launch: (target: string) => Promise<void>;
+  /** False when the path is on another machine (a mapped network drive, an NFS or SMB mount). */
+  local?: (path: string) => boolean;
   platform?: string;
 }
 export interface ToolResult { text: string; isError: boolean }
@@ -122,9 +124,16 @@ export function fileTools(deps: FileDeps) {
         try { url = new URL(target); } catch { return failed('BAD_URL', `"${target}" is not a URL`); }
         const schemes = ['http:', 'https:', 'mailto:', ...(platform === 'win32' ? ['ms-settings:'] : platform === 'darwin' ? ['x-apple.systempreferences:'] : [])];
         if (!schemes.includes(url.protocol)) return refused('SCHEME', 'open only web, mail and settings links');
-        // a mail link fills in a new message, nothing more: no attach= of a file from this computer
-        if (url.protocol === 'mailto:' && [...url.searchParams.keys()].some(k => !MAIL_FIELDS.has(k.toLowerCase()))) {
-          return refused('MAIL_FIELD', 'a mail link takes only to, subject, body, cc and bcc');
+        // a mail link fills in a new message, nothing more: no attach= of a file from this computer. What opens is
+        // rebuilt from what was checked, so a mail app that reads the link another way sees the same fields.
+        if (url.protocol === 'mailto:') {
+          const fields = [...url.searchParams];
+          if (url.hash || fields.some(([k]) => !MAIL_FIELDS.has(k.toLowerCase()))) {
+            return refused('MAIL_FIELD', 'a mail link takes only to, subject, body, cc and bcc');
+          }
+          const e = encodeURIComponent;
+          target = `mailto:${e(decodeURIComponent(url.pathname)).replace(/%40/g, '@').replace(/%2C/gi, ',')}` +
+            (fields.length ? '?' + fields.map(([k, v]) => `${k.toLowerCase()}=${e(v)}`).join('&') : '');
         }
       } else {
         // a network or device path (\\server\share, \\?\, //host) would reach out to another machine, with the user's sign-in
@@ -134,7 +143,7 @@ export function fileTools(deps: FileDeps) {
         if (/^[\\/]{2}/.test(p)) return refused('NOT_LOCAL', 'open only files and folders on this computer');
         if (!existsSync(p)) return failed('NOT_FOUND', `${p} does not exist`);
         const real = realpathSync(p), ext = extname(real).toLowerCase();   // a link is judged by what it points to
-        if (/^[\\/]{2}/.test(real)) return refused('NOT_LOCAL', 'open only files and folders on this computer');
+        if (/^[\\/]{2}/.test(real) || deps.local?.(real) === false) return refused('NOT_LOCAL', 'open only files and folders on this computer');
         // a Mac folder can be a program (an .app, or any bundle with Contents/Info.plist)
         const program = (d: string) => platform === 'darwin' && (BUNDLES.has(ext) || existsSync(join(d, 'Contents', 'Info.plist')));
         if (statSync(real).isDirectory() ? program(real) : !OPENS.has(ext.slice(1))) {
@@ -198,13 +207,33 @@ export async function osOpen(target: string, platform: string = process.platform
   if (Number(r) <= 32) throw new Error(`Windows error ${r}`);
 }
 
+let driveType: ((root: string) => number) | undefined;
+// Linux statfs types of network filesystems: NFS, SMB, CIFS, SMB2, AFS, Coda, NCP, 9P
+const NET_FS = new Set([0x6969, 0x517b, 0xff534d42, 0xfe534d42, 0x5346414f, 0x73757245, 0x564c, 0x01021997]);
+
+/** Whether a path is on this computer. Windows: its drive is not a network one (a mapped Z:). Linux: not a network
+ *  mount. macOS: a network share mounts under /Volumes like a disk, so there it is the path's mount type. */
+export function osLocal(path: string, platform: string = process.platform): boolean {
+  if (platform === 'win32') {
+    driveType ??= createRequire(import.meta.url)('koffi').load('kernel32.dll').func('uint32_t __stdcall GetDriveTypeW(const char16_t *root)');
+    return driveType!(parse(path).root) !== 4;   // DRIVE_REMOTE
+  }
+  if (platform === 'linux') {
+    try { return !NET_FS.has(Number(statfsSync(path).type)); } catch { return false; }
+  }
+  try {   // darwin: `df` names the mount; a network one is //user@host/share or host:/path
+    const dev = execFileSync('df', ['-P', path], { encoding: 'utf8', timeout: 5000 }).trim().split('\n').pop()?.split(/\s+/)[0] ?? '';
+    return !/^\/\/|^[^/]+:/.test(dev);
+  } catch { return false; }
+}
+
 // ── the MCP server ───────────────────────────────────────────────────────────
 
 export async function serve(): Promise<void> {
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const { z } = await import('zod');
-  const tools = fileTools({ ask: q => askUser(q), trash: p => osTrash(p), launch: t => osOpen(t) });
+  const tools = fileTools({ ask: q => askUser(q), trash: p => osTrash(p), launch: t => osOpen(t), local: p => osLocal(p) });
   const server = new McpServer({ name: 'blob-files', version: '0.1.0' });
   const reply = (r: ToolResult) => ({ content: [{ type: 'text' as const, text: r.text }], isError: r.isError });
   const path = z.string().describe('Full path (a leading ~ means the home folder).');

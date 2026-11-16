@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fileTools } from '../src/files-mcp.ts';
+import { fileTools, osLocal } from '../src/files-mcp.ts';
 import { Questions, askUser } from '../src/ask.ts';
 import { outcomeOf } from '../src/brain.ts';
 
@@ -153,8 +153,19 @@ describe('files tools', () => {
     for (const target of ['mailto:a@b.c?attach=C:/secret.txt', 'mailto:a@b.c?subject=hi&Attachment=x']) {
       expect((await tools().open({ target })).text).toMatch(/MAIL_FIELD/);
     }
-    expect(outcome(await tools().open({ target: 'mailto:a@b.c?subject=Hi&body=See%20you&cc=d@e.f' }))).toBe('confirmed');
+    expect((await tools().open({ target: 'mailto:a@b.c?subject=hi#attach=x' })).text).toMatch(/MAIL_FIELD/);
+    // what opens is rebuilt from what was checked: one field per &, each encoded
+    expect(outcome(await tools().open({ target: 'mailto:a@b.c,d@e.f?Subject=Hi&body=See+you;attach=x' }))).toBe('confirmed');
+    expect(launched).toEqual(['mailto:a@b.c,d@e.f?subject=Hi&body=See%20you%3Battach%3Dx']);
+    // a mapped network drive is a path on another machine
+    writeFileSync(join(dir, 'z.pdf'), '');
+    const t = fileTools({ ask: async () => true, trash: async () => {}, launch: async x => { launched.push(x); }, local: () => false, platform });
+    expect((await t.open({ target: join(dir, 'z.pdf') })).text).toMatch(/NOT_LOCAL/);
     expect(launched).toHaveLength(1);
+  });
+
+  it.runIf(process.platform === 'win32')('knows a fixed disk is on this computer', () => {
+    expect(osLocal(tmpdir())).toBe(true);
   });
 
   it('says so when the system could not open it', async () => {
