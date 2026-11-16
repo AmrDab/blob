@@ -140,6 +140,21 @@ describe('files tools', () => {
     expect((await tools().open({ target: join(dir, 'gone.pdf') })).text).toMatch(/NOT_FOUND/);
     expect((await tools().open({ target: 'Word' })).text).toMatch(/NOT_ABSOLUTE/);            // an app by name is not a path
     expect(launched).toHaveLength(3);
+    mkdirSync(join(dir, 'Plain', 'Contents'), { recursive: true });                       // a bundle by its insides, any name
+    writeFileSync(join(dir, 'Plain', 'Contents', 'Info.plist'), '');
+    expect((await tools().open({ target: join(dir, 'Plain') })).text).toMatch(/NOT_OPENABLE/);
+    expect(launched).toHaveLength(3);
+  });
+
+  it('opens nothing on another machine, and no mail link that attaches a file', async () => {
+    for (const target of ['\\\\server\\share\\a.pdf', '//server/share/a.pdf', '\\\\?\\C:\\a.pdf', '\\\\.\\pipe\\x']) {
+      expect((await tools().open({ target })).text).toMatch(/NOT_LOCAL/);
+    }
+    for (const target of ['mailto:a@b.c?attach=C:/secret.txt', 'mailto:a@b.c?subject=hi&Attachment=x']) {
+      expect((await tools().open({ target })).text).toMatch(/MAIL_FIELD/);
+    }
+    expect(outcome(await tools().open({ target: 'mailto:a@b.c?subject=Hi&body=See%20you&cc=d@e.f' }))).toBe('confirmed');
+    expect(launched).toHaveLength(1);
   });
 
   it('says so when the system could not open it', async () => {

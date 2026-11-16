@@ -28,6 +28,8 @@ const OPENS = new Set(('pdf txt md rtf csv log json xml doc docx xls xlsx ppt pp
   'mp3 wav m4a aac flac ogg mp4 mov m4v mkv avi webm').split(' '));
 /** macOS folders that are programs. */
 const BUNDLES = new Set(['.app', '.workflow', '.bundle', '.pkg', '.mpkg', '.prefpane', '.terminal']);
+/** What a mail link may carry. */
+const MAIL_FIELDS = new Set(['to', 'subject', 'body', 'cc', 'bcc']);
 
 /** A full path from the model's argument: "~" expands, anything relative is refused (there is no useful cwd). */
 function fullPath(p: unknown): string | ToolResult {
@@ -120,12 +122,22 @@ export function fileTools(deps: FileDeps) {
         try { url = new URL(target); } catch { return failed('BAD_URL', `"${target}" is not a URL`); }
         const schemes = ['http:', 'https:', 'mailto:', ...(platform === 'win32' ? ['ms-settings:'] : platform === 'darwin' ? ['x-apple.systempreferences:'] : [])];
         if (!schemes.includes(url.protocol)) return refused('SCHEME', 'open only web, mail and settings links');
+        // a mail link fills in a new message, nothing more: no attach= of a file from this computer
+        if (url.protocol === 'mailto:' && [...url.searchParams.keys()].some(k => !MAIL_FIELDS.has(k.toLowerCase()))) {
+          return refused('MAIL_FIELD', 'a mail link takes only to, subject, body, cc and bcc');
+        }
       } else {
+        // a network or device path (\\server\share, \\?\, //host) would reach out to another machine, with the user's sign-in
+        if (/^[\\/]{2}/.test(target)) return refused('NOT_LOCAL', 'open only files and folders on this computer');
         const p = fullPath(a.target);
         if (typeof p !== 'string') return p;
+        if (/^[\\/]{2}/.test(p)) return refused('NOT_LOCAL', 'open only files and folders on this computer');
         if (!existsSync(p)) return failed('NOT_FOUND', `${p} does not exist`);
-        const ext = extname(platform === 'darwin' ? realpathSync(p) : p).toLowerCase();   // a Mac follows a link into a program
-        if (statSync(p).isDirectory() ? platform === 'darwin' && BUNDLES.has(ext) : !OPENS.has(ext.slice(1))) {
+        const real = realpathSync(p), ext = extname(real).toLowerCase();   // a link is judged by what it points to
+        if (/^[\\/]{2}/.test(real)) return refused('NOT_LOCAL', 'open only files and folders on this computer');
+        // a Mac folder can be a program (an .app, or any bundle with Contents/Info.plist)
+        const program = (d: string) => platform === 'darwin' && (BUNDLES.has(ext) || existsSync(join(d, 'Contents', 'Info.plist')));
+        if (statSync(real).isDirectory() ? program(real) : !OPENS.has(ext.slice(1))) {
           return refused('NOT_OPENABLE', 'open only folders, documents, pictures, audio and video; a program goes through run, which asks the user first');
         }
         target = p;
