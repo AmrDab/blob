@@ -22,8 +22,8 @@ const post = (path: string, body: unknown = {}) =>
 /** Gives the keyboard back to the window the user was in before clicking the bubble. */
 const back = () => void post('/focus-back');
 
-const MODELS: Model[] = ['sonnet', 'haiku', 'opus', 'default'];
-const LABEL: Record<Model, string> = { sonnet: 'Sonnet', haiku: 'Haiku', opus: 'Opus', default: 'Default' };
+const MODELS: Model[] = ['auto', 'haiku', 'sonnet', 'opus', 'default'];
+const LABEL: Record<Model, string> = { auto: 'Auto', sonnet: 'Sonnet', haiku: 'Haiku', opus: 'Opus', default: 'Default' };
 const T = { duration: 550, ease: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
 const HOLD_MS = 350;   // a press longer than this is press-and-hold; shorter is a tap (tap again to finish)
 const STILL_MS = 150;  // a press that stays still this long starts the mic
@@ -72,7 +72,7 @@ function App() {
   const [typeOpen, setTypeOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [browsing, setBrowsing] = useState(false);            // the + view: every saved shortcut, to pin or remove
-  const [model, setModel] = useState<Model>('sonnet');        // the settings' model: a click on the chip changes it
+  const [model, setModel] = useState<Model>('auto');          // the settings' model: a click on the chip changes it
   const [codex, setCodex] = useState(false);                  // the brain is Codex: it runs its own default model, so the chip only says so
   const [voice, setVoice] = useState(true);
   const [first, setFirst] = useState<{ onboarded: boolean; cards: FirstRun[] }>({ onboarded: true, cards: [] });

@@ -41,6 +41,7 @@ const NO = () => refused('USER_SAID_NO', 'the user said No (or did not answer); 
 /** The card's question for a change. */
 export function question(key: typeof CHANGEABLE[number], value: Settings[Key]): string {
   if (key === 'brain') return `Switch to ${BRAIN_NAME[value as BrainName]}? This starts a new conversation.`;
+  if (key === 'model' && value === 'auto') return 'Let Blob pick the model: Haiku first, stronger only when needed?';
   if (key === 'model') return value === 'default' ? "Switch to Claude Code's default model?" : `Switch to ${String(value)[0].toUpperCase()}${String(value).slice(1)}?`;
   if (key === 'watching') {
     return value
@@ -81,6 +82,13 @@ export function selfTools(d: SelfDeps) {
       const s = d.settings.get();
       const lines = (Object.keys(DEFAULTS) as Key[]).map(k => `- ${k} = ${String(s[k])}: ${WHAT[k]}`);
       return { text: `${persona(s, { memory: memoryBrief(d.memoryFile) })}\n\nSettings (the user can change ${CHANGEABLE.join(', ')}):\n${lines.join('\n')}`, isError: false };
+    },
+
+    /** Changes nothing here: on auto, the host hands the request to the next model once this one's turn has ended (ladder.ts). */
+    step_up(): ToolResult {
+      const s = d.settings.get();
+      if (s.brain === 'codex' || s.model !== 'auto') return { text: 'No stronger model here: finish the request, or say in one sentence what stopped you.', isError: false };
+      return { text: 'Noted. End your turn now with no reply text.', isError: false };
     },
 
     get_settings(): ToolResult {
@@ -240,6 +248,10 @@ export async function serve(): Promise<void> {
   server.registerTool('about', {
     description: 'What Blob can do, its settings now, and what each one does.', inputSchema: {}, annotations: read,
   }, async () => reply(tools.about()));
+  server.registerTool('step_up', {
+    description: 'Hand this request to a stronger model after you stop. Only when a needed step failed and you cannot see another way. Then end your turn with no reply text.',
+    inputSchema: {},
+  }, async () => reply(tools.step_up()));
   server.registerTool('get_settings', {
     description: 'Blob\'s settings now, as JSON.', inputSchema: {}, annotations: read,
   }, async () => reply(tools.get_settings()));

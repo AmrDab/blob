@@ -12,16 +12,19 @@ let dir = '';
 let asked: string[] = [];
 let answer = false;
 let trashed: string[] = [];
+let launched: string[] = [];
+let platform = 'win32';
 const tools = () => fileTools({
   ask: async q => { asked.push(q); return answer; },
   trash: async p => { trashed.push(p); rmSync(p, { recursive: true }); },
-  platform: 'win32',
+  launch: async t => { launched.push(t); },
+  platform,
 });
 const outcome = (r: { text: string; isError: boolean }) => outcomeOf(r.text, r.isError).outcome;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'blob-files-'));
-  asked = []; trashed = []; answer = false;
+  asked = []; trashed = []; launched = []; answer = false; platform = 'win32';
   writeFileSync(join(dir, 'a.txt'), 'A');
   writeFileSync(join(dir, 'b.txt'), 'B');
 });
@@ -96,6 +99,54 @@ describe('files tools', () => {
     expect(asked).toHaveLength(2);
     expect(outcome(await t.trash({ path: join(dir, 'gone.txt') }))).toBe('failed');
     expect(asked).toHaveLength(2);   // nothing to ask about
+  });
+
+  it('opens web, mail and settings links as they are, and no other scheme', async () => {
+    const r = await tools().open({ target: 'https://example.com/a?b=1&c=2' });
+    expect(r.text).toMatch(/\[confirmed\]$/);
+    expect(outcome(await tools().open({ target: 'mailto:a@b.c' }))).toBe('confirmed');
+    expect(outcome(await tools().open({ target: 'ms-settings:display' }))).toBe('confirmed');
+    expect(launched).toEqual(['https://example.com/a?b=1&c=2', 'mailto:a@b.c', 'ms-settings:display']);
+    for (const target of ['search-ms:query=x', 'file:///C:/x']) expect((await tools().open({ target })).text).toMatch(/SCHEME/);
+    // quotes and spaces would reach the mail app's command line as more arguments
+    expect((await tools().open({ target: 'mailto:a@b.c" /a "C:\\secret.txt' })).text).toMatch(/BAD_URL/);
+    expect(launched).toHaveLength(3);
+    platform = 'linux';
+    for (const target of ['ms-settings:display', 'search-ms:query=x', 'file:///C:/x']) {
+      const no = await tools().open({ target });
+      expect(outcome(no)).toBe('refused');
+      expect(no.text).toMatch(/SCHEME/);
+    }
+    platform = 'darwin';
+    expect(outcome(await tools().open({ target: 'x-apple.systempreferences:com.apple.preference.sound' }))).toBe('confirmed');
+    expect(launched).toHaveLength(4);
+    expect(asked).toEqual([]);                           // never a question: nothing here is a program
+  });
+
+  it('opens folders, documents and media, never a program', async () => {
+    for (const name of ['x.exe', 'x.lnk', 'x.py', 'x.PDF']) writeFileSync(join(dir, name), '');
+    for (const name of ['x.exe', 'x.lnk', 'x.py']) {
+      const no = await tools().open({ target: join(dir, name) });
+      expect(outcome(no)).toBe('refused');
+      expect(no.text).toMatch(/NOT_OPENABLE/);
+    }
+    expect(outcome(await tools().open({ target: join(dir, 'x.PDF') }))).toBe('confirmed');
+    expect(outcome(await tools().open({ target: dir }))).toBe('confirmed');
+    expect(launched).toEqual([join(dir, 'x.PDF'), dir]);
+    mkdirSync(join(dir, 'X.app'));
+    expect(outcome(await tools().open({ target: join(dir, 'X.app') }))).toBe('confirmed');   // only a program on a Mac
+    platform = 'darwin';
+    expect((await tools().open({ target: join(dir, 'X.app') })).text).toMatch(/NOT_OPENABLE/);
+    expect((await tools().open({ target: join(dir, 'gone.pdf') })).text).toMatch(/NOT_FOUND/);
+    expect((await tools().open({ target: 'Word' })).text).toMatch(/NOT_ABSOLUTE/);            // an app by name is not a path
+    expect(launched).toHaveLength(3);
+  });
+
+  it('says so when the system could not open it', async () => {
+    const t = fileTools({ ask: async () => true, trash: async () => {}, launch: async () => { throw new Error('Windows error 2'); } });
+    const r = await t.open({ target: 'https://example.com' });
+    expect(outcome(r)).toBe('failed');
+    expect(r.text).toMatch(/CANT_OPEN · hint: Windows error 2/);
   });
 });
 

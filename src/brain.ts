@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { MAX_TURNS, askedUp, continueText, firstTier, stepUp, userDecided, type Tier } from './ladder.ts';
 import { BRAIN_NAME, type BrainName, type Model } from './settings.ts';
 
 export type { Model };
@@ -23,6 +24,7 @@ export interface Call {
   args: Record<string, unknown>;
   outcome: string;
   line: string;
+  decided?: boolean;  // the user said No, pressed Stop or took the screen back (ladder.ts)
 }
 
 export type Update =
@@ -78,21 +80,23 @@ export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand }, en
 }
 
 /** `persona`: what Blob knows about itself (persona.ts), as the settings are when the child starts. */
-export function claudeArgs(o: { mcpConfigPath: string; model: Model; resume?: string; persona?: string }): string[] {
+export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: string; persona?: string; maxTurns?: number }): string[] {
   return [
     '-p',
     '--input-format', 'stream-json',
     '--output-format', 'stream-json', '--verbose',
     '--mcp-config', o.mcpConfigPath,
     '--strict-mcp-config',                  // no other MCP server (not the user's own, not a plugin's)
-    '--setting-sources', 'project',         // the cwd is an empty folder: none of the user's hooks, plugins or CLAUDE.md
+    '--setting-sources', 'project',         // the cwd is an empty folder: none of the user's hooks or plugins (CLAUDE.md: cleanEnv)
     '--tools', BUILTIN_TOOLS.join(','),     // read-only built-ins only: no Bash, no Edit/Write (the shell is files `run`, which asks)
     '--allowedTools', ['mcp__clawdcursor__*', 'mcp__files__*', 'mcp__blob__*', ...BUILTIN_TOOLS].join(','),
     '--disable-slash-commands',
     '--no-chrome',
     '--append-system-prompt', o.persona ? `${SYSTEM_PROMPT}\n${o.persona}` : SYSTEM_PROMPT,
+    '--system-prompt-snapshot', 'off',      // each start sends its own brief: the time, settings and tier now, not the first request's
     ...(o.model === 'default' ? [] : ['--model', o.model]),
     ...(o.resume ? ['--resume', o.resume] : []),
+    ...(o.maxTurns ? ['--max-turns', String(o.maxTurns)] : []),   // auto only: the tier's step budget (ladder.ts)
   ];
 }
 
@@ -157,7 +161,7 @@ export function codexArgs(o: { servers: Record<string, ServerCommand>; model?: s
         ...c(`${k}.args`, `[${s.args.map(toml).join(',')}]`),
         ...(Object.keys(env).length ? c(`${k}.env`, `{${Object.entries(env).map(([n, v]) => `${n}=${toml(v)}`).join(',')}}`) : []),
         ...c(`${k}.default_tools_approval_mode`, '"approve"'),   // the Yes gates are the servers' own; Codex has nobody to ask
-        ...c(`${k}.required`, 'true'),                           // without one of them Codex does not start, and says which
+        ...c(`${k}.required`, name === 'clawdcursor' ? 'false' : 'true'),   // clawdcursor is the last resort: Codex starts without it
         ...c(`${k}.startup_timeout_sec`, '30'),
         ...c(`${k}.tool_timeout_sec`, '1800'),                   // a call may wait for the user's Yes, or for a pause to end
       ];
@@ -176,13 +180,18 @@ export function codexInput(text: string, brief?: string): string {
   return brief ? `<brief_now>\n${brief}\n</brief_now>\n${text}` : text;
 }
 
-/** The child's env: no API key or host-session variables, so `claude` signs in with the user's own plan login. */
+/**
+ * The child's env: no API key or host-session variables, so `claude` signs in with the user's own plan login. And no
+ * CLAUDE.md: Claude Code reads one from every folder above the cwd (the user's own coding rules in their home folder),
+ * whatever --setting-sources says.
+ */
 export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
     if (/^ANTHROPIC_/i.test(k) || /^CLAUDECODE$/i.test(k) || /^CLAUDE_CODE_/i.test(k)) continue;
     out[k] = v;
   }
+  out.CLAUDE_CODE_DISABLE_CLAUDE_MDS = '1';
   return out;
 }
 
@@ -238,6 +247,12 @@ export class StreamParser {
   readonly calls: Call[] = [];
   sawResult = false;
   resultError = false;
+  /** Why the run ended: 'max_turns' when it used up its step budget, else Claude Code's own word. */
+  stop?: string;
+  private said?: Update;
+
+  /** `hold`: on a tier that can step up, what the model says waits for its next step, so a stuck model's last words never show. */
+  constructor(private hold = false) {}
 
   feed(line: string): Update[] {
     let e: any;
@@ -246,20 +261,24 @@ export class StreamParser {
     if (e?.type === 'system' && e.subtype === 'init') {
       if (typeof e.session_id === 'string') out.push({ type: 'session', id: e.session_id });
       const servers: any[] = Array.isArray(e.mcp_servers) ? e.mcp_servers : [];
-      const s = servers.find(x => x?.name === 'clawdcursor');
       const f = servers.find(x => x?.name === 'files');
-      if (!s) out.push({ type: 'caption', text: "Blob can't use this computer right now." });
-      else if (s.status !== 'connected') out.push({ type: 'caption', text: `Blob can't use this computer right now (${s.status ?? 'not connected'}).` });
-      else if (f && f.status !== 'connected') out.push({ type: 'caption', text: `Blob's file tools are ${f.status ?? 'not connected'}.` });
+      if (f && f.status !== 'connected') out.push({ type: 'caption', text: `Blob's file tools are ${f.status ?? 'not connected'}.` });
       return out;
     }
     if (e?.type === 'assistant' && Array.isArray(e.message?.content)) {
       for (const b of e.message.content) {
-        if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) out.push({ type: 'caption', text: oneLine(b.text) });
+        if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+          const u: Update = { type: 'caption', text: oneLine(b.text) };
+          if (this.hold) this.said = u; else out.push(u);
+        }
         if (b?.type === 'tool_use' && typeof b.name === 'string') {
           const { server, tool } = splitToolName(b.name);
           const args = b.input && typeof b.input === 'object' && !Array.isArray(b.input) ? b.input : {};
           this.pending.set(b.id, { server, tool, args });
+          const held = this.said;
+          this.said = undefined;
+          if (askedUp({ server, tool })) continue;     // the hand-off is not a step the user sees
+          if (held) out.push(held);
           const l = callLabel(server, tool, args);
           out.push({ type: 'caption', text: stepCaption(l.tool, l.action) });
         }
@@ -270,17 +289,21 @@ export class StreamParser {
       for (const b of e.message.content) {
         if (b?.type !== 'tool_result') continue;
         const call = this.pending.get(b.tool_use_id) ?? { server: '', tool: '?', args: {} };
-        const o = outcomeOf(resultText(b.content), b.is_error === true);
-        this.calls.push({ ...call, ...o });
-        out.push({ type: 'log', entry: { ...callLabel(call.server, call.tool, call.args), ...o } });
+        const text = resultText(b.content), o = outcomeOf(text, b.is_error === true);
+        this.calls.push({ ...call, ...o, ...(userDecided(call.server, text) && { decided: true }) });
+        if (!askedUp(call)) out.push({ type: 'log', entry: { ...callLabel(call.server, call.tool, call.args), ...o } });
       }
       return out;
     }
     if (e?.type === 'result') {
       this.sawResult = true;
       this.resultError = e.is_error === true;
+      this.stop = e.subtype === 'error_max_turns' || e.terminal_reason === 'max_turns' ? 'max_turns' : (e.terminal_reason ?? e.subtype);
       if (typeof e.session_id === 'string') out.push({ type: 'session', id: e.session_id });
-      const text = typeof e.result === 'string' && e.result.trim() ? e.result : e.is_error ? `Claude Code stopped (${e.subtype ?? 'error'}).` : 'Done.';
+      // Out of steps, or it asked for a stronger model and said nothing: when no model takes over, that is not "Done."
+      const text = this.stop === 'max_turns' ? 'I couldn\'t finish that: it took too many steps.'
+        : typeof e.result === 'string' && e.result.trim() ? e.result
+        : e.is_error ? `Claude Code stopped (${e.subtype ?? 'error'}).` : this.calls.some(askedUp) ? 'I couldn\'t finish that.' : 'Done.';
       out.push({ type: 'answer', text: oneLine(text, 400) });
     }
     return out;
@@ -336,12 +359,15 @@ function killTree(p: ChildProcessWithoutNullStreams): void {
 
 /** One `claude -p` or `codex exec` at a time. prewarm() starts it early (when Speak is pressed); run() sends the request. */
 export class Brain {
-  private child?: { p: ChildProcessWithoutNullStreams; brain: BrainName; model: Model; sent: boolean; halted: boolean; early: Update[]; input: (text: string) => string };
+  private child?: {
+    p: ChildProcessWithoutNullStreams; brain: BrainName; model: Model; sent: boolean; halted: boolean; early: Update[]; input: (text: string) => string;
+    tier: Tier; before: Call[]; next?: { tier: Tier; why: string };   // auto: the model running now, the earlier tiers' calls, and who takes over
+  };
   private session?: { id: string; brain: BrainName };
 
   constructor(private o: {
     mcpConfigPath: string; servers: Record<string, ServerCommand>; cwd: string; emit: (e: BrainEvent) => void;
-    persona?: (brain: BrainName) => string;
+    persona?: (brain: BrainName, tier: Tier) => string;
   }) {}
 
   get busy(): boolean { return !!this.child?.sent; }
@@ -366,7 +392,7 @@ export class Brain {
     c.sent = true;
     this.o.emit({ type: 'busy', busy: true });
     this.o.emit({ type: 'caption', text: 'Thinking…' });
-    for (const u of c.early.splice(0)) this.o.emit(u);   // e.g. "clawdcursor is failed." from a prewarmed start
+    for (const u of c.early.splice(0)) this.o.emit(u);   // e.g. "Blob's file tools are failed." from a prewarmed start
     c.p.stdin.end(c.input(text));
     return true;
   }
@@ -378,33 +404,46 @@ export class Brain {
     killTree(this.child.p);
   }
 
-  stop(): void { if (this.child) killTree(this.child.p); this.child = undefined; }
+  stop(): void {
+    if (this.child) { this.child.halted = true; killTree(this.child.p); }   // halted: quitting never starts the next tier
+    this.child = undefined;
+  }
 
-  private start(model: Model, brain: BrainName) {
+  /** `tier` and `before`: a step-up of the same request (ladder.ts), with the calls of the tiers before it. */
+  private start(model: Model, brain: BrainName, tier: Tier = firstTier(model), before: Call[] = []) {
     // A session cannot move between brains: the other one starts a new conversation, and says so.
     const moved = !!this.session && this.session.brain !== brain;
     if (moved) this.session = undefined;
-    const resume = this.session?.id, persona = this.o.persona?.(brain), codex = brain === 'codex', name = BRAIN_NAME[brain];
+    const resume = this.session?.id, persona = this.o.persona?.(brain, tier), codex = brain === 'codex', name = BRAIN_NAME[brain];
     const cmd = codex ? codexCommand() : { command: 'claude', args: [] };
     const args = codex ? codexArgs({ servers: this.o.servers, resume, persona })      // Codex runs its own default model
-      : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model, resume, persona });
+      : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model: tier, resume, persona, maxTurns: model === 'auto' ? MAX_TURNS[tier] : undefined });
     const p = spawn(cmd.command, [...cmd.args, ...args], {
       cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: process.platform !== 'win32',
     });
-    const entry = {
-      p, brain, model, sent: false, halted: false,
+    const entry: NonNullable<Brain['child']> = {
+      p, brain, model, tier, before, sent: false, halted: false,
       early: (moved ? [{ type: 'caption', text: `Now using ${name}: this is a new conversation.` }] : []) as Update[],
       input: codex ? (text: string) => codexInput(text, resume && persona) : userMessage,
     };
-    const parser = codex ? new CodexParser() : new StreamParser();
+    const parser = codex ? new CodexParser() : new StreamParser(model === 'auto' && !!MAX_TURNS[tier]);
     let stderr = '';
     p.stdout.setEncoding('utf8');
     p.stdin.on('error', () => { /* it exited before reading; the close handler reports it */ });
     p.stderr.on('data', d => { stderr = (stderr + d).slice(-2000); });
     createInterface({ input: p.stdout }).on('line', line => {
       for (const u of parser.feed(line)) {
-        if (u.type === 'session') this.session = { id: u.id, brain };
-        else if (entry.sent) this.o.emit(u);
+        if (u.type === 'session') { this.session = { id: u.id, brain }; continue; }
+        // The run ended by itself: a stuck tier's answer is held back, and the next tier starts when this child closes.
+        if (u.type === 'answer' && parser instanceof StreamParser && entry.sent) {
+          entry.next = stepUp({ brain, model, tier, halted: entry.halted, sawResult: true, resultError: parser.resultError, stop: parser.stop, calls: parser.calls });
+          if (entry.next) {
+            this.o.emit({ type: 'caption', text: 'Thinking harder…' });
+            this.o.emit({ type: 'log', entry: { tool: 'model', action: entry.next.tier, outcome: 'ok', line: entry.next.why } });
+            continue;
+          }
+        }
+        if (entry.sent) this.o.emit(u);
         else entry.early.push(u);
       }
     });
@@ -414,9 +453,18 @@ export class Brain {
       finished = true;
       if (this.child === entry) this.child = undefined;
       if (!entry.sent) return;
-      if (!parser.sawResult) this.o.emit({ type: 'answer', text: entry.halted ? 'Stopped.' : oneLine(stderr.trim().split('\n').pop() || why, 400) });
+      if (entry.next && !entry.halted) {              // the next tier takes the same session, in the same tick: never idle in between
+        try {
+          const c = this.start(model, brain, entry.next.tier, [...entry.before, ...parser.calls]);
+          this.child = c;
+          c.sent = true;
+          c.p.stdin.end(c.input(continueText(entry.next.why)));
+          return;
+        } catch (e) { why = `Could not start ${name}: ${(e as Error).message}`; }   // the request ends here, with that as its answer
+      }
+      if (!parser.sawResult || entry.next) this.o.emit({ type: 'answer', text: entry.halted ? 'Stopped.' : oneLine(stderr.trim().split('\n').pop() || why, 400) });
       this.o.emit({ type: 'busy', busy: false });
-      this.o.emit({ type: 'done', calls: parser.calls, ok: parser.sawResult && !parser.resultError });
+      this.o.emit({ type: 'done', calls: [...entry.before, ...parser.calls], ok: parser.sawResult && !parser.resultError });
     };
     p.on('error', err => done(`Could not start ${name}: ${err.message}`));
     p.on('close', code => done(`${name} exited (${code}).`));

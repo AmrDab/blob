@@ -608,7 +608,7 @@ const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, processLister());
 writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer }), { mode: 0o600 });
 brain = new Brain({
   mcpConfigPath, servers: mcpServers({ files: filesServer, blob: selfServer }), cwd: WORK, emit: onBrain,
-  persona: b => persona(settings.get(), { memory: memoryBrief(memoryFile()), brain: b }),
+  persona: (b, tier) => persona(settings.get(), { memory: memoryBrief(memoryFile()), brain: b, tier }),
 });
 sendShortcuts();
 sendSettings();

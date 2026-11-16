@@ -35,7 +35,7 @@ describe('codex command line', () => {
     expect(override(a, 'web_search')).toEqual(['"disabled"']);
   });
 
-  it('gives it Blob\'s three servers as overrides of this run: required, and never asked about by Codex', () => {
+  it('gives it Blob\'s three servers as overrides of this run: its own two required, and never asked about by Codex', () => {
     const a = codexArgs({ servers, env: {} });
     expect(override(a, 'mcp_servers.clawdcursor.command')).toEqual(['"cmd"']);
     expect(override(a, 'mcp_servers.clawdcursor.args')).toEqual(['["/c","clawdcursor","mcp","--compact"]']);
@@ -46,7 +46,7 @@ describe('codex command line', () => {
     expect(override(a, 'mcp_servers.blob.env')).toEqual([]);            // no env: no empty table
     for (const name of ['clawdcursor', 'files', 'blob']) {
       expect(override(a, `mcp_servers.${name}.default_tools_approval_mode`)).toEqual(['"approve"']);
-      expect(override(a, `mcp_servers.${name}.required`)).toEqual(['true']);
+      expect(override(a, `mcp_servers.${name}.required`)).toEqual([name === 'clawdcursor' ? 'false' : 'true']);   // the screen is the last resort: Codex starts without it
     }
     expect(a.filter(x => /^mcp_servers\.(?!clawdcursor\.|files\.|blob\.)/.test(x))).toEqual([]);   // no other server
     // Codex hands a server only a few system variables, so a Blob folder that is not the usual one goes along
@@ -151,7 +151,7 @@ describe('the brief', () => {
   it('is the same plain brief for both, bar how to read a file; it says how to switch, and names no company', () => {
     const claude = persona(DEFAULTS), codex = persona({ ...DEFAULTS, brain: 'codex' });
     expect(claude).toMatch(/Read, Glob and Grep to look/);
-    expect(claude).toMatch(/brain Claude Code; model Sonnet;/);
+    expect(claude).toMatch(/brain Claude Code; model Auto \(Haiku first/);
     expect(codex).not.toMatch(/Read, Glob and Grep/);                   // Codex has no built-in file tools here
     expect(codex).toMatch(/run with a command that only looks, to read/);
     expect(codex).toMatch(/brain Codex; model Codex's default model;/);

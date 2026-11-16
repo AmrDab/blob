@@ -3,17 +3,21 @@
 A small floating blob on your desktop that does tasks on your computer. Tell it what to do, by voice or by typing,
 and it does it while you watch, then says in a sentence that it is done.
 
-- **Any task, the fastest way.** It opens a link or an app directly, runs a command when one does the job, uses its
-  file tools for files, and works an app's window only when that is the only way.
+- **Any task, the fastest way.** It opens a link, a file or an app directly, runs a command when one does the job,
+  uses its file tools for files, and works an app's window only as the last resort.
+- **The right model for the job.** On Auto (the default) each request starts on Haiku; Sonnet, then Opus, take over
+  only when it gets stuck. Easy requests are fast and cheap; the hardest take a few seconds longer.
 - **Reminders and schedules.** "Remind me at 5 to call the bank." "Every weekday at 9, open my mail."
 - **Memory.** "Remember that I use Outlook for mail." It is a plain file on your computer that you can read and edit.
-- **Simple.** One blob. No settings menu: to change something, just ask ("use Haiku", "stop watching").
+- **Simple.** One blob. No settings menu: to change something, just ask ("use Haiku" always uses that one model,
+  "pick the model yourself" goes back to Auto, "stop watching").
 - **It learns.** A task that worked 3 times becomes a shortcut by itself. If you let it, it also learns which apps
   and sites you use.
 
-Blob runs **your own Claude Code or Codex** (signed in with your own plan, no API key) and gives it
-[clawdcursor](https://github.com/AmrDab/clawdcursor) as its hands: it reads apps by name, clicks, types, and checks
-every step. For files it can look, move, rename, make folders, or put things in the Recycle Bin / Trash; it asks you
+Blob runs **your own Claude Code or Codex** (signed in with your own plan, no API key). It opens links, files and
+folders with its own tools, and uses [clawdcursor](https://github.com/AmrDab/clawdcursor) to work inside a window
+when nothing else does the job: it reads apps by name, clicks, types, and checks every step. For files it can look,
+open, move, rename, make folders, or put things in the Recycle Bin / Trash; it asks you
 first before anything goes to the bin or a file gets replaced.
 
 It can also run commands (PowerShell on Windows, your login shell on macOS and Linux). A command that only looks
@@ -63,7 +67,8 @@ Blob walks you through it on small cards, one at a time:
 - **Speak** (the blob): hold it still and talk, or tap to start and tap again to stop. Press and move it to drag it
   somewhere else. The first time, it asks once to download the speech model (about 81 MB). Speech becomes text on
   your computer.
-- **Type** (fans out on hover): a one-line box. The chip next to it is the model; a click changes it (with Codex it says `Codex`).
+- **Type** (fans out on hover): a one-line box. The chip next to it is the model; a click changes it: Auto, or
+  always Haiku, Sonnet, Opus or Claude Code's default (with Codex it says `Codex`).
 - **Log**: each request, each step and whether it was confirmed, and the answer. Also kept in `~/.blob/logs/`.
 - **Shortcuts.** A shortcut replays a task's steps directly, with no AI, and stops at the first step that does not
   confirm. When the same task has worked 3 times, Blob makes the shortcut, pins it on the blob and asks once: "Keep
@@ -143,6 +148,7 @@ State in `~/.blob/`: `settings.json`, `memory.md`, `schedule.json`, `shortcuts.j
 - `src/brain.ts`: starts `claude -p` (stream-json) with clawdcursor, the files server, the self server and the
   read-only built-ins, or `codex exec --json` with the same three servers, and parses what either does into the
   same events.
+- `src/ladder.ts`: Auto's ladder: when Haiku hands a request to Sonnet, and Sonnet to Opus.
 - `src/settings.ts`, `src/self-mcp.ts`, `src/persona.ts`: the settings, the "blob" tools that change them after a
   Yes, and the brief the AI gets (what Blob can do, and the order to try it in).
 - `src/shell.ts`: the `run` tool: which commands only look, the Yes card for the rest, and the run itself.

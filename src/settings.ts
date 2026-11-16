@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, unwatchFile, watchFile, writeFileS
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-export const MODELS = ['default', 'sonnet', 'haiku', 'opus'] as const;
+export const MODELS = ['auto', 'haiku', 'sonnet', 'opus', 'default'] as const;
 export type Model = typeof MODELS[number];
 /** The program that does the thinking: the user's own Claude Code or Codex. */
 export const BRAINS = ['claude', 'codex'] as const;
@@ -26,7 +26,7 @@ export type Key = keyof Settings;
 
 /** Before the first-run questions: nothing that learns about the user is on until they say Yes. */
 export const DEFAULTS: Settings = {
-  brain: 'claude', model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false, pairOffered: false,
+  brain: 'claude', model: 'auto', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false, pairOffered: false,
 };
 
 /** What the user can change by asking. The rest is set by the host. */
@@ -37,8 +37,9 @@ export const FIRST_RUN = ['watching', 'voice', 'autoShortcuts', 'startAtLogin'] 
 export const WHAT: Record<Key, string> = {
   brain: 'Which program does the thinking: claude (Claude Code) or codex (Codex). Each needs its own install and ' +
     'sign-in. A change applies from the next request and starts a new conversation.',
-  model: 'Which Claude model does the work: default, sonnet, haiku or opus. A change applies from the next request. ' +
-    'Codex runs its own default model.',
+  model: 'Which Claude model does the work. auto (the default): Haiku first; Sonnet, then Opus, take over when a ' +
+    'request is too hard for it. Or always one of haiku, sonnet, opus, default. A change applies from the next ' +
+    'request. Codex runs its own default model.',
   watching: 'Learn only: Blob notes which app, window title and website are in front. No screenshots, no page text. ' +
     'The notes stay on this computer. A short list of the apps and sites you use most goes to Blob\'s AI only when ' +
     'you say Yes to it, asked each time.',

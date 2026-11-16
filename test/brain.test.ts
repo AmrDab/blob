@@ -33,6 +33,17 @@ describe('claude command line', () => {
     expect(claudeArgs({ mcpConfigPath: 'm.json', model: 'haiku' })).toContain('haiku');
   });
 
+  it('caps the steps only when told to (a tier of auto that can step up)', () => {
+    const a = claudeArgs({ mcpConfigPath: 'm.json', model: 'haiku', maxTurns: 12 });
+    expect(a[a.indexOf('--max-turns') + 1]).toBe('12');
+    expect(claudeArgs({ mcpConfigPath: 'm.json', model: 'haiku' })).not.toContain('--max-turns');
+  });
+
+  it('sends a fresh brief on every start, a resume too', () => {
+    const a = claudeArgs({ mcpConfigPath: 'm.json', model: 'sonnet', resume: 'abc' });
+    expect(a[a.indexOf('--system-prompt-snapshot') + 1]).toBe('off');
+  });
+
   it('starts clawdcursor mcp --compact, through cmd on Windows, or the override', () => {
     expect(clawdcursorCommand({}, 'win32')).toEqual({ command: 'cmd', args: ['/c', 'clawdcursor', 'mcp', '--compact'] });
     expect(clawdcursorCommand({}, 'darwin')).toEqual({ command: 'clawdcursor', args: ['mcp', '--compact'] });
@@ -67,12 +78,15 @@ describe('claude command line', () => {
 });
 
 describe('env', () => {
-  it('drops API keys and host-session variables, keeps the rest', () => {
+  it('drops API keys and host-session variables, keeps the rest, and turns CLAUDE.md loading off', () => {
     const env = cleanEnv({
       PATH: '/bin', HOME: '/home/u', ANTHROPIC_API_KEY: 'k', ANTHROPIC_BASE_URL: 'u', CLAUDECODE: '1',
       CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_OAUTH_TOKEN: 't', CLAUDE_CONFIG_DIR: '/c', BLOB_CLAWDCURSOR: 'x',
     });
-    expect(env).toEqual({ PATH: '/bin', HOME: '/home/u', CLAUDE_CONFIG_DIR: '/c', BLOB_CLAWDCURSOR: 'x' });
+    // Claude Code reads a CLAUDE.md from every folder above the cwd, whatever --setting-sources says: the user's own
+    // coding rules are not Blob's brief. A value inherited from the host session does not switch it back on.
+    expect(env).toEqual({ PATH: '/bin', HOME: '/home/u', CLAUDE_CONFIG_DIR: '/c', BLOB_CLAWDCURSOR: 'x', CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' });
+    expect(cleanEnv({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '0' })).toEqual({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' });
   });
 });
 
@@ -139,11 +153,56 @@ describe('stream-json parsing', () => {
     expect(p.sawResult).toBe(true);
   });
 
-  it('says so when clawdcursor did not connect', () => {
+  it('says nothing when clawdcursor did not connect: the screen is the last resort', () => {
     const p = new StreamParser();
     const init = (servers: unknown[]) => p.feed(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', mcp_servers: servers }));
-    expect(init([{ name: 'clawdcursor', status: 'failed' }])).toContainEqual({ type: 'caption', text: "Blob can't use this computer right now (failed)." });
-    expect(init([])).toContainEqual({ type: 'caption', text: "Blob can't use this computer right now." });
+    const files = { name: 'files', status: 'connected' };
+    expect(init([{ name: 'clawdcursor', status: 'failed' }, files])).toEqual([{ type: 'session', id: 's' }]);
+    expect(init([files])).toEqual([{ type: 'session', id: 's' }]);
+  });
+
+  it('tells a run that used up its steps from any other error', () => {
+    const line = '{"type":"result","subtype":"error_max_turns","is_error":true,"terminal_reason":"max_turns","stop_reason":"tool_use","errors":["Reached maximum number of turns (2)"],"num_turns":3,"session_id":"s"}';
+    const p = new StreamParser();
+    expect(p.feed(line).filter(u => u.type === 'answer')).toEqual([{ type: 'answer', text: "I couldn't finish that: it took too many steps." }]);
+    expect([p.stop, p.resultError, p.sawResult]).toEqual(['max_turns', true, true]);
+    const q = new StreamParser();
+    q.feed(line.replace('"terminal_reason":"max_turns",', ''));
+    expect(q.stop).toBe('max_turns');
+    const r = new StreamParser();
+    r.feed(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, terminal_reason: 'completed', result: 'ok' }));
+    expect(r.stop).toBe('completed');
+  });
+
+  const say = (text: string) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+  const use = (id: string, name: string) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input: {} }] } });
+  const got = (id: string, text: string, is_error = false) => JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error, content: text }] } });
+  const end = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '' });
+
+  it('on a tier that can step up, holds what the model says until its next step, and never shows the hand-off', () => {
+    const p = new StreamParser(true);
+    expect(p.feed(say('Looking.'))).toEqual([]);
+    expect(p.feed(use('1', 'mcp__files__list_dir'))).toEqual([{ type: 'caption', text: 'Looking.' }, { type: 'caption', text: 'files · list_dir…' }]);
+    expect(p.feed(say("I couldn't open Word."))).toEqual([]);
+    expect(p.feed(use('2', 'mcp__blob__step_up'))).toEqual([]);
+    expect(p.feed(got('2', 'Noted. End your turn now with no reply text.'))).toEqual([]);
+    expect(p.calls.map(c => c.tool)).toEqual(['step_up']);                  // still counted: the ladder reads it
+    expect(p.feed(say('Sorry.'))).toEqual([]);
+    // no model took over (say the user had said No): an empty reply after step_up is not "Done."
+    expect(p.feed(end)).toEqual([{ type: 'answer', text: "I couldn't finish that." }]);
+    expect(new StreamParser().feed(say('Hello.'))).toEqual([{ type: 'caption', text: 'Hello.' }]);
+    expect(new StreamParser().feed(end)).toEqual([{ type: 'answer', text: 'Done.' }]);
+  });
+
+  it('marks a call the user decided, from the whole result (a batch has no outcome line)', () => {
+    const p = new StreamParser();
+    p.feed(use('1', 'mcp__clawdcursor__batch'));
+    p.feed(got('1', 'batch: 0/2 completed, halted at step 0\nstep 0: stopped by the user — they took control back, and nothing runs until they give it back.', true));
+    p.feed(use('2', 'mcp__files__run'));
+    p.feed(got('2', 'Not run.\n[refused · USER_SAID_NO · hint: the user did not agree]'));
+    p.feed(use('3', 'Read'));
+    p.feed(got('3', 'a line with · STOPPED in a file'));
+    expect(p.calls.map(c => c.decided)).toEqual([true, true, undefined]);
   });
 
   it('reports an error result and ignores lines that are not JSON', () => {
@@ -157,7 +216,7 @@ describe('stream-json parsing', () => {
   it('says so when the files server did not connect', () => {
     const p = new StreamParser();
     expect(p.feed(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's',
-      mcp_servers: [{ name: 'clawdcursor', status: 'connected' }, { name: 'files', status: 'failed' }] })))
+      mcp_servers: [{ name: 'files', status: 'failed' }] })))                 // also with clawdcursor missing
       .toContainEqual({ type: 'caption', text: "Blob's file tools are failed." });
   });
 

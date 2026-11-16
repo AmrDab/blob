@@ -41,7 +41,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe('settings', () => {
   it('starts with the defaults: nothing that learns is on, not onboarded', () => {
     expect(loadSettings(file)).toEqual(DEFAULTS);
-    expect(DEFAULTS).toEqual({ brain: 'claude', model: 'sonnet', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false, pairOffered: false });
+    expect(DEFAULTS).toEqual({ brain: 'claude', model: 'auto', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false, pairOffered: false });
   });
 
   it('offers the phone card once, also to someone onboarded before phones were on', () => {
@@ -85,6 +85,7 @@ describe('settings', () => {
 
   it('reads values as the model may send them', () => {
     expect(parseValue('model', ' Haiku ')).toBe('haiku');
+    expect(parseValue('model', ' Auto ')).toBe('auto');
     expect(parseValue('model', 'gpt')).toBeUndefined();
     expect(parseValue('watching', 'off')).toBe(false);
     expect(parseValue('watching', 'maybe')).toBeUndefined();
@@ -112,7 +113,7 @@ describe('change_setting', () => {
     expect(outcome(r)).toBe('confirmed');
     expect(r.text).toMatch(/brain is now codex\. It applies from the next request/);
     expect(loadSettings(file).brain).toBe('codex');
-    expect(loadSettings(file).model).toBe('sonnet');                    // the model setting is Claude Code's, and stays
+    expect(loadSettings(file).model).toBe('auto');                      // the model setting is Claude Code's, and stays
     expect(outcome(await tools().change_setting({ key: 'brain', value: 'claude' }))).toBe('confirmed');
     expect(loadSettings(file).brain).toBe('claude');
   });
@@ -154,6 +155,8 @@ describe('change_setting', () => {
 
   it('writes the card itself: one plain question per change', () => {
     expect(question('model', 'default')).toMatch(/default model\?$/);
+    expect(question('model', 'auto')).toBe('Let Blob pick the model: Haiku first, stronger only when needed?');
+    expect(question('model', 'haiku')).toBe('Switch to Haiku?');
     expect(question('watching', true)).toMatch(/No screenshots/);
     expect(question('watching', false)).toBe('Stop watching?');
     expect(question('autoShortcuts', false)).toMatch(/^Stop making shortcuts/);
@@ -163,6 +166,19 @@ describe('change_setting', () => {
 });
 
 describe('the other self tools', () => {
+  it('step_up only tells the model to stop: nothing is asked and nothing changes', () => {
+    expect(tools().step_up()).toEqual({ text: 'Noted. End your turn now with no reply text.', isError: false });
+    expect(asked).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('step_up says there is nobody to hand over to on a pinned model or Codex', () => {
+    for (const s of [{ model: 'haiku' }, { brain: 'codex' }]) {
+      writeFileSync(file, JSON.stringify(s));
+      expect(tools().step_up().text).toMatch(/^No stronger model here: finish the request/);
+    }
+  });
+
   it('about and get_settings show the settings as they are', () => {
     new SettingsStore(file).set('watching', true);
     expect(tools().about().text).toMatch(/watching = true/);
@@ -334,12 +350,14 @@ describe('the brief', () => {
     expect(p).not.toMatch(/You are Blob|I'm Blob|I am Blob|friendly|personality|cheerful|playful|!/i);
   });
 
-  it('orders the routes: direct, a command, the files tools, then the desktop', () => {
+  it('orders the routes: know it, open, a command, the files tools, and the screen last', () => {
     const p = persona(DEFAULTS, { now, platform: 'win32' });
     const at = (s: string) => { expect(p, s).toContain(s); return p.indexOf(s); };
-    const order = [at('1. Direct'), at('2. A command'), at('3. Files'), at('4. clawdcursor, only when a window is the only way')];
+    const order = [at('The screen is the last resort.'), at('1. Know it'), at('2. Open'), at('3. A command'), at('4. Files'), at('5. The screen')];
     expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(p).toMatch(/open_url, open_uri/);
+    expect(p).toContain('files tool open');
+    expect(p).toContain('open_app');
+    expect(p).toContain("screen access isn't working right now");
     expect(p).toMatch(/run \(PowerShell, starts in the home folder\)/);
     expect(p).toMatch(/shown to the user word for word with Yes and No first/);
     expect(p).toMatch(/Never put a password, key or token in a command/);
@@ -349,7 +367,7 @@ describe('the brief', () => {
   });
 
   it('reflects the settings, and keeps the facts about watching true', () => {
-    const off = persona(DEFAULTS, { now });
+    const off = persona({ ...DEFAULTS, model: 'sonnet' }, { now });
     expect(off).toMatch(/change_setting/);
     expect(off).toMatch(/model Sonnet; watching off; auto-shortcuts on; voice on; start at sign-in off; phone not paired/);
     expect(off).toMatch(/watching is off/);
@@ -361,6 +379,22 @@ describe('the brief', () => {
     expect(on).not.toMatch(/it stays on this computer/);
     expect(on).toMatch(/does not make shortcuts on its own/);
     expect(on).toMatch(/Blob starts when the user signs in/);
+  });
+
+  it('on auto, says which model it is and how a tier below Opus hands over', () => {
+    const auto = (tier?: 'haiku' | 'sonnet' | 'opus') => persona(DEFAULTS, { now, tier });
+    expect(auto('haiku')).toMatch(/model Auto: Haiku now;/);
+    expect(auto('haiku')).toMatch(/call the blob tool step_up, then end your turn with no reply text: Sonnet continues/);
+    expect(auto('haiku')).toMatch(/Never mention models or this hand-off to the user/);
+    expect(auto('sonnet')).toMatch(/Opus continues[^]*model Auto: Sonnet now;/);
+    expect(auto('opus')).toMatch(/model Auto: Opus now;/);
+    expect(auto('opus')).not.toMatch(/step_up/);
+    expect(auto()).toMatch(/model Auto \(Haiku first, Sonnet then Opus when needed\);/);   // as about() shows it
+    expect(auto()).not.toMatch(/step_up/);
+    expect(persona({ ...DEFAULTS, model: 'opus' }, { now })).not.toMatch(/step_up|Auto:/);
+    expect(persona({ ...DEFAULTS, model: 'opus' }, { now, tier: 'opus' })).toMatch(/model Opus;/);   // a pinned model has no ladder
+    expect(persona(DEFAULTS, { now, brain: 'codex', tier: 'haiku' })).not.toMatch(/step_up|Auto/);
+    expect(auto()).toMatch(/"use Haiku" pins one model; "pick the model yourself" is model=auto/);
   });
 
   it('covers reminders, schedules and memory, and carries the saved facts', () => {

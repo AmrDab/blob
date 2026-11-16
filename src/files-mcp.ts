@@ -1,17 +1,19 @@
-// Blob's files server (stdio MCP): list_dir, make_folder, move (also renames), trash, and run (a shell command,
+// Blob's files server (stdio MCP): list_dir, make_folder, move (also renames), trash, open, and run (a shell command,
 // shell.ts). Claude Code starts it from the --mcp-config Blob writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
 // onto an existing file ask the user on the bubble first (No, or no answer in 60 s, refuses).
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { askUser } from './ask.ts';
 import { MAX_COMMAND, runTool, systemExec } from './shell.ts';
 
 export interface FileDeps {
   ask: (question: string) => Promise<boolean>;
   trash: (path: string) => Promise<void>;
+  /** Opens a URL or a path in its usual app. */
+  launch: (target: string) => Promise<void>;
   platform?: string;
 }
 export interface ToolResult { text: string; isError: boolean }
@@ -21,6 +23,11 @@ const ok = (text: string): ToolResult => ({ text: `${text}\n[confirmed]`, isErro
 const failed = (code: string, hint: string): ToolResult => ({ text: `[failed · ${code} · hint: ${hint}]`, isError: true });
 const refused = (code: string, hint: string): ToolResult => ({ text: `[refused · ${code} · hint: ${hint}]`, isError: true });
 const binName = (platform: string) => (platform === 'win32' ? 'Recycle Bin' : 'Trash');
+/** The files `open` opens: documents, pictures, audio and video. Anything else may be a program, and that is run's to ask about. */
+const OPENS = new Set(('pdf txt md rtf csv log json xml doc docx xls xlsx ppt pptx odt ods odp jpg jpeg png gif bmp webp heic tif tiff svg ' +
+  'mp3 wav m4a aac flac ogg mp4 mov m4v mkv avi webm').split(' '));
+/** macOS folders that are programs. */
+const BUNDLES = new Set(['.app', '.workflow', '.bundle', '.pkg', '.mpkg', '.prefpane', '.terminal']);
 
 /** A full path from the model's argument: "~" expands, anything relative is refused (there is no useful cwd). */
 function fullPath(p: unknown): string | ToolResult {
@@ -103,6 +110,29 @@ export function fileTools(deps: FileDeps) {
       try { await deps.trash(p); } catch (e) { return failed('TRASH_FAILED', (e as Error).message); }
       return ok(`Moved ${p} to the ${binName(platform)}.`);
     },
+
+    /** A web, mail or settings link, a folder, or a document: never a program, so there is no question. */
+    async open(a: { target?: unknown }): Promise<ToolResult> {
+      let target = typeof a.target === 'string' ? a.target.trim() : '';
+      if (/^[a-z][a-z0-9+.-]+:/i.test(target)) {       // a URL; two letters at least, so C: is a path
+        let url;
+        if (/["\s\x00-\x1f]/.test(target)) return failed('BAD_URL', 'a URL has no spaces or quotes: encode them');   // nothing extra for the app's command line
+        try { url = new URL(target); } catch { return failed('BAD_URL', `"${target}" is not a URL`); }
+        const schemes = ['http:', 'https:', 'mailto:', ...(platform === 'win32' ? ['ms-settings:'] : platform === 'darwin' ? ['x-apple.systempreferences:'] : [])];
+        if (!schemes.includes(url.protocol)) return refused('SCHEME', 'open only web, mail and settings links');
+      } else {
+        const p = fullPath(a.target);
+        if (typeof p !== 'string') return p;
+        if (!existsSync(p)) return failed('NOT_FOUND', `${p} does not exist`);
+        const ext = extname(platform === 'darwin' ? realpathSync(p) : p).toLowerCase();   // a Mac follows a link into a program
+        if (statSync(p).isDirectory() ? platform === 'darwin' && BUNDLES.has(ext) : !OPENS.has(ext.slice(1))) {
+          return refused('NOT_OPENABLE', 'open only folders, documents, pictures, audio and video; a program goes through run, which asks the user first');
+        }
+        target = p;
+      }
+      try { await deps.launch(target); } catch (e) { return failed('CANT_OPEN', (e as Error).message); }
+      return ok(`Opened ${target}.`);
+    },
   };
 }
 
@@ -144,13 +174,25 @@ export async function osTrash(path: string, platform: string = process.platform)
   return run('gio', ['trash', '--', path]);
 }
 
+let shOpen: ((...a: unknown[]) => unknown) | undefined;
+
+/** Opens a URL or a path in its usual app, with no shell in between. */
+export async function osOpen(target: string, platform: string = process.platform): Promise<void> {
+  if (platform === 'darwin') return run('open', [target]);
+  if (platform !== 'win32') return run('xdg-open', [target]);
+  shOpen ??= createRequire(import.meta.url)('koffi').load('shell32.dll')
+    .func('intptr_t __stdcall ShellExecuteW(intptr_t hwnd, const char16_t *verb, const char16_t *file, const char16_t *params, const char16_t *dir, int show)');
+  const r = shOpen!(0, null, target, null, null, 1);   // SW_SHOWNORMAL; above 32 is success
+  if (Number(r) <= 32) throw new Error(`Windows error ${r}`);
+}
+
 // ── the MCP server ───────────────────────────────────────────────────────────
 
 export async function serve(): Promise<void> {
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const { z } = await import('zod');
-  const tools = fileTools({ ask: q => askUser(q), trash: p => osTrash(p) });
+  const tools = fileTools({ ask: q => askUser(q), trash: p => osTrash(p), launch: t => osOpen(t) });
   const server = new McpServer({ name: 'blob-files', version: '0.1.0' });
   const reply = (r: ToolResult) => ({ content: [{ type: 'text' as const, text: r.text }], isError: r.isError });
   const path = z.string().describe('Full path (a leading ~ means the home folder).');
@@ -171,6 +213,10 @@ export async function serve(): Promise<void> {
     description: 'Move a file or folder to the Recycle Bin / Trash (never a permanent delete). The user is asked first.',
     inputSchema: { path }, annotations: { destructiveHint: true },
   }, async a => reply(await tools.trash(a)));
+  server.registerTool('open', {
+    description: 'Open a web page, a mailto: or settings link, a file or a folder in its usual app. Documents, pictures, audio, video and folders only; a program goes through run.',
+    inputSchema: { target: z.string().describe('A URL, or a full path (a leading ~ means the home folder).') },
+  }, async a => reply(await tools.open(a)));
   const shell = process.platform === 'win32' ? 'PowerShell' : 'shell';
   server.registerTool('run', {
     description: `Run one ${shell} command in the home folder and get its output. A command that only looks ` +
