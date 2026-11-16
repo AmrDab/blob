@@ -1,15 +1,14 @@
 // The blobs as one glossy liquid: a single fragment shader. A 2D smooth-union field (so blobs neck and merge),
 // lit as a soft height field: light from the top left, a highlight, shade to the bottom right, a contact shadow.
 export type Box = { x: number; y: number; w: number; h: number; r: number };
-export type Scene = { hero: Box; blobs: Box[]; breath: number };
+export type Scene = { hero: Box; blobs: Box[]; breath: number; neck?: number };   // neck: how far apart two blobs start to neck (44)
 
-const N = 7;   // budding blobs (the hero is a rounded box, so it can become the last card)
 const VERT = 'attribute vec2 p; void main() { gl_Position = vec4(p, 0., 1.); }';
-const FRAG = `
+// n: the budding blobs, each a pill (the hero is a rounded box, so it can become the last card)
+const frag = (n: number) => `
 precision highp float;
 uniform vec2 uRes; uniform float uPx, uTime, uHeroR, uGloss;
-uniform vec4 uHero; uniform vec3 uBlob[${N}];
-const float K = 44.;      // how far apart two blobs start to neck
+uniform vec4 uHero; uniform vec4 uBlob[${n}]; uniform float uK;
 const float B = 64.;      // how deep the rounded edge runs before the top goes flat
 const float E = 6.;
 float smin(float a, float b, float k) { float h = max(k - abs(a - b), 0.) / k; return min(a, b) - h * h * k * .25; }
@@ -18,10 +17,12 @@ vec2 field(vec2 p) {
   vec2 q = abs(p - uHero.xy) - uHero.zw + uHeroR;
   float d = length(max(q, 0.)) + min(max(q.x, q.y), 0.) - uHeroR;
   float w = exp(-max(d, 0.) * .06), ws = w, bs = min(B, min(uHero.z, uHero.w)) * w;
-  for (int i = 0; i < ${N}; i++) {
-    float di = length(p - uBlob[i].xy) - uBlob[i].z;
-    w = exp(-max(di, 0.) * .06); ws += w; bs += min(B, uBlob[i].z) * w;
-    d = smin(d, di, K);
+  for (int i = 0; i < ${n}; i++) {
+    float r = min(uBlob[i].z, uBlob[i].w);
+    q = abs(p - uBlob[i].xy) - uBlob[i].zw + r;
+    float di = length(max(q, 0.)) + min(max(q.x, q.y), 0.) - r;
+    w = exp(-max(di, 0.) * .06); ws += w; bs += min(B, r) * w;
+    d = smin(d, di, uK);
   }
   d += sin(p.x * .013 + uTime * .5 + sin(p.y * .011 - uTime * .35) * 1.6) * 3.5 + sin(p.y * .017 + uTime * .4 + p.x * .006) * 2.5;
   return vec2(d, bs / max(ws, 1e-4));
@@ -48,13 +49,13 @@ void main() {
 }`;
 
 /** Starts drawing; returns a stop function, or null when WebGL is not there (the page then uses the 2D goo). */
-export function startLiquid(canvas: HTMLCanvasElement, read: () => Scene): (() => void) | null {
+export function startLiquid(canvas: HTMLCanvasElement, read: () => Scene, n = 7): (() => void) | null {
   const gl = canvas.getContext('webgl', { premultipliedAlpha: true, antialias: false, alpha: true });
   if (!gl) return null;
   let u: Record<string, WebGLUniformLocation | null> = {};
   const build = () => {   // the program and its buffer: again after the browser gives a lost context back
     const prog = gl.createProgram()!;
-    for (const [type, src] of [[gl.VERTEX_SHADER, VERT], [gl.FRAGMENT_SHADER, FRAG]] as const) {
+    for (const [type, src] of [[gl.VERTEX_SHADER, VERT], [gl.FRAGMENT_SHADER, frag(n)]] as const) {
       const sh = gl.createShader(type)!;
       gl.shaderSource(sh, src);
       gl.compileShader(sh);
@@ -69,11 +70,11 @@ export function startLiquid(canvas: HTMLCanvasElement, read: () => Scene): (() =
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);   // one big triangle
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    u = Object.fromEntries(['uRes', 'uPx', 'uTime', 'uHero', 'uHeroR', 'uBlob', 'uGloss'].map(n => [n, gl.getUniformLocation(prog, n)]));
+    u = Object.fromEntries(['uRes', 'uPx', 'uTime', 'uHero', 'uHeroR', 'uBlob', 'uGloss', 'uK'].map(n => [n, gl.getUniformLocation(prog, n)]));
     return true;
   };
   if (!build()) return null;
-  const blobs = new Float32Array(N * 3);
+  const blobs = new Float32Array(n * 4);
   let raf = 0;
   const draw = (ms: number) => {
     raf = requestAnimationFrame(draw);
@@ -83,16 +84,17 @@ export function startLiquid(canvas: HTMLCanvasElement, read: () => Scene): (() =
       canvas.width = Math.round(w * px); canvas.height = Math.round(h * px);
       gl.viewport(0, 0, canvas.width, canvas.height);
     }
-    const { hero, blobs: bs, breath } = read(), t = ms / 1000;
+    const { hero, blobs: bs, breath, neck = 44 } = read(), t = ms / 1000;
     const swell = 1 + .03 * Math.sin(t * 1.3) * breath;               // the hero breathes
-    bs.forEach((b, i) => blobs.set([b.x, b.y, b.w / 2], i * 3));
+    for (let i = 0; i < n; i++) { const b = bs[i]; blobs.set(b ? [b.x, b.y, b.w / 2, b.h / 2] : [-1e5, 0, 0, 0], i * 4); }   // an unused one waits far off the canvas
     gl.uniform2f(u.uRes, canvas.width, canvas.height);
     gl.uniform1f(u.uPx, px);
     gl.uniform1f(u.uTime, t);
     gl.uniform4f(u.uHero, hero.x, hero.y, hero.w / 2 * swell, hero.h / 2 * swell);
     gl.uniform1f(u.uHeroR, hero.r * swell);
     gl.uniform1f(u.uGloss, .12 + .88 * breath);                         // the last card is calmer
-    gl.uniform3fv(u.uBlob, blobs);
+    gl.uniform4fv(u.uBlob, blobs);
+    gl.uniform1f(u.uK, neck);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
   raf = requestAnimationFrame(draw);
