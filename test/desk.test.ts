@@ -259,6 +259,15 @@ describe('the Yes card', () => {
   it('asks before a press on a file that runs', () => {
     for (const name of ['ChromeSetup.exe', 'tool.ps1', 'Setup']) expect(card({ role: 'ListItem', name }), name).toEqual({ question: `Press "${name}" in Notepad?` });
     expect(card({ role: 'ListItem', name: 'notes.txt' })).toBeNull();
+    // Explorer hides extensions: "invoice" may be invoice.exe, so every item there asks; its tree pane does not
+    for (const role of ['ListItem', 'DataItem']) expect(card({ app: 'explorer', role, name: 'invoice' }), role).toEqual({ question: 'Press "invoice" in explorer?' });
+    expect(card({ app: 'explorer', role: 'TreeItem', name: 'Documents' })).toBeNull();
+  });
+
+  it('asks before any press in a security prompt, and before run, enable content, keep or trust', () => {
+    for (const box of [{ windowTitle: 'Open File - Security Warning' }, { windowTitle: 'Windows protected your PC' }, { windowTitle: 'Book1 - Excel', windowText: 'PROTECTED VIEW Be careful' },
+      { windowTitle: 'Word', windowText: 'SECURITY WARNING Macros have been disabled.' }]) expect(card({ name: 'More info', ...box }), box.windowTitle).toEqual({ question: 'Press "More info" in Notepad?', detail: expect.any(String) });
+    for (const name of ['Run', 'Enable Content', 'Enable Editing', 'Keep', 'Trust', 'Open anyway']) expect(card({ name }), name).not.toBeNull();
   });
 
   it('asks before a bare OK when the window\'s title says what it does, and shows the title', () => {

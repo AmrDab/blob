@@ -151,13 +151,17 @@ const GONE = unverified('the request ended; the rest was not done');
 const flat = (s: string, max: number) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
 
 /** A press whose name says it sends, deletes, pays, posts or installs: it asks first, because nobody sees a background press. */
-export const CONSEQUENTIAL = /\b(sends?|delet(?:e|ing)|remove|trash|empty|erase|discard|don[’'‘ʼ]?t save|do not save|without saving|pay|buy|purchase|order|checkout|check out|subscribe|unsubscribe|submit|confirm|post|publish|share|forward|transfer|approve|accept|agree|allow|install|uninstall|run anyway|reset|restart|shut down|end task|clear (?:all|history|data|browsing data)|format|overwrite|replace|sign out|sign off|log out|log off)\b/i;
+export const CONSEQUENTIAL = /\b(sends?|delet(?:e|ing)|remove|trash|empty|erase|discard|don[’'‘ʼ]?t save|do not save|without saving|pay|buy|purchase|order|checkout|check out|subscribe|unsubscribe|submit|confirm|post|publish|share|forward|transfer|approve|accept|agree|allow|install|uninstall|run anyway|reset|restart|shut down|end task|clear (?:all|history|data|browsing data)|format|overwrite|replace|sign out|sign off|log out|log off|run|enable (?:content|editing|macros)|keep|trust|open anyway)\b/i;
 /** A button that says nothing by itself: what it does is in its window's title, or in the box's own text. */
 export const GENERIC = /^(yes|no|ok|okay|continue|proceed|accept|allow|next|finish|done|apply|got it)$/i;
 /** A box whose Yes, No or OK loses something, though no word above is in it. */
 const LOSES = /save changes|unsaved|permanently|can(?:no|[’'])t be undone/i;
 /** A press on a file that runs (an item in a folder window). */
 const RUNS = /\.(exe|msi|msix|appx|bat|cmd|ps1|vbs|js|scr|lnk)$|\bsetup\b/i;
+/** A security prompt: every press in it asks, whatever the button says ("More info", "Keep", "Open"). */
+const GUARD = /security warning|smartscreen|protected view|unknown publisher|protected your pc|macros have been disabled|potentially (?:harmful|unsafe)|blocked content/i;
+/** An item in a folder window or on the desktop: Explorer hides extensions, so its name can't tell a file that runs. */
+const folderItem = (m: Meta) => /^explorer$/i.test(m.app) && (m.role === 'ListItem' || m.role === 'DataItem');
 const ASKS: Record<string, string> = { toggle: 'Switch', select: 'Select', expand: 'Open' };
 const DID: Record<string, string> = { press: 'Pressed', set: 'Set', toggle: 'Switched', select: 'Selected', expand: 'Expanded', collapse: 'Collapsed' };
 
@@ -183,8 +187,8 @@ export function refusal(step: Step, m: Meta | undefined, own: Set<number>): Tool
 
 /**
  * The Yes card a step needs, or null. A press asks when the model marked it, when it opens a link or a file that
- * runs, when its name, tooltip or id says what it does, or when it is a bare OK, Yes or No in a window whose title
- * or text does. A toggle and a select ask when marked or by their name, tooltip or id; an expand only when marked.
+ * runs (any item in a folder window: Explorer hides extensions), when its name, tooltip or id says what it does,
+ * when its window is a security prompt, or when it is a bare OK, Yes or No in a window whose title or text does. A toggle and a select ask when marked or by their name, tooltip or id; an expand only when marked.
  * A set asks when it would replace text in the field the user is in. `fg`: the window in front. The words are
  * Blob's; the app's are cut short.
  */
@@ -198,8 +202,9 @@ export function needsYes(step: Step, m: Meta, fg?: number): { question: string; 
   // deleteButton: delete Button; SENDButton: SEND Button; delete2: delete 2
   const words = m.aid.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Za-z])(\d)/g, '$1 $2').replace(/[_.-]+/g, ' ');
   const says = CONSEQUENTIAL.test(m.name) || CONSEQUENTIAL.test(m.help) || CONSEQUENTIAL.test(words);
-  if (step.consequential === true || (says && step.action !== 'expand') || (press && RUNS.test(m.name.trim()))) return { question };
+  if (step.consequential === true || (says && step.action !== 'expand') || (press && (RUNS.test(m.name.trim()) || folderItem(m)))) return { question };
   const box = `${m.windowTitle} ${m.windowText}`;
+  if (press && GUARD.test(box)) return { question, detail: flat(box, 200) };
   if (press && (!m.name.trim() || GENERIC.test(m.name.trim())) && (CONSEQUENTIAL.test(box) || LOSES.test(box))) return { question, detail: flat(box, 200) };
   return null;
 }
