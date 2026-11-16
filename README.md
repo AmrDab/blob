@@ -20,6 +20,11 @@ when nothing else does the job: it reads apps by name, clicks, types, and checks
 open, move, rename, make folders, or put things in the Recycle Bin / Trash; it asks you
 first before anything goes to the bin or a file gets replaced.
 
+On Windows (for now), Blob works an open app in the background first: it presses buttons and fills fields without
+taking your screen, your mouse or your keyboard. The screen comes last, when the background way can't do it. A press
+like Send or Delete, a link, and replacing text in the field you are typing in ask you first, on a Yes / No card.
+Apps that run as administrator can't be controlled.
+
 It can also run commands (PowerShell on Windows, your login shell on macOS and Linux). A command that only looks
 (listing a folder, reading a file, `git status`, `winget list`, a `--version`) runs at once. Anything that changes or
 installs something is shown to you first, word for word, on a Yes / No card, and runs only on Yes. When Blob is not

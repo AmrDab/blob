@@ -16,7 +16,8 @@ export const firstTier = (m: Model): Tier => (m === 'auto' ? 'haiku' : m);
  * whole result: a clawdcursor batch has no outcome line, only its steps' own words.
  */
 export function userDecided(server: string, text: string): boolean {
-  if (server !== 'clawdcursor' && server !== 'files' && server !== 'blob') return false;
+  if (server !== 'clawdcursor' && server !== 'files' && server !== 'blob' && server !== 'desk') return false;
+  if (server === 'desk') text = text.trim().split('\n').pop() ?? '';   // a desk read carries an app's own text: only Blob's last line counts
   if (/· (USER_SAID_NO|STOPPED|NOT_CONFIRMED|PAUSED)\b/.test(text)) return true;
   // Stop on the pill, a confirm the user turned down, and a pause the user ended or that ran out
   return server === 'clawdcursor' && /stopped by the user — they took control back|not confirmed: confirm mode|"status"\s*:\s*"(ended|timed_out)"/.test(text);
@@ -27,8 +28,10 @@ export const askedUp = (c: { server: string; tool: string }): boolean => c.serve
 
 /** A step that went wrong. Looking around and finding nothing (list_dir, a command's exit code) is not one. */
 function failure(c: Call): boolean {
-  if (c.server !== 'clawdcursor' && c.server !== 'files') return false;
+  if (c.server !== 'clawdcursor' && c.server !== 'files' && c.server !== 'desk') return false;
   if (c.outcome !== 'failed' && c.outcome !== 'error' && c.outcome !== 'refused') return false;
+  // the desk saying "go to the screen", "tell the user" or "not allowed": a stronger model would hear the same
+  if (c.server === 'desk' && /· (NO_PATTERN|NOT_IN_BACKGROUND|EMPTY|DID_NOTHING|NOT_RESPONDING|BRIDGE|NOT_FOUND|AMBIGUOUS|ELEVATED|PASSWORD|AI_HOST|OWN_UI|NOT_APP)\b/.test(c.line)) return false;
   if (c.server === 'files' && c.tool === 'list_dir') return false;
   return !(c.server === 'files' && c.tool === 'run' && /· EXIT_\d+/.test(c.line));
 }

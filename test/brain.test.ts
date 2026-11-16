@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { isAbsolute } from 'node:path';
-import { PILL_HOST, StreamParser, callLabel, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
+import { PILL_HOST, StreamParser, callLabel, claudeArgs, cleanEnv, clawdcursorCommand, mcpConfig, mcpServers, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
 
 describe('claude command line', () => {
-  it('runs stream-json print mode with clawdcursor, the files (and shell) and self servers and the read-only built-ins', () => {
+  it('runs stream-json print mode with clawdcursor, the files (and shell), desk and self servers and the read-only built-ins', () => {
     const a = claudeArgs({ mcpConfigPath: '/tmp/mcp.json', model: 'sonnet' });
     const after = (flag: string) => a[a.indexOf(flag) + 1];
     expect(a[0]).toBe('-p');
@@ -13,7 +13,7 @@ describe('claude command line', () => {
     expect(after('--mcp-config')).toBe('/tmp/mcp.json');
     expect(a).toContain('--strict-mcp-config');
     expect(after('--tools')).toBe('Read,Glob,Grep');
-    expect(after('--allowedTools')).toBe('mcp__clawdcursor__*,mcp__files__*,mcp__blob__*,Read,Glob,Grep');   // files__* covers the shell tool, run
+    expect(after('--allowedTools')).toBe('mcp__clawdcursor__*,mcp__files__*,mcp__desk__*,mcp__blob__*,Read,Glob,Grep');   // files__* covers the shell tool, run
     expect(a.join(' ')).not.toMatch(/Bash|Edit|Write/);                 // Claude Code's own shell stays off: run asks, Bash would not
     expect(after('--model')).toBe('sonnet');
     expect(after('--append-system-prompt')).toMatch(/one short plain sentence/);
@@ -68,6 +68,16 @@ describe('claude command line', () => {
       files: { type: 'stdio', ...files },
       blob: { type: 'stdio', command: 'node', args: ['self.mjs'] },
     } });
+  });
+
+  it('adds the desk server on Windows only, between files and blob', () => {
+    const own = { files: { command: 'node', args: ['files.mjs'] }, blob: { command: 'node', args: ['self.mjs'] }, desk: { command: 'node', args: ['desk.mjs'], env: { BLOB_DESK_URL: 'http://127.0.0.1:1/desk', BLOB_DESK_TOKEN: 'd' } } };
+    const win = JSON.parse(mcpConfig(own, {}, 'win32')).mcpServers;
+    expect(Object.keys(win)).toEqual(['clawdcursor', 'files', 'desk', 'blob']);
+    expect(win.desk).toEqual({ type: 'stdio', ...own.desk });
+    expect(Object.keys(JSON.parse(mcpConfig(own, {}, 'linux')).mcpServers)).toEqual(['clawdcursor', 'files', 'blob']);
+    expect(Object.keys(mcpServers(own, {}, 'darwin'))).toEqual(['clawdcursor', 'files', 'blob']);
+    expect(Object.keys(mcpServers({ files: own.files, blob: own.blob }, {}, 'win32'))).toEqual(['clawdcursor', 'files', 'blob']);   // none given: none added
   });
 
   it('writes one stream-json user message line', () => {

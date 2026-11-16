@@ -1,5 +1,6 @@
 // Builds into dist/: the UI (the React bundles, the pages, onnxruntime-web's wasm, served locally, not from a CDN),
-// the files and self MCP servers that Claude Code starts with Node, and the pill relay that clawdcursor starts with Node.
+// the files, self and desk MCP servers that Claude Code starts with Node, the desk's PowerShell bridge, and the pill
+// relay that clawdcursor starts with Node.
 import { build } from 'esbuild';
 import { cpSync, mkdirSync } from 'node:fs';
 
@@ -36,6 +37,18 @@ await build({
   target: 'node20',
   logLevel: 'warning',
 });
+// Blob's desk server ("desk"): it passes each call on to the main process, which runs the bridge beside it.
+await build({
+  stdin: { contents: "import { serve } from './src/desk-mcp.ts'; void serve();", resolveDir: import.meta.dirname, loader: 'ts' },
+  outfile: 'dist/desk-mcp.mjs',
+  bundle: true,
+  packages: 'external',
+  format: 'esm',
+  platform: 'node',
+  target: 'node20',
+  logLevel: 'warning',
+});
+cpSync('src/desk-bridge.ps1', 'dist/desk-bridge.ps1');
 // The pill relay clawdcursor starts with Node in place of its own pill (brain.ts): Node built-ins only.
 await build({
   stdin: { contents: "import { main } from './src/pill-host.ts'; main();", resolveDir: import.meta.dirname, loader: 'ts' },

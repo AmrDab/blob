@@ -62,6 +62,7 @@ export function saveOffer(calls: Call[]): { steps: Step[] } | { why: string } | 
   const mine = calls.filter(c => c.server === 'clawdcursor' || c.server === 'files');
   if (!mine.some(c => c.outcome === 'confirmed')) return null;
   if (mine.some(c => BAD.has(c.outcome))) return null;
+  if (calls.some(c => c.server === 'desk' && (c.tool === 'act' || c.tool === 'open'))) return { why: "a step works an app's controls in the background, which shortcuts can't replay yet" };
   const steps: Step[] = [];
   for (const c of mine) {
     if (isPause(c)) continue;

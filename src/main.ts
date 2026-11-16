@@ -1,10 +1,11 @@
 // The host: a 127.0.0.1 server for the built UI and its event stream, the bubble window, the Brain, shortcuts,
-// the settings (changed by asking Blob, never by a menu), the files and self servers' questions, clawdcursor's pill,
+// the settings (changed by asking Blob, never by a menu), the files and self servers' questions, the desk (open
+// windows worked in the background, Windows only), clawdcursor's pill,
 // the paired phone, the learn-only watcher, reminders and scheduled tasks, starting at sign-in, focus hand-back, the
 // log file and the first-run check.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
@@ -13,6 +14,7 @@ import { Application } from '@webviewjs/webview';
 import { Brain, callLabel, mcpConfig, mcpServers, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
 import { MAX_DETAIL, Questions } from './ask.ts';
 import { clickThrough, cursorReader, follower, type ClickThrough } from './clickthrough.ts';
+import { Bridge, deskTools, ownPids } from './desk.ts';
 import { setAutostart, supported as autostartSupported, systemAutostart } from './autostart.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
@@ -58,6 +60,7 @@ const token = randomBytes(24).toString('hex');      // the page's
 const askToken = randomBytes(24).toString('hex');   // the files server's: it can only ask a question
 const pillToken = randomBytes(24).toString('hex');  // the pill relay's: it can only show clawdcursor's pill
 const selfToken = randomBytes(24).toString('hex');  // the self server's: save a shortcut, pair or unpair the phone
+const deskToken = randomBytes(24).toString('hex');  // the desk server's: read and work open windows in the background
 const settings = new SettingsStore();
 
 // ── events to the page ───────────────────────────────────────────────────────
@@ -120,6 +123,19 @@ const questions = new Questions({
   },
   hide: id => { send({ type: 'ask-done', id }); pairing?.askDone(`q${id}`); },
 });
+
+// ── the desk ─────────────────────────────────────────────────────────────────
+// Windows: one bridge for as long as Blob runs, started now so the first read finds it warm. Its Yes card is a
+// question like any other; Blob's own windows and its web view's processes are looked up again at every call.
+const bridge = process.platform !== 'win32' ? undefined : new Bridge({
+  script: join(DIST, 'desk-bridge.ps1'),
+  spawn: (command, args, o) => spawn(command, args, o),
+  kill: pid => { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }); },
+});
+const desk = bridge && deskTools({
+  bridge, ask: (q, d) => questions.ask(q, undefined, d), own: () => ownPids(process.env.BLOB_OWN_UI_FILE), log: console.log,
+});
+void bridge?.call({ cmd: 'windows' }).catch(() => { /* the first tool call says why */ });
 
 // ── clawdcursor's pill ───────────────────────────────────────────────────────
 // clawdcursor starts dist/pill-host.mjs in place of its own pill (brain.ts). That relay keeps one request open: its
@@ -552,13 +568,23 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (req.method === 'POST') {
-    const asking = url.pathname === '/ask', self = url.pathname === '/self';
-    const allowed = asking ? req.headers['x-ask-token'] === askToken : self ? req.headers['x-self-token'] === selfToken : req.headers['x-talk-token'] === token;
+    const asking = url.pathname === '/ask', self = url.pathname === '/self', desking = url.pathname === '/desk';
+    const allowed = asking ? req.headers['x-ask-token'] === askToken : self ? req.headers['x-self-token'] === selfToken
+      : desking ? req.headers['x-desk-token'] === deskToken : req.headers['x-talk-token'] === token;
     if (!allowed) { res.writeHead(403).end(); return; }
     let body: any = {};
     try { let s = ''; for await (const c of req) s += c; body = JSON.parse(s || '{}'); } catch { /* empty body */ }
     if (self) {
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(await selfAction(body)));
+      return;
+    }
+    if (desking) {                                  // the desk server passes a tool call on: { tool, args }
+      const tool = desk && (body.tool === 'read' || body.tool === 'act' || body.tool === 'open') ? desk[body.tool as 'read' | 'act' | 'open'] : undefined;
+      if (!tool) { res.writeHead(404).end(); return; }
+      let r, closed = false;                        // the model's process ended (Stop): an act presses nothing more
+      res.on('close', () => { closed = true; });
+      try { r = await (body.tool === 'act' ? desk!.act(body.args ?? {}, () => closed) : tool(body.args ?? {})); } catch { res.writeHead(500).end(); return; }
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(r));
       return;
     }
     if (asking) {
@@ -591,7 +617,7 @@ await new Promise<void>(ok => {
 });
 port = (server.address() as { port: number }).port;
 
-// The files and self servers are built by build.mjs into dist/ and run with this same Node.
+// The files, self and desk servers are built by build.mjs into dist/ and run with this same Node.
 const asks = { BLOB_ASK_URL: `http://127.0.0.1:${port}/ask`, BLOB_ASK_TOKEN: askToken };
 filesServer = { command: process.execPath, args: [join(DIST, 'files-mcp.mjs')], env: asks };
 const selfServer: ServerCommand = {
@@ -599,15 +625,19 @@ const selfServer: ServerCommand = {
   args: [join(DIST, 'self-mcp.mjs')],
   env: { ...asks, BLOB_SELF_URL: `http://127.0.0.1:${port}/self`, BLOB_SELF_TOKEN: selfToken, ...(RELAY && { BLOB_RELAY: RELAY }) },
 };
+const deskServer: ServerCommand = {
+  command: process.execPath, args: [join(DIST, 'desk-mcp.mjs')],
+  env: { BLOB_DESK_URL: `http://127.0.0.1:${port}/desk`, BLOB_DESK_TOKEN: deskToken },
+};
 // Where the pill relay finds Blob: brain.ts hands these to clawdcursor, which passes its own env on to the relay.
 process.env.BLOB_PILL_URL = `http://127.0.0.1:${port}/pill`;
 process.env.BLOB_PILL_TOKEN = pillToken;
 // Blob's web view processes, named to clawdcursor as its own UI in a file that follows them (own-ui.ts).
 process.env.BLOB_OWN_UI_FILE = join(tmp, 'own-ui-pids');
 const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, processLister());
-writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer }), { mode: 0o600 });
+writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer, desk: deskServer }), { mode: 0o600 });
 brain = new Brain({
-  mcpConfigPath, servers: mcpServers({ files: filesServer, blob: selfServer }), cwd: WORK, emit: onBrain,
+  mcpConfigPath, servers: mcpServers({ files: filesServer, blob: selfServer, desk: deskServer }), cwd: WORK, emit: onBrain,
   persona: (b, tier) => persona(settings.get(), { memory: memoryBrief(memoryFile()), brain: b, tier }),
 });
 sendShortcuts();
@@ -756,6 +786,7 @@ function quit(): void {
   brain.stop();
   watcher?.stop();
   stopOwnUi();
+  bridge?.stop();
   pairing?.close();
   settings.unwatch();
   focus.stop();

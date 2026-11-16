@@ -1,5 +1,5 @@
-// One run at a time of the user's own `claude -p` or `codex exec`, with clawdcursor, Blob's files and shell tools
-// and its self tools.
+// One run at a time of the user's own `claude -p` or `codex exec`, with clawdcursor, Blob's files and shell tools,
+// its desk tools (Windows: an open window worked in the background) and its self tools.
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
@@ -19,7 +19,7 @@ export interface LogEntry {
 
 /** One finished tool call of a run, in order: what a shortcut is saved from. server '' = a Claude Code built-in. */
 export interface Call {
-  server: string;     // 'clawdcursor' | 'files' | 'blob' | '' ('codex': one of Codex's own MCP helpers)
+  server: string;     // 'clawdcursor' | 'files' | 'desk' | 'blob' | '' ('codex': one of Codex's own MCP helpers)
   tool: string;       // the tool's own name: "accessibility", "move", "Read"
   args: Record<string, unknown>;
   outcome: string;
@@ -68,13 +68,13 @@ export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platfor
 
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
 
-/** The servers every brain gets: clawdcursor, Blob's files server and Blob's self server ("blob"), nothing else. */
-export function mcpServers(own: { files: ServerCommand; blob: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): Record<string, ServerCommand> {
-  return { clawdcursor: clawdcursorCommand(env, platform), files: own.files, blob: own.blob };
+/** The servers every brain gets: clawdcursor, Blob's files server, its desk server (Windows only) and its self server ("blob"), nothing else. */
+export function mcpServers(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): Record<string, ServerCommand> {
+  return { clawdcursor: clawdcursorCommand(env, platform), files: own.files, ...(platform === 'win32' && own.desk && { desk: own.desk }), blob: own.blob };
 }
 
 /** Claude Code's --mcp-config file. */
-export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
+export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
   const servers = Object.entries(mcpServers(own, env, platform)).map(([name, s]) => [name, { type: 'stdio', ...s }]);
   return JSON.stringify({ mcpServers: Object.fromEntries(servers) }, null, 2);
 }
@@ -89,7 +89,7 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: str
     '--strict-mcp-config',                  // no other MCP server (not the user's own, not a plugin's)
     '--setting-sources', 'project',         // the cwd is an empty folder: none of the user's hooks or plugins (CLAUDE.md: cleanEnv)
     '--tools', BUILTIN_TOOLS.join(','),     // read-only built-ins only: no Bash, no Edit/Write (the shell is files `run`, which asks)
-    '--allowedTools', ['mcp__clawdcursor__*', 'mcp__files__*', 'mcp__blob__*', ...BUILTIN_TOOLS].join(','),
+    '--allowedTools', ['mcp__clawdcursor__*', 'mcp__files__*', 'mcp__desk__*', 'mcp__blob__*', ...BUILTIN_TOOLS].join(','),
     '--disable-slash-commands',
     '--no-chrome',
     '--append-system-prompt', o.persona ? `${SYSTEM_PROMPT}\n${o.persona}` : SYSTEM_PROMPT,

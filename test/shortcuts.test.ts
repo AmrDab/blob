@@ -67,6 +67,16 @@ describe('save offer', () => {
     expect(o).toEqual({ why: 'step 2 (computer · click) clicks a position read off a screenshot' });
   });
 
+  it('says why when a step worked an app in the background; a step that did not confirm still offers nothing', () => {
+    const desk = (tool: string, outcome = 'confirmed'): Call => ({ server: 'desk', tool, args: {}, outcome, line: `[${outcome}]` });
+    const move: Call = { server: 'files', tool: 'move', args: { from: '/a', to: '/b' }, outcome: 'confirmed', line: '[confirmed]' };
+    const why = { why: "a step works an app's controls in the background, which shortcuts can't replay yet" };
+    expect(saveOffer([cc('system', { action: 'open_app', name: 'Notepad' }), desk('act')])).toEqual(why);
+    expect(saveOffer([move, desk('open')])).toEqual(why);
+    expect(saveOffer([move, desk('read', 'ok')])).toEqual({ steps: [{ server: 'files', tool: 'move', args: move.args }] });   // a read changes nothing
+    expect(saveOffer([{ ...move, outcome: 'failed', line: '[failed · CANT_MOVE · hint: busy]' }, cc('system', { action: 'open_app', name: 'X' }), desk('act')])).toBeNull();
+  });
+
   it('names the offer from the request', () => {
     expect(nameFrom('  open   notepad ')).toBe('open notepad');
     expect(nameFrom('x'.repeat(60))).toHaveLength(40);

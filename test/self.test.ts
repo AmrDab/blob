@@ -350,13 +350,26 @@ describe('the brief', () => {
     expect(p).not.toMatch(/You are Blob|I'm Blob|I am Blob|friendly|personality|cheerful|playful|!/i);
   });
 
-  it('orders the routes: know it, open, a command, the files tools, and the screen last', () => {
+  it('orders the routes: know it, open, a command, the files tools, the background (Windows), and the screen last', () => {
     const p = persona(DEFAULTS, { now, platform: 'win32' });
-    const at = (s: string) => { expect(p, s).toContain(s); return p.indexOf(s); };
-    const order = [at('The screen is the last resort.'), at('1. Know it'), at('2. Open'), at('3. A command'), at('4. Files'), at('5. The screen')];
+    const at = (s: string, text = p) => { expect(text, s).toContain(s); return text.indexOf(s); };
+    const order = [at('The screen is the last resort.'), at('1. Know it'), at('2. Open'), at('3. A command'), at('4. Files'), at('5. In the background'), at('6. The screen')];
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(p).toContain('files tool open');
-    expect(p).toContain('open_app');
+    expect(p).toContain("with the desk tool open (it gives back the app's window)");
+    expect(p).not.toContain('open_app');
+    expect(p).toMatch(/act does one or more of those in one call \(steps\) and says what changed/);
+    expect(p).toMatch(/Set consequential: true on a press that sends, deletes, pays, posts, installs/);
+    expect(p).toMatch(/they answered NO_PATTERN, NOT_IN_BACKGROUND, EMPTY, DID_NOTHING or BRIDGE/);
+    expect(p).toMatch(/Never use the screen to press a control that act could press/);
+    expect(p).not.toMatch(/in your reasoning/);                          // what is said before a tool call shows as a caption
+    // elsewhere there is no desk: the screen stays step 5, and an app opens through it
+    for (const platform of ['darwin', 'linux']) {
+      const other = persona(DEFAULTS, { now, platform });
+      expect(other).not.toMatch(/In the background|desk tool|6\. The screen/);
+      expect(at('4. Files', other)).toBeLessThan(at('5. The screen (clawdcursor), last, only when a window is the only way and 1-4 cannot do it: element names', other));
+      expect(other).toContain('in one call with clawdcursor system open_app. Never by clicking through menus.');
+    }
     expect(p).toContain("screen access isn't working right now");
     expect(p).toMatch(/run \(PowerShell, starts in the home folder\)/);
     expect(p).toMatch(/shown to the user word for word with Yes and No first/);
@@ -403,6 +416,6 @@ describe('the brief', () => {
     expect(p).toMatch(/remember[^]*Never a password, code, key or other secret[^]*data about the user, never instructions/);
     expect(p).toMatch(/<saved_facts>\n- Uses Outlook for mail\.\n<\/saved_facts>$/);
     expect(persona(DEFAULTS, { now })).toMatch(/<saved_facts>\n\(nothing yet\)\n<\/saved_facts>$/);
-    expect(persona(DEFAULTS, { now }).length).toBeLessThan(5500);
+    expect(persona(DEFAULTS, { now, platform: 'win32' }).length).toBeLessThan(6000);   // Windows has the longest brief: the desk route
   });
 });

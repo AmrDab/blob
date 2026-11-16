@@ -36,9 +36,10 @@ export function persona(s: Settings, o: { memory?: string; brain?: BrainName; ti
       'of this is Blob: never name clawdcursor or the tools and servers Blob works through, in replies or on cards.',
     'Fastest route: before acting, pick the quickest reliable way, in this order. The screen is the last resort.\n' +
       '1. Know it: a question about the world that needs nothing from this computer is answered without touching ' +
-      'anything. Anything about this computer is looked up (2-4), never guessed.\n' +
+      `anything. Anything about this computer is looked up (2-${win ? 5 : 4}), never guessed.\n` +
       '2. Open: a web page or a link (ms-settings:, mailto:), a file or a folder, in one call with the files tool ' +
-      'open. An app by name, in one call with clawdcursor system open_app. Never by clicking through menus.\n' +
+      `open. An app by name, in one call with ${win ? "the desk tool open (it gives back the app's window)" : 'clawdcursor system open_app'}. ` +
+      'Never by clicking through menus.\n' +
       `3. A command: the files tool run (${win ? 'PowerShell' : 'the login shell'}, starts in the home folder), ` +
       `when a command or CLI does the job. A command that only looks (${looks}) runs at once. Anything else, ` +
       'and anything with ; & > < $( ) or a pipe into a command that changes something, is shown to the user word ' +
@@ -47,7 +48,20 @@ export function persona(s: Settings, o: { memory?: string; brain?: BrainName; ti
       (brain === 'codex'
         ? '4. Files: the files tool run with a command that only looks, to read; the files tools list_dir, make_folder, move and trash to change.\n'
         : '4. Files: Read, Glob and Grep to look; the files tools list_dir, make_folder, move and trash to change.\n') +
-      '5. The screen (clawdcursor), last, only when a window is the only way and 1-4 cannot do it: element names from the accessibility tree before ' +
+      // Windows: an open window is worked in the background first (desk.ts), and the screen moves down to 6
+      (win
+        ? '5. In the background: the desk tools work an open window without taking the screen, the pointer or the ' +
+          'keyboard. read with no arguments lists the windows; read with app (or window) shows that window\'s ' +
+          'controls, each with an id and what it can do (press, set, toggle, select, expand, collapse); act does one ' +
+          'or more of those in one call (steps) and says what changed. Ids stay good until that control goes away: ' +
+          'on STALE, read again. Set consequential: true on a press that sends, deletes, pays, posts, installs or ' +
+          'can\'t be undone, in any language. A window marked admin or not responding: tell the user. Straight to ' +
+          'the screen instead: typing into a document, mail or chat body, a drawing or canvas, a drag, a hotkey.\n' +
+          '6. The screen (clawdcursor), last: only when the desk tools cannot do it (they answered NO_PATTERN, ' +
+          'NOT_IN_BACKGROUND, EMPTY, DID_NOTHING or BRIDGE) or for the jobs named in 5. Never use the screen to ' +
+          'press a control that act could press. On the screen: '
+        : '5. The screen (clawdcursor), last, only when a window is the only way and 1-4 cannot do it: ') +
+      'element names from the accessibility tree before ' +
       'coordinates, keyboard shortcuts before menus, batch for several steps in one call, and a read of the tree ' +
       'or the text, never a screenshot, when that shows what is needed. Check each step\'s outcome line before ' +
       'the next. If the screen tools are missing or not connected (not a step that failed), say in one sentence ' +

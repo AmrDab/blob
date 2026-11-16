@@ -1,7 +1,7 @@
 // Codex as the brain: its command line, its JSON events, and the tool names. Nothing is started.
 // The event lines are as `codex exec --json` (codex-cli 0.169.0) printed them against a local stand-in for the model.
 import { describe, expect, it } from 'vitest';
-import { CODEX_OFF, CodexParser, SYSTEM_PROMPT, codexArgs, codexCommand, codexInput, splitToolName, type ServerCommand } from '../src/brain.ts';
+import { CODEX_OFF, CodexParser, SYSTEM_PROMPT, codexArgs, codexCommand, codexInput, mcpServers, splitToolName, type ServerCommand } from '../src/brain.ts';
 import { persona } from '../src/persona.ts';
 import { DEFAULTS } from '../src/settings.ts';
 
@@ -51,6 +51,18 @@ describe('codex command line', () => {
     expect(a.filter(x => /^mcp_servers\.(?!clawdcursor\.|files\.|blob\.)/.test(x))).toEqual([]);   // no other server
     // Codex hands a server only a few system variables, so a Blob folder that is not the usual one goes along
     expect(override(codexArgs({ servers, env: { BLOB_HOME: '/tmp/b' } }), 'mcp_servers.blob.env')).toEqual(['{BLOB_HOME="/tmp/b"}']);
+  });
+
+  it('on Windows gets the desk server too, required like the other two of Blob; the screen is still not', () => {
+    const desk = { command: 'node', args: ['desk-mcp.mjs'], env: { BLOB_DESK_URL: 'http://127.0.0.1:47615/desk', BLOB_DESK_TOKEN: 'd' } };
+    const a = codexArgs({ servers: mcpServers({ files: servers.files, blob: servers.blob, desk }, {}, 'win32'), env: {} });
+    expect(override(a, 'mcp_servers.desk.command')).toEqual(['"node"']);
+    expect(override(a, 'mcp_servers.desk.args')).toEqual(['["desk-mcp.mjs"]']);
+    expect(override(a, 'mcp_servers.desk.env')).toEqual(['{BLOB_DESK_URL="http://127.0.0.1:47615/desk",BLOB_DESK_TOKEN="d"}']);
+    expect(override(a, 'mcp_servers.desk.default_tools_approval_mode')).toEqual(['"approve"']);
+    expect(override(a, 'mcp_servers.desk.required')).toEqual(['true']);
+    expect(override(a, 'mcp_servers.clawdcursor.required')).toEqual(['false']);
+    expect(codexArgs({ servers: mcpServers({ files: servers.files, blob: servers.blob, desk }, {}, 'linux'), env: {} }).join(' ')).not.toContain('mcp_servers.desk');
   });
 
   it('adds the same brief, as developer instructions', () => {

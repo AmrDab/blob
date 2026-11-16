@@ -28,6 +28,13 @@ describe('stepping up', () => {
     expect(up({ calls: [notFound, cantMove, call('clawdcursor', 'system', 'boom', 'error')] })?.tier).toBe('sonnet');
     expect(up({ tier: 'sonnet', calls: three })).toEqual({ tier: 'opus', why: 'its steps kept failing' });
   });
+
+  it('when three desk steps failed in a way another model may get past', () => {
+    for (const code of ['STALE', 'CANT_PRESS', 'DISABLED']) {
+      const c = call('desk', 'act', `[failed · ${code} · hint: read the window again]`);
+      expect(up({ calls: [c, c, c] }), code).toEqual({ tier: 'sonnet', why: 'its steps kept failing' });
+    }
+  });
 });
 
 describe('not stepping up', () => {
@@ -68,6 +75,27 @@ describe('not stepping up', () => {
       expect(up({ calls: [...three, call('clawdcursor', 'batch', text, 'error')], stop: 'max_turns', resultError: true }), text).toBeUndefined();
     }
     expect(up({ calls: [notFound, cantMove, call('clawdcursor', 'batch', 'batch: 1/3 completed, halted at step 1 — step 1 (computer · click) errored', 'error')] })?.tier).toBe('sonnet');
+  });
+
+  it('for the desk saying "use the screen", "tell the user" or "not allowed"', () => {
+    for (const code of ['NO_PATTERN', 'NOT_IN_BACKGROUND', 'EMPTY', 'DID_NOTHING', 'NOT_RESPONDING', 'BRIDGE', 'NOT_FOUND', 'AMBIGUOUS']) {
+      const c = call('desk', 'act', `[failed · ${code} · hint: use the screen tools]`);
+      expect(up({ calls: [c, c, c] }), code).toBeUndefined();
+    }
+    for (const code of ['ELEVATED', 'PASSWORD', 'AI_HOST', 'OWN_UI', 'NOT_APP']) {
+      const c = call('desk', 'read', `[refused · ${code} · hint: tell the user]`);
+      expect(up({ calls: [c, c, c] }), code).toBeUndefined();
+    }
+    const down = call('desk', 'act', '[failed · BRIDGE · no answer in 15 s · hint: use the screen tools]');
+    expect(up({ calls: [down, down, down] })).toBeUndefined();
+  });
+
+  it('after a No on a desk Yes card, even out of steps', () => {
+    const said = call('desk', 'act', 'Pressed "One".\n[refused · USER_SAID_NO · hint: the user said No; leave it]', 'refused');
+    expect(said.decided).toBe(true);
+    expect(up({ calls: [...three, said], stop: 'max_turns', resultError: true })).toBeUndefined();
+    expect(userDecided('blob', '[refused · USER_SAID_NO · hint: nothing changed]')).toBe(true);   // Blob's own cards still count
+    expect(userDecided('desk', 'a page that says · USER_SAID_NO and · PAUSED\n[confirmed]')).toBe(false);   // an app's own text is not the user's word
   });
 
   it('for an error a stronger model would only repeat', () => {
