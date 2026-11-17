@@ -92,12 +92,17 @@ export interface ClickThrough {
   stop(): void;
 }
 
+const AT_MS = 80;   // the cursor's place on Blob goes to the page at most this often
+
 /**
  * `over(on)` is called when the cursor comes onto Blob's shapes or leaves them (the page hears nothing from a
- * window that ignores the mouse); `gone()` once if the window turns out not to do it.
+ * window that ignores the mouse); `gone()` once if the window turns out not to do it. `at(x, y)`: where the cursor
+ * is on Blob, in the page's px, when it moved there. A macOS window that is not in front gets no mouse moves, so this
+ * is how its page sees a hover.
  */
-export function clickThrough(win: Win, on: { over(on: boolean): void; gone(): void }, read: (() => Cursor) | undefined): ClickThrough {
+export function clickThrough(win: Win, on: { over(on: boolean): void; gone(): void; at?(x: number, y: number): void }, read: (() => Cursor) | undefined): ClickThrough {
   let shapes: HitShape[] | null = null, capture = false, ignoring = false, timer: ReturnType<typeof setTimeout> | undefined;
+  let told = { x: NaN, y: NaN, t: -Infinity };
   let available = !!read;
   if (!read) console.log('Blob: the cursor can\'t be read here, so the bubble\'s window takes every click on it');
   const apply = (next: boolean) => {
@@ -122,6 +127,11 @@ export function clickThrough(win: Win, on: { over(on: boolean): void; gone(): vo
       const x = (c.x - p.x) / s, y = (c.y - p.y) / s;
       if (x > -NEAR_PX && y > -NEAR_PX && x < size.width + NEAR_PX && y < size.height + NEAR_PX) wait = NEAR_MS;
       apply(ignoreNext(ignoring, { shapes, capture, down: c.down, x, y }));
+      const t = Date.now();
+      if (!ignoring && on.at && (Math.round(x) !== told.x || Math.round(y) !== told.y) && t - told.t >= AT_MS) {
+        told = { x: Math.round(x), y: Math.round(y), t };
+        on.at(told.x, told.y);
+      }
     } catch (e) { fail(e); return; }
     timer = setTimeout(look, wait);
     timer.unref();

@@ -122,6 +122,7 @@ function App() {
         dispatchEvent(new CustomEvent('blob-over', { detail: e.on }));
         if (e.on) clearTimeout(typeLeave.current); else leave.current();
       }
+      if (e.type === 'cursor') dispatchEvent(new CustomEvent('blob-cursor', { detail: { x: e.x, y: e.y } }));
     };
     const calm = () => setLiquid(!CALM.matches && !gpuGone.current);
     CALM.addEventListener('change', calm);
@@ -187,7 +188,7 @@ function App() {
     if (!hover || typeOpen || logOpen || asks.length || phase !== 'idle') { setStale(false); return; }
     let t = setTimeout(() => setStale(true), FAN_IDLE_MS);
     const touch = () => { setStale(false); clearTimeout(t); t = setTimeout(() => setStale(true), FAN_IDLE_MS); };
-    const kinds = ['pointermove', 'pointerdown', 'keydown'] as const;
+    const kinds = ['pointermove', 'pointerdown', 'keydown', 'blob-cursor'];
     kinds.forEach(k => window.addEventListener(k, touch));
     return () => { clearTimeout(t); kinds.forEach(k => window.removeEventListener(k, touch)); };
   }, [hover, typeOpen, logOpen, asks.length, phase]);

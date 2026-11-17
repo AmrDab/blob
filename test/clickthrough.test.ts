@@ -64,6 +64,27 @@ describe('the cursor on macOS', () => {
   });
 });
 
+describe('a hover the page can\'t see', () => {
+  it('sends where the cursor is on Blob, in the page\'s px, and nothing once it is off', () => {
+    vi.useFakeTimers();
+    const cursor = { x: 2010, y: 1010 };           // 5 points into the window
+    const { win } = mac(cursor);
+    const at: number[][] = [];
+    const ct = clickThrough(win, { over() {}, gone() {}, at: (x, y) => at.push([x, y]) }, macCursor(win));
+    ct.set({ shapes: [{ x: 0, y: 0, w: 20, h: 20 }] });
+    expect(at).toEqual([[5, 5]]);
+    vi.advanceTimersByTime(30);
+    expect(at).toEqual([[5, 5]]);                  // it didn't move: nothing new
+    cursor.x = 2020;                               // 10 points in, still on the shape
+    vi.advanceTimersByTime(100);
+    expect(at).toEqual([[5, 5], [10, 5]]);
+    cursor.x = 2100;                               // off the shape
+    vi.advanceTimersByTime(200);
+    expect(at).toHaveLength(2);
+    ct.stop();
+  });
+});
+
 describe('a drag of the window on macOS', () => {
   it('moves the window as far as the cursor, in points', () => {
     const cursor = { x: 2000, y: 1000 };

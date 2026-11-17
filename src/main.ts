@@ -730,7 +730,11 @@ function moveBy(dx: number, dy: number, start: unknown): { dx: number; dy: numbe
 // Empty pixels of the bubble's window let clicks through to the desktop (clickthrough.ts); the page is told whether
 // they do (it keeps the window small when not) and when the cursor comes onto Blob or leaves it.
 const readCursor = os.cursor?.(win), dragged = follower(win, readCursor);
-through = clickThrough(win, { over: on => tell({ type: 'over', on }), gone: () => send({ type: 'stage', clickThrough: false }) }, readCursor);
+through = clickThrough(win, {
+  over: on => tell({ type: 'over', on }),
+  at: (x, y) => tell({ type: 'cursor', x, y }),
+  gone: () => send({ type: 'stage', clickThrough: false }),
+}, readCursor);
 send({ type: 'stage', clickThrough: through.available });
 
 // What the web view reads from the environment when it is created (os.webviewEnv: WebView2's browser flags). Removed

@@ -287,6 +287,13 @@ export function startLiquid(canvas: HTMLCanvasElement, els: Map<string, HTMLElem
     clearTimeout(leftTimer);
     if (!(e as CustomEvent<boolean>).detail) leftTimer = window.setTimeout(left, LEFT_MS);
   };
+  /** The host: where the cursor is on Blob. A macOS window that is not in front hears no pointer moves of its own. */
+  const onCursor = (e: Event) => {
+    if (down) return;
+    const { x, y } = (e as CustomEvent<{ x: number; y: number }>).detail;
+    sim.pointer.x = x; sim.pointer.y = y; seen = true;
+    if (look()) wake();
+  };
   const onFocus = (e: FocusEvent) => {
     const el = e.type === 'focusin' ? (e.target as Element).closest?.('[data-liq]') : null;
     let ring = !!el;
@@ -348,6 +355,7 @@ export function startLiquid(canvas: HTMLCanvasElement, els: Map<string, HTMLElem
   addEventListener('pointermove', onMove);
   addEventListener('blur', onBlur);
   addEventListener('blob-over', onOver);
+  addEventListener('blob-cursor', onCursor);
   addEventListener('focusin', onFocus);
   addEventListener('focusout', onFocus);
   addEventListener('keydown', onKey, true);          // before the page's own Escape
@@ -388,6 +396,7 @@ export function startLiquid(canvas: HTMLCanvasElement, els: Map<string, HTMLElem
       removeEventListener('pointermove', onMove);
       removeEventListener('blur', onBlur);
       removeEventListener('blob-over', onOver);
+      removeEventListener('blob-cursor', onCursor);
       removeEventListener('focusin', onFocus);
       removeEventListener('focusout', onFocus);
       removeEventListener('keydown', onKey, true);
