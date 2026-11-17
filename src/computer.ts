@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadRunningApps } from './mac.ts';
+import { os } from './os/index.ts';
 import { webviewPids, type Proc } from './own-ui.ts';
 import { blobHome } from './settings.ts';
 import { HIDDEN, shellEnv } from './shell.ts';
@@ -134,7 +135,7 @@ const run: Run = (cmd, args) => new Promise((res, rej) =>
   execFile(cmd, args, { windowsHide: true, timeout: 60_000, maxBuffer: 4_000_000, env: shellEnv() }, (err, out) => (err ? rej(err) : res(String(out)))));
 
 /** Reads this computer. Throws when the system's own tools can't be run; undefined where there is nothing to read with. */
-export async function readProfile(platform: string = process.platform, exec: Run = run,
+export async function readProfile(platform: string = os.id, exec: Run = run,
   ls: (dir: string) => string[] = d => { try { return readdirSync(d); } catch { return []; } }, home: string = homedir()): Promise<Profile | undefined> {
   if (platform === 'win32') {
     // encoded, so no quote of the script has to survive a command line
@@ -281,7 +282,7 @@ function makeWindowsReader(): () => Win[] {
 export function computerNow(d: {
   platform?: string; self?: number; procs?: () => Proc[]; wins?: () => Win[]; mac?: () => { apps: string[]; front: string };
 } = {}): () => string {
-  const platform = d.platform ?? process.platform, self = d.self ?? process.pid;
+  const platform = d.platform ?? os.id, self = d.self ?? process.pid;
   let wins = d.wins, mac = d.mac, off = (platform !== 'win32' && platform !== 'darwin') || (platform === 'win32' && !d.procs);
   return () => {
     if (off) return '';

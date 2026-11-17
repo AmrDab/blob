@@ -5,6 +5,7 @@
 // all, which is why the host has to look. Where the cursor can't be read the window takes every click, as before.
 import { createRequire } from 'node:module';
 import type { BrowserWindow } from '@webviewjs/webview';
+import { os } from './os/index.ts';
 import { ignoreNext, parseShapes, type HitShape } from './ui/liquid/hit.ts';
 
 /**
@@ -46,7 +47,7 @@ const NEAR_MS = 25, FAR_MS = 100;      // how often to look: the cursor on or ne
 const NEAR_PX = 200;
 
 /** How to read the cursor here: user32 on Windows, the window library on macOS, undefined elsewhere or when it fails. */
-export function cursorReader(win: Win & Partial<Pick<BrowserWindow, 'getPrimaryMonitor'>>, platform: string = process.platform, now: () => number = Date.now): (() => Cursor) | undefined {
+export function cursorReader(win: Win & Partial<Pick<BrowserWindow, 'getPrimaryMonitor'>>, platform: string = os.id, now: () => number = Date.now): (() => Cursor) | undefined {
   try {
     if (platform === 'win32') {
       const koffi = createRequire(import.meta.url)('koffi');

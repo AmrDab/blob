@@ -11,11 +11,6 @@ const inOs = (f: string) => f.startsWith('os/');
 const text = (f: string) => readFileSync(join(SRC, f), 'utf8');
 const having = (re: RegExp) => all.filter(f => !inOs(f) && re.test(text(f)));
 
-/** Until step 2 of the plan: the files that read process.platform. */
-const READS = [
-  'autostart.ts', 'brain.ts', 'clickthrough.ts', 'computer.ts', 'files-mcp.ts', 'focus.ts', 'mac.ts', 'main.ts', 'overlay.ts',
-  'own-ui.ts', 'persona.ts', 'scripts.ts', 'setup.ts', 'shell.ts', 'watch.ts',
-];
 /** The files that still name a system. */
 const NAMES = [
   'autostart.ts', 'brain.ts', 'clickthrough.ts', 'computer.ts', 'files-mcp.ts', 'focus.ts', 'mac.ts', 'main.ts', 'overlay.ts',
@@ -30,7 +25,7 @@ const imports = (f: string) => [...text(f).matchAll(/^(?:import|export)\s+(?!typ
 
 describe('the operating system boundary', () => {
   it('process.platform is read only in src/os/', () => {
-    expect(having(/process\.platform/)).toEqual(READS);
+    expect(having(/process\.platform/)).toEqual([]);
   });
 
   it('a system is named only in src/os/, and in the files still on the list', () => {

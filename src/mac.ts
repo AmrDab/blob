@@ -227,9 +227,9 @@ export interface MacDeps {
   later?: (fn: () => void, ms: number) => unknown;
 }
 
-/** Everything above, in order. Call once, after the first web view is made. Does nothing off macOS. */
+/** Everything above, in order. Call once, after the first web view is made. Does nothing unless `platform` is macOS. */
 export function macSetup(app: Pick<Application, 'setMenu'>, quit: () => void, deps: MacDeps = {}): void {
-  if ((deps.platform ?? process.platform) !== 'darwin') return;
+  if (deps.platform !== 'darwin') return;
   const step = (failed: string, fn: () => void): void => {
     try { fn(); } catch (e) { console.log(`Blob: ${failed} (${(e as Error).message})`); }
   };

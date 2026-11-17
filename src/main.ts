@@ -22,6 +22,7 @@ import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
 import { macSetup } from './mac.ts';
 import { memoryBrief, memoryFile } from './memory.ts';
+import { os } from './os/index.ts';
 import { hideFromCapture, overlay, type Overlay } from './overlay.ts';
 import { keepOwnUiFile, processLister } from './own-ui.ts';
 import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type Reply, type RoomInfo } from './pair.ts';
@@ -130,7 +131,7 @@ const questions = new Questions({
 // ── the desk ─────────────────────────────────────────────────────────────────
 // Windows: one bridge for as long as Blob runs, started now so the first read finds it warm. Its Yes card is a
 // question like any other; Blob's own windows and its web view's processes are looked up again at every call.
-const bridge = process.platform !== 'win32' ? undefined : new Bridge({
+const bridge = os.id !== 'win32' ? undefined : new Bridge({
   script: join(DIST, 'desk-bridge.ps1'),
   spawn: (command, args, o) => spawn(command, args, o),
   kill: pid => { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }); },
@@ -288,7 +289,7 @@ const waiting: Entry[] = [];                        // tasks that came due while
 function remind(e: Entry, due: number): void {
   send({ type: 'reminder', id: `${e.id}-${due}`, text: e.text, at: stamp(due).slice(11) });
   row({ kind: 'answer', text: `Reminder: ${e.text}` });
-  if (process.platform === 'darwin') spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore' }).on('error', () => {});
+  if (os.id === 'darwin') spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore' }).on('error', () => {});
   else pillUi.beep();
   pairing?.answer(`Reminder: ${e.text}`);
 }
@@ -472,8 +473,8 @@ function watchMac(): void {
 
 function openMicSettings(): void {
   const o = { windowsHide: true, detached: true, stdio: 'ignore' as const };
-  if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', 'ms-settings:privacy-microphone'], o).unref();
-  else if (process.platform === 'darwin') spawn('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'], o).unref();
+  if (os.id === 'win32') spawn('cmd', ['/c', 'start', '', 'ms-settings:privacy-microphone'], o).unref();
+  else if (os.id === 'darwin') spawn('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'], o).unref();
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
@@ -692,7 +693,7 @@ const win = app.createBrowserWindow({
   const s = m?.scaleFactor ?? 1;
   const right = m ? (m.position.x + m.size.width) / s : 1280;
   const bottom = m ? (m.position.y + m.size.height) / s : 800;
-  win.setPosition(Math.round(right - START.w - 16), Math.round(bottom - START.h - (process.platform === 'darwin' ? 90 : 56)), true);   // a Dock is taller
+  win.setPosition(Math.round(right - START.w - 16), Math.round(bottom - START.h - (os.id === 'darwin' ? 90 : 56)), true);   // a Dock is taller
 }
 // The page asks for the size it needs. Keep the bottom-right corner where it is (the user may have dragged the bubble)
 // and grow up and left.
@@ -733,7 +734,7 @@ send({ type: 'stage', clickThrough: through.available });
 
 // WebView2 reads extra browser flags from this variable when the webview is created: grant the page's microphone
 // request without a prompt. Removed right after, so nothing claude or clawdcursor starts inherits it.
-if (process.platform === 'win32') {
+if (os.id === 'win32') {
   process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS =
     '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream';
 }
@@ -747,7 +748,7 @@ const view = win.createWebview({
   newWindowHandler: () => false,
 });
 // macOS: the Edit menu, the first click, Cmd+Q through quit(), no Dock icon, every Space (mac.ts). Nothing elsewhere.
-macSetup(app, quit);
+macSetup(app, quit, { platform: os.id });
 // clawdcursor's pill: a second window at the top centre of the primary display, as big as the page says its
 // content is, shown only while a relay is connected. Made here so it shares the first webview's browser flags.
 const PILL = { w: 320, h: 64 };
@@ -764,7 +765,7 @@ function placePill(w: number, h: number): void {
   const next = { w: Math.round(Math.min(520, Math.max(120, w))), h: Math.round(Math.min(700, Math.max(40, h))) };
   const m = pillWin.getPrimaryMonitor();
   const s = m?.scaleFactor ?? 1;
-  const left = m ? m.position.x / s : 0, width = m ? m.size.width / s : 1280, top = (m ? m.position.y / s : 0) + (process.platform === 'darwin' ? 40 : 0);   // below the menu bar and the notch
+  const left = m ? m.position.x / s : 0, width = m ? m.size.width / s : 1280, top = (m ? m.position.y / s : 0) + (os.id === 'darwin' ? 40 : 0);   // below the menu bar and the notch
   pillWin.setSize(next.w, next.h, true);
   pillWin.setPosition(Math.round(left + (width - next.w) / 2), Math.round(top), true);
 }
@@ -812,4 +813,4 @@ process.on('SIGINT', quit);
 process.on('SIGTERM', quit);
 process.on('exit', () => brain.stop());
 app.run();
-console.log(`Blob: http://127.0.0.1:${port} (${process.platform === 'darwin' ? 'Cmd+Q on the bubble' : 'close the bubble from the taskbar'}, or Ctrl+C here)`);
+console.log(`Blob: http://127.0.0.1:${port} (${os.id === 'darwin' ? 'Cmd+Q on the bubble' : 'close the bubble from the taskbar'}, or Ctrl+C here)`);

@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import type { BrowserWindow } from '@webviewjs/webview';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { loadFrontApp } from './mac.ts';
+import { os } from './os/index.ts';
 
 export interface Overlay {
   show(): void;
@@ -25,7 +26,7 @@ export interface Overlay {
  * Leaves a window out of screen captures: what Blob shows (a question, the phone's QR code) is for the person at the
  * screen, never for a screenshot or OCR the agent takes. False when the system can't do it.
  */
-export function hideFromCapture(win: BrowserWindow, platform: string = process.platform): boolean {
+export function hideFromCapture(win: BrowserWindow, platform: string = os.id): boolean {
   try {
     if (platform !== 'win32') { win.setContentProtection(true); return true; }
     const user32 = createRequire(import.meta.url)('koffi').load('user32.dll');
@@ -54,7 +55,7 @@ function pillHasKeyboard(): () => boolean {
 }
 
 /** `mac`: the macOS parts, for tests (the keeper that hands the front back, whether the pill has the keyboard, and the sound). */
-export function overlay(win: BrowserWindow, platform: string = process.platform, mac: { keeper?: FocusKeeper; mine?: () => boolean; chime?: () => void } = {}): Overlay {
+export function overlay(win: BrowserWindow, platform: string = os.id, mac: { keeper?: FocusKeeper; mine?: () => boolean; chime?: () => void } = {}): Overlay {
   const darwin = platform === 'darwin';
   const back = darwin ? mac.keeper ?? focusKeeper(0, platform) : undefined;   // remembers the user's app, to hand the front back to
   const mine = darwin ? mac.mine ?? pillHasKeyboard() : undefined;            // the pill also closes while the user types in the bubble: not then

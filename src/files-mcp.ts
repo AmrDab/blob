@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse, resolve } from 'node:path';
 import { askUser } from './ask.ts';
+import { os } from './os/index.ts';
 import { scriptTools, scriptsDir } from './scripts.ts';
 import { MAX_COMMAND, runTool, systemExec } from './shell.ts';
 
@@ -51,7 +52,7 @@ function sameFile(a: string, b: string): boolean {
 }
 
 export function fileTools(deps: FileDeps) {
-  const platform = deps.platform ?? process.platform;
+  const platform = deps.platform ?? os.id;
   return {
     list_dir(a: { path?: unknown }): ToolResult {
       const p = fullPath(a.path);
@@ -194,7 +195,7 @@ function windowsTrash(path: string): void {
 const MAC_TRASH = 'function run(a){var e=Ref();if(!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError($.NSURL.fileURLWithPathIsDirectory(a[0],false),null,e))'
   + 'throw new Error(e[0]?ObjC.unwrap(e[0].localizedDescription):"could not move it to the Trash")}';
 
-export async function osTrash(path: string, platform: string = process.platform, exec: (cmd: string, args: string[]) => Promise<void> = run): Promise<void> {
+export async function osTrash(path: string, platform: string = os.id, exec: (cmd: string, args: string[]) => Promise<void> = run): Promise<void> {
   if (platform === 'win32') return windowsTrash(path);
   if (platform === 'darwin') return exec('osascript', ['-l', 'JavaScript', '-e', MAC_TRASH, path]);
   return exec('gio', ['trash', '--', path]);
@@ -203,7 +204,7 @@ export async function osTrash(path: string, platform: string = process.platform,
 let shOpen: ((...a: unknown[]) => unknown) | undefined;
 
 /** Opens a URL or a path in its usual app, with no shell in between. */
-export async function osOpen(target: string, platform: string = process.platform): Promise<void> {
+export async function osOpen(target: string, platform: string = os.id): Promise<void> {
   if (platform === 'darwin') return run('open', [target]);
   if (platform !== 'win32') return run('xdg-open', [target]);
   shOpen ??= createRequire(import.meta.url)('koffi').load('shell32.dll')
@@ -218,7 +219,7 @@ const NET_FS = new Set([0x6969, 0x517b, 0xff534d42, 0xfe534d42, 0x5346414f, 0x73
 
 /** Whether a path is on this computer. Windows: its drive is not a network one (a mapped Z:). Linux: not a network
  *  mount. macOS: a network share mounts under /Volumes like a disk, so there it is the path's mount type. */
-export function osLocal(path: string, platform: string = process.platform): boolean {
+export function osLocal(path: string, platform: string = os.id): boolean {
   if (platform === 'win32') {
     driveType ??= createRequire(import.meta.url)('koffi').load('kernel32.dll').func('uint32_t __stdcall GetDriveTypeW(const char16_t *root)');
     return driveType!(parse(path).root) !== 4;   // DRIVE_REMOTE
@@ -263,7 +264,7 @@ export async function serve(): Promise<void> {
     description: 'Open a web page, a mailto: or settings link, a file or a folder in its usual app. Documents, pictures, audio, video and folders only; a program goes through run.',
     inputSchema: { target: z.string().describe('A URL, or a full path (a leading ~ means the home folder).') },
   }, async a => reply(await tools.open(a)));
-  const shell = process.platform === 'win32' ? 'PowerShell' : 'shell';
+  const shell = os.id === 'win32' ? 'PowerShell' : 'shell';
   const shellDeps = { ask: (q: string, detail: string) => askUser(q, { detail }), exec: systemExec };
   server.registerTool('run', {
     description: `Run one ${shell} command in the home folder and get its output. A command that only looks ` +

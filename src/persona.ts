@@ -2,6 +2,7 @@
 // Codex: developer_instructions). What Blob can do, the order to try it in, and its settings and memory as they are
 // now. Plain facts: Blob has no character to play.
 import type { Tier } from './ladder.ts';
+import { os } from './os/index.ts';
 import { BRAIN_NAME, type BrainName, type Settings } from './settings.ts';
 
 const MODEL_NAME: Record<Settings['model'], string> = {
@@ -22,7 +23,7 @@ export function persona(s: Settings, o: {
   memory?: string; computer?: string; scripts?: { name: string; description: string }[];
   brain?: BrainName; tier?: Tier; now?: Date; platform?: string;
 } = {}): string {
-  const now = o.now ?? new Date(), platform = o.platform ?? process.platform, brain = o.brain ?? s.brain;
+  const now = o.now ?? new Date(), platform = o.platform ?? os.id, brain = o.brain ?? s.brain;
   const win = platform === 'win32';
   const looks = win
     ? 'Get-ChildItem, Get-Content, Select-String, Get-Process, Get-Command, Test-Path, winget list, winget search, --version'

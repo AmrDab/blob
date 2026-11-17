@@ -7,6 +7,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { MAX_TURNS, askedUp, continueText, firstTier, stepUp, userDecided, type Tier } from './ladder.ts';
+import { os } from './os/index.ts';
 import { BRAIN_NAME, type BrainName, type Model } from './settings.ts';
 
 export type { Model };
@@ -58,7 +59,7 @@ function pillEnv(env: NodeJS.ProcessEnv): Record<string, string> | undefined {
   };
 }
 /** The clawdcursor MCP server command: `clawdcursor mcp --compact`, or BLOB_CLAWDCURSOR (e.g. a dev build). */
-export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): ServerCommand {
+export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platform: string = os.id): ServerCommand {
   const raw = env.BLOB_CLAWDCURSOR?.trim() || 'clawdcursor mcp --compact';
   const parts = (raw.match(/"[^"]*"|\S+/g) ?? []).map(p => p.replace(/^"|"$/g, ''));
   const pill = pillEnv(env);
@@ -70,12 +71,12 @@ export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platfor
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
 
 /** The servers every brain gets: clawdcursor, Blob's files server, its desk server (Windows only) and its self server ("blob"), nothing else. */
-export function mcpServers(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): Record<string, ServerCommand> {
+export function mcpServers(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = os.id): Record<string, ServerCommand> {
   return { clawdcursor: clawdcursorCommand(env, platform), files: own.files, ...(platform === 'win32' && own.desk && { desk: own.desk }), blob: own.blob };
 }
 
 /** Claude Code's --mcp-config file. */
-export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
+export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = os.id): string {
   const servers = Object.entries(mcpServers(own, env, platform)).map(([name, s]) => [name, { type: 'stdio', ...s }]);
   return JSON.stringify({ mcpServers: Object.fromEntries(servers) }, null, 2);
 }
@@ -109,7 +110,7 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: str
  * How to start Claude Code. Its macOS/Linux installer puts it in ~/.local/bin (an older one in ~/.claude/local) and
  * does not add that folder to PATH, so when PATH has no `claude` Blob looks there itself.
  */
-export function claudeCommand(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env,
+export function claudeCommand(platform: string = os.id, env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(), exists: (p: string) => boolean = existsSync): string {
   if (platform === 'win32') return 'claude';
   try {
@@ -123,7 +124,7 @@ export function claudeCommand(platform: string = process.platform, env: NodeJS.P
  * How to start Codex with no shell in between (the brief and the servers' tokens are arguments). On Windows npm
  * installs it as codex.cmd, which only cmd can start: Blob runs the script that shim names with this same Node.
  */
-export function codexCommand(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env,
+export function codexCommand(platform: string = os.id, env: NodeJS.ProcessEnv = process.env,
   fs: { exists(p: string): boolean; read(p: string): string } = { exists: existsSync, read: p => readFileSync(p, 'utf8') }): ServerCommand {
   if (platform !== 'win32') return { command: 'codex', args: [] };
   for (const dir of (env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean)) {
@@ -399,7 +400,7 @@ function readClaudeFlags(command: string): void {
 
 function killTree(p: ChildProcessWithoutNullStreams): void {
   if (p.exitCode !== null || p.pid === undefined) return;
-  if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
+  if (os.id === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
   else try { process.kill(-p.pid, 'SIGTERM'); } catch { /* already gone */ }
 }
 
@@ -468,7 +469,7 @@ export class Brain {
     const args = codex ? codexArgs({ servers: this.o.servers, resume, persona })      // Codex runs its own default model
       : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model: tier, resume, persona, maxTurns: model === 'auto' ? MAX_TURNS[tier] : undefined, snapshotOff: snapshotFlag });
     const p = spawn(cmd.command, [...cmd.args, ...args], {
-      cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: process.platform !== 'win32',
+      cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: os.id !== 'win32',
     });
     const entry: NonNullable<Brain['child']> = {
       p, brain, model, tier, before, sent: false, halted: false,

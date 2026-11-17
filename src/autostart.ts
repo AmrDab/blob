@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { os } from './os/index.ts';
 import { blobHome } from './settings.ts';
 
 /** How this Blob was started: the program, its arguments and the folder it runs in. */
@@ -36,7 +37,7 @@ export interface AutostartDeps {
 export const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 export const RUN_NAME = 'Blob';
 export const AGENT = 'com.blob.start';
-export const supported = (platform: string = process.platform) => platform === 'win32' || platform === 'darwin';
+export const supported = (platform: string = os.id) => platform === 'win32' || platform === 'darwin';
 
 /** ~/.blob/start.cmd: go to the folder, start Blob. (`%` is doubled: in a .cmd it starts a variable.) */
 export function windowsScript(c: StartCommand): string {
@@ -97,9 +98,9 @@ export async function setAutostart(on: boolean, d: AutostartDeps): Promise<{ ok:
 /** The real system. */
 export function systemAutostart(): AutostartDeps {
   const path = process.env.PATH ?? '', command = startCommand();
-  if (process.platform === 'darwin') command.exe = stableNode(command.exe, path);
+  if (os.id === 'darwin') command.exe = stableNode(command.exe, path);
   return {
-    platform: process.platform, home: homedir(), blobHome: blobHome(), command, path,
+    platform: os.id, home: homedir(), blobHome: blobHome(), command, path,
     run: (command, args) => new Promise(res => execFile(command, args, { windowsHide: true, timeout: 20_000 }, err => res(!err))),
     write: (file, text) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); },
     remove: file => rmSync(file, { force: true }),

@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { claudeCommand, cleanEnv, clawdcursorCommand, codexCommand, type ServerCommand } from './brain.ts';
+import { os } from './os/index.ts';
 import { BRAINS, type BrainName } from './settings.ts';
 
 /**
@@ -76,7 +77,7 @@ export function pickBrain(wanted: BrainName, ready: readonly BrainName[]): Brain
  * Which brains are installed, and which of those are signed in. Each is started the same way the Brain starts it,
  * so this says whether Blob can start it. `codex login status` exits 0 only when signed in.
  */
-export async function brains(platform: string = process.platform, run: Runner = shell, codex: ServerCommand = codexCommand(platform), claude: string = claudeCommand(platform)): Promise<{ has: Record<BrainName, boolean>; ready: BrainName[] }> {
+export async function brains(platform: string = os.id, run: Runner = shell, codex: ServerCommand = codexCommand(platform), claude: string = claudeCommand(platform)): Promise<{ has: Record<BrainName, boolean>; ready: BrainName[] }> {
   const cx = (args: string[]) => run(codex.command, [...codex.args, ...args]);
   const has = { claude: (await run(claude, ['--version'])).ok, codex: (await cx(['--version'])).ok };
   const signedIn = {
@@ -86,7 +87,7 @@ export async function brains(platform: string = process.platform, run: Runner = 
   return { has, ready: BRAINS.filter(b => signedIn[b]) };
 }
 
-export async function runChecks(platform: string = process.platform, run: Runner = shell, home: string = homedir(), codex: ServerCommand = codexCommand(platform), claude: string = claudeCommand(platform)): Promise<Check[]> {
+export async function runChecks(platform: string = os.id, run: Runner = shell, home: string = homedir(), codex: ServerCommand = codexCommand(platform), claude: string = claudeCommand(platform)): Promise<Check[]> {
   const checks: Check[] = [];
   const { has, ready } = await brains(platform, run, codex, claude);
   // Blob needs one of the two. With none installed both installs are offered; with one installed, its sign-in.
@@ -130,7 +131,7 @@ export let fixNote = '';
  *   consent:     `clawdcursor consent --accept` (clawdcursor writes its own consent file; Blob never does)
  *   mac:         `clawdcursor grant` (macOS asks for Accessibility and Screen Recording)
  */
-export async function fix(id: string, run: Runner = shell, platform: string = process.platform): Promise<boolean> {
+export async function fix(id: string, run: Runner = shell, platform: string = os.id): Promise<boolean> {
   fixNote = '';
   if (id === 'clawdcursor') {
     // npm is a .cmd shim on Windows, which only cmd can start.

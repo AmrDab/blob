@@ -4,6 +4,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import type { ToolResult } from './files-mcp.ts';
+import { os } from './os/index.ts';
 
 export type Verdict = 'read' | 'ask';
 
@@ -80,7 +81,7 @@ function pipeline(command: string): { text: string; quoted: boolean }[][] | null
 }
 
 /** 'read' only when every command of the pipeline is known to only look. Everything else is 'ask'. */
-export function classify(command: string, platform: string = process.platform): Verdict {
+export function classify(command: string, platform: string = os.id): Verdict {
   const win = platform === 'win32';
   // A plain environment variable or the home folder as a value is fine; any other `$` is not.
   const plain = win ? command.replace(/\$env:\w+/gi, 'X').replace(/\$HOME\b/gi, 'X') : command.replace(/\$HOME\b/g, 'X');
@@ -175,7 +176,7 @@ export function shellEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 }
 
 /** How the command is started: PowerShell (output as UTF-8, no progress bars), or the user's login shell. */
-export function shellArgv(command: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): [string, string[]] {
+export function shellArgv(command: string, platform: string = os.id, env: NodeJS.ProcessEnv = process.env): [string, string[]] {
   if (platform === 'win32') {
     const quiet = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; ";
     return ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', quiet + command]];
@@ -195,7 +196,7 @@ export function killLive(kill: (pid: number, signal: string) => void = (pid, s) 
 // Stop (or quit) ends this process with a signal, and the timeout below dies with it: take the commands along.
 let hooked = false;
 function hookExit(): void {
-  if (hooked || process.platform === 'win32') return;
+  if (hooked || os.id === 'win32') return;
   hooked = true;
   try {
     for (const s of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.once(s, () => { killLive(); process.exit(143); });
@@ -207,16 +208,16 @@ function hookExit(): void {
 export const systemExec: Exec = (command, timeoutMs) => new Promise((res, rej) => {
   const [exe, args] = shellArgv(command);
   const p = spawn(exe, args, {
-    cwd: homedir(), env: shellEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
+    cwd: homedir(), env: shellEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: os.id !== 'win32',
   });
-  if (process.platform !== 'win32' && p.pid) { live.add(p.pid); hookExit(); }
+  if (os.id !== 'win32' && p.pid) { live.add(p.pid); hookExit(); }
   let out = '', timedOut = false;
   const take = (d: Buffer) => { if (out.length < 200_000) out += d.toString('utf8'); };
   p.stdout.on('data', take);
   p.stderr.on('data', take);
   const timer = setTimeout(() => {
     timedOut = true;
-    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
+    if (os.id === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
     else try { process.kill(-p.pid!, 'SIGKILL'); } catch { /* already gone */ }
   }, timeoutMs);
   p.on('error', e => { clearTimeout(timer); live.delete(p.pid!); rej(e); });

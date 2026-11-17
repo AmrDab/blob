@@ -4,6 +4,7 @@
 // runtime (mac.ts). Elsewhere it does nothing.
 import { createRequire } from 'node:module';
 import { loadFrontApp, type FrontApp } from './mac.ts';
+import { os } from './os/index.ts';
 
 export interface FocusKeeper { restore(): void; stop(): void }
 
@@ -30,7 +31,7 @@ function macKeeper(load: () => FrontApp, me: number): FocusKeeper {
   };
 }
 
-export function focusKeeper(own: bigint | number, platform: string = process.platform, mac: () => FrontApp = loadFrontApp, pid: number = process.pid): FocusKeeper {
+export function focusKeeper(own: bigint | number, platform: string = os.id, mac: () => FrontApp = loadFrontApp, pid: number = process.pid): FocusKeeper {
   if (platform === 'darwin') return macKeeper(mac, pid);
   if (platform !== 'win32') return NONE;
   let f: {

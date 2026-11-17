@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import type { ToolResult } from './files-mcp.ts';
 import { SECRET, UNSAFE_FACT } from './memory.ts';
+import { os } from './os/index.ts';
 import { blobHome } from './settings.ts';
 import { classify, execTool, saidNo, unfit, type ShellDeps } from './shell.ts';
 
@@ -87,7 +88,7 @@ export function scriptsBrief(dir: string, max: number = MAX_BRIEF): { name: stri
 }
 
 export function scriptTools(d: ScriptDeps) {
-  const platform = d.platform ?? process.platform;
+  const platform = d.platform ?? os.id;
   const fileOf = (name: string) => join(d.dir, name + ext(platform));
   const nameOf = (v: unknown): string | ToolResult => {
     const name = typeof v === 'string' ? v.trim() : '';
