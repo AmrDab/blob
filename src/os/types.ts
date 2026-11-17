@@ -92,6 +92,10 @@ export interface Os {
   hideFromCapture(win: BrowserWindow): boolean;
   /** The native side of the pill's window (overlay.ts): left out of captures, and kept from taking the keyboard as far as the system lets it. */
   overlay(win: BrowserWindow): Overlay;
+  /** The sound of a reminder, where it is not the pill's own (overlay.ts's beep). */
+  reminderSound?(): void;
+  /** What the web view reads from the environment when it is made: set for that moment only (main.ts). */
+  webviewEnv?: Record<string, string>;
 
   /** How far the bubble starts above the bottom of the screen: clear of the taskbar or the Dock. */
   dockGap: number;

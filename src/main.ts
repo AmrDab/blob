@@ -288,7 +288,7 @@ const waiting: Entry[] = [];                        // tasks that came due while
 function remind(e: Entry, due: number): void {
   send({ type: 'reminder', id: `${e.id}-${due}`, text: e.text, at: stamp(due).slice(11) });
   row({ kind: 'answer', text: `Reminder: ${e.text}` });
-  if (os.id === 'darwin') spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore' }).on('error', () => {});
+  if (os.reminderSound) os.reminderSound();
   else pillUi.beep();
   pairing?.answer(`Reminder: ${e.text}`);
 }
@@ -730,12 +730,9 @@ const readCursor = os.cursor?.(win), dragged = follower(win, readCursor);
 through = clickThrough(win, { over: on => tell({ type: 'over', on }), gone: () => send({ type: 'stage', clickThrough: false }) }, readCursor);
 send({ type: 'stage', clickThrough: through.available });
 
-// WebView2 reads extra browser flags from this variable when the webview is created: grant the page's microphone
-// request without a prompt. Removed right after, so nothing claude or clawdcursor starts inherits it.
-if (os.id === 'win32') {
-  process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS =
-    '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream';
-}
+// What the web view reads from the environment when it is created (os.webviewEnv: WebView2's browser flags). Removed
+// right after, so nothing claude or clawdcursor starts inherits it.
+Object.assign(process.env, os.webviewEnv);
 const webContext = app.createWebContext({ dataDirectory: join(HOME, 'webview') });
 const view = win.createWebview({
   url: `http://127.0.0.1:${port}/?t=${token}`,
@@ -774,7 +771,7 @@ const pillView = pillWin.createWebview({
   navigationHandler: u => u.startsWith(`http://127.0.0.1:${port}/`),
   newWindowHandler: () => false,
 });
-delete process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS;
+for (const name in os.webviewEnv) delete process.env[name];
 view.setBackgroundColor(0, 0, 0, 0);
 pillView.setBackgroundColor(0, 0, 0, 0);
 placePill(PILL.w, PILL.h);

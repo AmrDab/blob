@@ -1,5 +1,5 @@
 // macOS.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { macAutostart, stableNode } from '../autostart.ts';
@@ -47,6 +47,7 @@ export const mac: Os = {
   focusKeeper: () => macKeeper(),                  // whole apps, not windows: Blob is this process
   hideFromCapture: protect,
   overlay: win => macOverlay(win),
+  reminderSound() { spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore' }).on('error', () => {}); },
   dockGap: 90,                                     // a Dock is taller than a taskbar
   topInset: 40,                                    // the menu bar and the notch
   quitHint: 'Cmd+Q on the bubble',

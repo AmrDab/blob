@@ -106,6 +106,11 @@ export const win: Os = {
   focusKeeper: winKeeper,
   hideFromCapture: winProtect,
   overlay: winOverlay,
+  // WebView2's extra browser flags: grant the page's microphone request without a prompt
+  webviewEnv: {
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:
+      '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream',
+  },
   dockGap: 56,
   topInset: 0,
   quitHint: 'close the bubble from the taskbar',

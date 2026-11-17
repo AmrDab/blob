@@ -72,6 +72,14 @@ describe('the operating system', () => {
     expect(typeof m.openApps!(1)).toBe('function');                                // macOS names its apps itself: no process list needed
   });
 
+  it('has the web view flags on Windows only, and a reminder sound of its own on macOS only', () => {
+    const [w, m, l] = ['win32', 'darwin', 'linux'].map(osFor);
+    expect(Object.keys(w.webviewEnv ?? {})).toEqual(['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS']);
+    expect(w.webviewEnv!.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS).toContain('--use-fake-ui-for-media-stream');
+    expect([m.webviewEnv, l.webviewEnv]).toEqual([undefined, undefined]);
+    expect([w, m, l].map(o => !!o.reminderSound)).toEqual([false, true, false]);
+  });
+
   it('carries the words and sizes of each system', () => {
     const [w, m, l] = ['win32', 'darwin', 'linux'].map(osFor);
     expect([w, m, l].map(o => o.shell.label)).toEqual(['PowerShell', 'shell', 'shell']);
