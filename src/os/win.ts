@@ -1,4 +1,5 @@
 // Windows.
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { parse } from 'node:path';
@@ -59,7 +60,13 @@ export const win: Os = {
     name: 'PowerShell',
     scriptExt: '.ps1',
     looks: 'Get-ChildItem, Get-Content, Select-String, Get-Process, Get-Command, Test-Path, winget list, winget search, --version',
+    dialect: 'powershell',
+    // output as UTF-8, no progress bars
+    argv: command => ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; " + command]],
   },
+  spawnGroup: false,
+  killTree(pid) { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }); },
   claudeInstall: 'irm https://claude.ai/install.ps1 | iex',
   trashName: 'Recycle Bin',
   settingsScheme: 'ms-settings:',

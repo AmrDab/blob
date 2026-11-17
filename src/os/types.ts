@@ -22,7 +22,16 @@ export interface Os {
     scriptExt: string;
     /** The brief's examples of commands that only look. */
     looks: string;
+    /** The language a command is written in: which commands only look (shell.ts). */
+    dialect: 'powershell' | 'posix';
+    /** The program and arguments that run one command. */
+    argv(command: string, env: NodeJS.ProcessEnv): [string, string[]];
   };
+
+  /** Whether a child is started at the head of a process group of its own, which is how its whole tree is ended. */
+  spawnGroup: boolean;
+  /** Ends a process and everything it started. `signal`: what its group is sent, where a group is how. */
+  killTree(pid: number, signal: NodeJS.Signals): void;
 
   /** How Claude Code is installed, for the user to copy. */
   claudeInstall: string;

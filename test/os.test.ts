@@ -1,5 +1,5 @@
 // The per-system files (src/os/): what each one has, and what a system without a file gets.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { os, osFor } from '../src/os/index.ts';
 
 describe('the operating system', () => {
@@ -19,6 +19,24 @@ describe('the operating system', () => {
     // as the code did before src/os: Linux's ways, but a network path told by its mount, as on macOS
     expect(bsd.isLocal).toBe(osFor('darwin').isLocal);
     expect({ ...bsd, id: 'linux', name: 'Linux', isLocal: osFor('linux').isLocal }).toEqual(osFor('linux'));
+  });
+
+  it('starts a command in the system\'s shell, and ends a whole process group with the signal it is given', () => {
+    const [w, m, l] = ['win32', 'darwin', 'linux'].map(osFor);
+    expect([w, m, l, osFor('freebsd')].map(o => o.shell.dialect)).toEqual(['powershell', 'posix', 'posix', 'posix']);
+    expect(w.shell.argv('Get-Date', {})[0]).toBe('powershell.exe');
+    expect(w.shell.argv('Get-Date', {})[1].slice(0, 3)).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
+    expect(m.shell.argv('date', { SHELL: '/bin/zsh' })).toEqual(['/bin/zsh', ['-lc', 'date']]);
+    expect(l.shell.argv('date', {})).toEqual(['/bin/sh', ['-lc', 'date']]);
+    expect([w, m, l].map(o => o.spawnGroup)).toEqual([false, true, true]);
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      m.killTree(4321, 'SIGTERM');
+      l.killTree(4322, 'SIGKILL');
+      expect(kill.mock.calls).toEqual([[-4321, 'SIGTERM'], [-4322, 'SIGKILL']]);   // the group, not the one process
+      kill.mockImplementation(() => { throw new Error('ESRCH'); });
+      expect(() => l.killTree(4323, 'SIGKILL')).not.toThrow();                      // already gone
+    } finally { kill.mockRestore(); }
   });
 
   it('has a trash, an opener and start at sign-in where the system does', async () => {

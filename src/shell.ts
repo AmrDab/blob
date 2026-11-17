@@ -1,10 +1,10 @@
 // Blob's shell tool (`run`, on the files server): PowerShell on Windows, the login shell elsewhere. A command that
 // only looks runs at once. Anything else is shown to the user word for word on a Yes/No card first. When the
 // classifier is not sure, it asks.
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import type { ToolResult } from './files-mcp.ts';
-import { os } from './os/index.ts';
+import { os, osFor } from './os/index.ts';
 
 export type Verdict = 'read' | 'ask';
 
@@ -82,7 +82,7 @@ function pipeline(command: string): { text: string; quoted: boolean }[][] | null
 
 /** 'read' only when every command of the pipeline is known to only look. Everything else is 'ask'. */
 export function classify(command: string, platform: string = os.id): Verdict {
-  const win = platform === 'win32';
+  const win = osFor(platform).shell.dialect === 'powershell';
   // A plain environment variable or the home folder as a value is fine; any other `$` is not.
   const plain = win ? command.replace(/\$env:\w+/gi, 'X').replace(/\$HOME\b/gi, 'X') : command.replace(/\$HOME\b/g, 'X');
   if ((win ? WIN_UNSAFE : UNIX_UNSAFE).test(plain) || HIDDEN.test(plain)) return 'ask';
@@ -177,14 +177,10 @@ export function shellEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 
 /** How the command is started: PowerShell (output as UTF-8, no progress bars), or the user's login shell. */
 export function shellArgv(command: string, platform: string = os.id, env: NodeJS.ProcessEnv = process.env): [string, string[]] {
-  if (platform === 'win32') {
-    const quiet = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; ";
-    return ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', quiet + command]];
-  }
-  return [env.SHELL || '/bin/sh', ['-lc', command]];
+  return osFor(platform).shell.argv(command, env);
 }
 
-/** macOS/Linux: the commands running now. Each is in its own process group, so a signal to Blob's group misses it. */
+/** Where a command gets a process group of its own (macOS, Linux): the commands running now. A signal to Blob's group misses them. */
 export const live = new Set<number>();
 
 /** Stops every running command, whole group. */
@@ -196,7 +192,7 @@ export function killLive(kill: (pid: number, signal: string) => void = (pid, s) 
 // Stop (or quit) ends this process with a signal, and the timeout below dies with it: take the commands along.
 let hooked = false;
 function hookExit(): void {
-  if (hooked || os.id === 'win32') return;
+  if (hooked || !os.spawnGroup) return;
   hooked = true;
   try {
     for (const s of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.once(s, () => { killLive(); process.exit(143); });
@@ -208,17 +204,16 @@ function hookExit(): void {
 export const systemExec: Exec = (command, timeoutMs) => new Promise((res, rej) => {
   const [exe, args] = shellArgv(command);
   const p = spawn(exe, args, {
-    cwd: homedir(), env: shellEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: os.id !== 'win32',
+    cwd: homedir(), env: shellEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: os.spawnGroup,
   });
-  if (os.id !== 'win32' && p.pid) { live.add(p.pid); hookExit(); }
+  if (os.spawnGroup && p.pid) { live.add(p.pid); hookExit(); }
   let out = '', timedOut = false;
   const take = (d: Buffer) => { if (out.length < 200_000) out += d.toString('utf8'); };
   p.stdout.on('data', take);
   p.stderr.on('data', take);
   const timer = setTimeout(() => {
     timedOut = true;
-    if (os.id === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
-    else try { process.kill(-p.pid!, 'SIGKILL'); } catch { /* already gone */ }
+    os.killTree(p.pid!, 'SIGKILL');
   }, timeoutMs);
   p.on('error', e => { clearTimeout(timer); live.delete(p.pid!); rej(e); });
   p.on('close', code => { clearTimeout(timer); live.delete(p.pid!); res({ code, out, timedOut }); });

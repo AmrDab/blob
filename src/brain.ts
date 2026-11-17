@@ -1,6 +1,6 @@
 // One run at a time of the user's own `claude -p` or `codex exec`, with clawdcursor, Blob's files and shell tools,
 // its desk tools (Windows: an open window worked in the background) and its self tools.
-import { execFile, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
@@ -400,8 +400,7 @@ function readClaudeFlags(command: string): void {
 
 function killTree(p: ChildProcessWithoutNullStreams): void {
   if (p.exitCode !== null || p.pid === undefined) return;
-  if (os.id === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
-  else try { process.kill(-p.pid, 'SIGTERM'); } catch { /* already gone */ }
+  os.killTree(p.pid, 'SIGTERM');
 }
 
 /** One `claude -p` or `codex exec` at a time. prewarm() starts it early (when Speak is pressed); run() sends the request. */
@@ -469,7 +468,7 @@ export class Brain {
     const args = codex ? codexArgs({ servers: this.o.servers, resume, persona })      // Codex runs its own default model
       : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model: tier, resume, persona, maxTurns: model === 'auto' ? MAX_TURNS[tier] : undefined, snapshotOff: snapshotFlag });
     const p = spawn(cmd.command, [...cmd.args, ...args], {
-      cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: os.id !== 'win32',
+      cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: os.spawnGroup,
     });
     const entry: NonNullable<Brain['child']> = {
       p, brain, model, tier, before, sent: false, halted: false,
