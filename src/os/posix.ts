@@ -1,5 +1,6 @@
 // What macOS and Linux share.
 import { execFile } from 'node:child_process';
+import { delimiter, join } from 'node:path';
 import type { Exec, Os } from './types.ts';
 
 const shell: Os['shell'] = {
@@ -21,6 +22,17 @@ export const posix = {
   killTree(pid, signal) {
     try { process.kill(-pid, signal); } catch { /* already gone */ }
   },
+  cli: parts => ({ command: parts[0], args: parts.slice(1) }),
+  // Its installer puts it in ~/.local/bin (an older one in ~/.claude/local) and does not add that folder to PATH,
+  // so when PATH has no `claude` Blob looks there itself.
+  findClaude(env, home, exists) {
+    try {
+      if ((env.PATH ?? '').split(delimiter).some(d => d && exists(join(d, 'claude')))) return 'claude';
+      for (const p of [join(home, '.local', 'bin', 'claude'), join(home, '.claude', 'local', 'claude')]) if (exists(p)) return p;
+    } catch (e) { console.log(`Blob: could not look for Claude Code: ${(e as Error).message}`); }
+    return 'claude';                                  // not found: starting it fails, and the first-run check says so
+  },
+  findCodex: () => ({ command: 'codex', args: [] }),
   claudeInstall: 'curl -fsSL https://claude.ai/install.sh | bash',
   trashName: 'Trash',
 } satisfies Partial<Os>;

@@ -134,11 +134,10 @@ export let fixNote = '';
 export async function fix(id: string, run: Runner = shell, platform: string = os.id): Promise<boolean> {
   fixNote = '';
   if (id === 'clawdcursor') {
-    // npm is a .cmd shim on Windows, which only cmd can start.
-    const npm = ['i', '-g', 'clawdcursor'];
-    const r = platform === 'win32' ? await run('cmd', ['/c', 'npm', ...npm], 300_000) : await run('npm', npm, 300_000);
+    const sys = osFor(platform), npm = sys.cli(['npm', 'i', '-g', 'clawdcursor']);   // npm is a .cmd shim on Windows, which only cmd can start
+    const r = await run(npm.command, npm.args, 300_000);
     // Node from the nodejs.org installer keeps its global folder owned by root: a plain install cannot write there.
-    if (!r.ok && platform !== 'win32' && /EACCES/.test(r.err ?? '')) {
+    if (!r.ok && sys.shell.dialect === 'posix' && /EACCES/.test(r.err ?? '')) {
       fixNote = 'Your Node needs your password to install this. Use Node from Homebrew or nvm, or run the install with sudo in Terminal, then tap Install.';
       console.log('Blob: npm has no write access to its global folder (EACCES). In a terminal, run: sudo npm i -g clawdcursor (or use Node from Homebrew or nvm).');
     }

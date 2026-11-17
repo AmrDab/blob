@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { parse } from 'node:path';
+import { delimiter, dirname, join, parse } from 'node:path';
 import { windowsAutostart } from '../autostart.ts';
 import type { Os } from './types.ts';
 
@@ -52,6 +52,19 @@ function isLocal(path: string): boolean {
   return driveType!(parse(path).root) !== 4;   // DRIVE_REMOTE
 }
 
+/** npm installs Codex as codex.cmd, which only cmd can start: Blob runs the script that shim names with this same Node. */
+const findCodex: Os['findCodex'] = (env, fs) => {
+  for (const dir of (env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean)) {
+    const exe = join(dir, 'codex.exe'), cmd = join(dir, 'codex.cmd');
+    if (fs.exists(exe)) return { command: exe, args: [] };
+    if (!fs.exists(cmd)) continue;
+    let js: string | undefined;
+    try { js = fs.read(cmd).match(/"%dp0%\\([^"]+\.js)"/)?.[1]; } catch { /* unreadable: not this one */ }
+    if (js) return { command: process.execPath, args: [join(dirname(cmd), js)] };
+  }
+  return { command: 'codex', args: [] };            // not found: starting it fails, and the first-run check says so
+};
+
 export const win: Os = {
   id: 'win32',
   name: 'Windows',
@@ -67,6 +80,9 @@ export const win: Os = {
   },
   spawnGroup: false,
   killTree(pid) { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }); },
+  cli: parts => ({ command: 'cmd', args: ['/c', ...parts] }),   // npm's .cmd shims, which only cmd can start
+  findClaude: () => 'claude',                                   // its installer sets PATH
+  findCodex,
   claudeInstall: 'irm https://claude.ai/install.ps1 | iex',
   trashName: 'Recycle Bin',
   settingsScheme: 'ms-settings:',

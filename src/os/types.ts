@@ -5,6 +5,8 @@ import type { Apply } from '../autostart.ts';
 
 /** Runs a program to its end; rejects with what it wrote on stderr. */
 export type Exec = (cmd: string, args: string[]) => Promise<void>;
+/** A program and its arguments. */
+export interface Command { command: string; args: string[] }
 
 export interface Os {
   /** Node's name for the system (process.platform). */
@@ -33,6 +35,12 @@ export interface Os {
   /** Ends a process and everything it started. `signal`: what its group is sent, where a group is how. */
   killTree(pid: number, signal: NodeJS.Signals): void;
 
+  /** How a command-line tool npm installed is started, with no shell of Blob's in between. `parts`: its name and arguments. */
+  cli(parts: string[]): Command;
+  /** How to start Claude Code: `claude`, or its full path when it is installed but not on PATH. */
+  findClaude(env: NodeJS.ProcessEnv, home: string, exists: (p: string) => boolean): string;
+  /** How to start Codex with no shell in between. */
+  findCodex(env: NodeJS.ProcessEnv, fs: { exists(p: string): boolean; read(p: string): string }): Command;
   /** How Claude Code is installed, for the user to copy. */
   claudeInstall: string;
 

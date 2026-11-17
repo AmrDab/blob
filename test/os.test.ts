@@ -1,4 +1,5 @@
 // The per-system files (src/os/): what each one has, and what a system without a file gets.
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { os, osFor } from '../src/os/index.ts';
 
@@ -37,6 +38,16 @@ describe('the operating system', () => {
       kill.mockImplementation(() => { throw new Error('ESRCH'); });
       expect(() => l.killTree(4323, 'SIGKILL')).not.toThrow();                      // already gone
     } finally { kill.mockRestore(); }
+  });
+
+  it('starts npm\'s tools, Claude Code and Codex the way the system needs', () => {
+    const [w, m, l] = ['win32', 'darwin', 'linux'].map(osFor), bsd = osFor('freebsd');
+    expect(w.cli(['npm', 'i'])).toEqual({ command: 'cmd', args: ['/c', 'npm', 'i'] });
+    expect([m, l, bsd].map(o => o.cli(['npm', 'i']))).toEqual(Array(3).fill({ command: 'npm', args: ['i'] }));
+    const none = { exists: () => false, read: () => '' }, local = join('/home/a', '.local', 'bin', 'claude');
+    expect([w, m, l, bsd].map(o => o.findCodex({}, none))).toEqual(Array(4).fill({ command: 'codex', args: [] }));
+    expect(w.findClaude({}, '/home/a', () => true)).toBe('claude');               // never looked for: its installer sets PATH
+    expect([m, l, bsd].map(o => o.findClaude({}, '/home/a', p => p === local))).toEqual([local, local, local]);
   });
 
   it('has a trash, an opener and start at sign-in where the system does', async () => {

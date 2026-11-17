@@ -3,11 +3,10 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { MAX_TURNS, askedUp, continueText, firstTier, stepUp, userDecided, type Tier } from './ladder.ts';
-import { os } from './os/index.ts';
+import { os, osFor } from './os/index.ts';
 import { BRAIN_NAME, type BrainName, type Model } from './settings.ts';
 
 export type { Model };
@@ -63,9 +62,7 @@ export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platfor
   const raw = env.BLOB_CLAWDCURSOR?.trim() || 'clawdcursor mcp --compact';
   const parts = (raw.match(/"[^"]*"|\S+/g) ?? []).map(p => p.replace(/^"|"$/g, ''));
   const pill = pillEnv(env);
-  // npm installs clawdcursor as a .cmd shim on Windows, which only cmd can start.
-  if (platform === 'win32') return { command: 'cmd', args: ['/c', ...parts], ...(pill && { env: pill }) };
-  return { command: parts[0], args: parts.slice(1), ...(pill && { env: pill }) };
+  return { ...osFor(platform).cli(parts), ...(pill && { env: pill }) };   // npm installed it: started the system's way
 }
 
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
@@ -106,36 +103,16 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: str
 
 // ── Codex ────────────────────────────────────────────────────────────────────
 
-/**
- * How to start Claude Code. Its macOS/Linux installer puts it in ~/.local/bin (an older one in ~/.claude/local) and
- * does not add that folder to PATH, so when PATH has no `claude` Blob looks there itself.
- */
+/** How to start Claude Code: `claude`, or where its installer put it when that is not on PATH (os.findClaude). */
 export function claudeCommand(platform: string = os.id, env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(), exists: (p: string) => boolean = existsSync): string {
-  if (platform === 'win32') return 'claude';
-  try {
-    if ((env.PATH ?? '').split(delimiter).some(d => d && exists(join(d, 'claude')))) return 'claude';
-    for (const p of [join(home, '.local', 'bin', 'claude'), join(home, '.claude', 'local', 'claude')]) if (exists(p)) return p;
-  } catch (e) { console.log(`Blob: could not look for Claude Code: ${(e as Error).message}`); }
-  return 'claude';                                  // not found: starting it fails, and the first-run check says so
+  return osFor(platform).findClaude(env, home, exists);
 }
 
-/**
- * How to start Codex with no shell in between (the brief and the servers' tokens are arguments). On Windows npm
- * installs it as codex.cmd, which only cmd can start: Blob runs the script that shim names with this same Node.
- */
+/** How to start Codex with no shell in between: the brief and the servers' tokens are arguments (os.findCodex). */
 export function codexCommand(platform: string = os.id, env: NodeJS.ProcessEnv = process.env,
   fs: { exists(p: string): boolean; read(p: string): string } = { exists: existsSync, read: p => readFileSync(p, 'utf8') }): ServerCommand {
-  if (platform !== 'win32') return { command: 'codex', args: [] };
-  for (const dir of (env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean)) {
-    const exe = join(dir, 'codex.exe'), cmd = join(dir, 'codex.cmd');
-    if (fs.exists(exe)) return { command: exe, args: [] };
-    if (!fs.exists(cmd)) continue;
-    let js: string | undefined;
-    try { js = fs.read(cmd).match(/"%dp0%\\([^"]+\.js)"/)?.[1]; } catch { /* unreadable: not this one */ }
-    if (js) return { command: process.execPath, args: [join(dirname(cmd), js)] };
-  }
-  return { command: 'codex', args: [] };            // not found: starting it fails, and the first-run check says so
+  return osFor(platform).findCodex(env, fs);
 }
 
 /**
