@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
+    "pack:npm": "node build.mjs && node scripts/pack.mjs && cd release/npm && npm pack",
     "build:phone": "node phone/build.mjs",
     "build:site": "node site/build.mjs",
     "check:phone": "tsc -p phone && tsc -p relay",

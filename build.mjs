@@ -5,6 +5,12 @@ import { build } from 'esbuild';
 import { cpSync, mkdirSync } from 'node:fs';
 
 mkdirSync('dist/ort', { recursive: true });
+// The MCP servers carry their own SDK and zod, so the npm package (scripts/pack.mjs) needs no node_modules for them.
+// koffi is a native addon: npm installs it per platform. CommonJS inside an ES module bundle needs a real require.
+const SERVER = {
+  external: ['koffi'],
+  banner: { js: "import { createRequire as __blobRequire } from 'node:module'; const require = __blobRequire(import.meta.url);" },
+};
 await build({
   entryPoints: ['src/ui/main.tsx', 'src/ui/pill.tsx'],   // the bubble, and clawdcursor's pill
   outdir: 'dist',
@@ -20,7 +26,7 @@ await build({
   stdin: { contents: "import { serve } from './src/files-mcp.ts'; void serve();", resolveDir: import.meta.dirname, loader: 'ts' },
   outfile: 'dist/files-mcp.mjs',
   bundle: true,
-  packages: 'external',     // the SDK and koffi load from node_modules
+  ...SERVER,
   format: 'esm',
   platform: 'node',
   target: 'node20',
@@ -31,7 +37,7 @@ await build({
   stdin: { contents: "import { serve } from './src/self-mcp.ts'; void serve();", resolveDir: import.meta.dirname, loader: 'ts' },
   outfile: 'dist/self-mcp.mjs',
   bundle: true,
-  packages: 'external',
+  ...SERVER,
   format: 'esm',
   platform: 'node',
   target: 'node20',
@@ -42,7 +48,7 @@ await build({
   stdin: { contents: "import { serve } from './src/desk-mcp.ts'; void serve();", resolveDir: import.meta.dirname, loader: 'ts' },
   outfile: 'dist/desk-mcp.mjs',
   bundle: true,
-  packages: 'external',
+  ...SERVER,
   format: 'esm',
   platform: 'node',
   target: 'node20',

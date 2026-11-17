@@ -20,3 +20,9 @@ jobs:
       - run: npx tsc --noEmit -p .
       - run: npm test
       - run: npm run build
+      # The npm package (npx theblob), installed from the packed file into an empty folder. Not published here.
+      - run: node scripts/pack.mjs
+      - run: npm pack --silent
+        working-directory: release/npm
+      - run: node scripts/check-package.mjs release/npm/theblob-*.tgz
+        shell: bash
