@@ -28,7 +28,8 @@ const T = { duration: 550, ease: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
 const HOLD_MS = 350;   // a press longer than this is press-and-hold; shorter is a tap (tap again to finish)
 const STILL_MS = 150;  // a press that stays still this long starts the mic
 const DRAG_PX = 4;     // a press that moves further than this drags the window instead
-const RING = 84;       // the voice ring: Speak's face (its loops fill about 40% of the canvas, which overhangs the blob)
+const FAN_IDLE_MS = 45_000;   // fanned-out buttons with no pointer or key on Blob this long tuck back under Speak
+const RING = 84;      // the voice ring: Speak's face (its loops fill about 40% of the canvas, which overhangs the blob)
 
 // The lit WebGL liquid is the bubble; with reduced motion, or no usable GPU, it is the 2D liquid-gooey one.
 const CALM = matchMedia('(prefers-reduced-motion: reduce)');
@@ -59,6 +60,7 @@ async function copyText(text: string): Promise<boolean> {
 
 function App() {
   const [hover, setHover] = useState(false);
+  const [stale, setStale] = useState(false);    // hovered, but untouched for FAN_IDLE_MS: the fan tucks in
   const [busy, setBusy] = useState(false);
   const [caption, setCaption] = useState('');
   const [hint, setHint] = useState<string | null>(null);     // a shortcut blob's name, while hovered
@@ -179,6 +181,16 @@ function App() {
     const t = setTimeout(() => setCaption(''), Math.min(20_000, 4_000 + caption.length * 60));
     return () => clearTimeout(t);
   }, [caption, hover, busy, phase]);
+  // The fan tucks back in after FAN_IDLE_MS with no pointer or key on Blob (a hover whose end was never seen stays
+  // open otherwise). Not while a question, the Type box or the Log is open, or Blob is doing something.
+  useEffect(() => {
+    if (!hover || typeOpen || logOpen || asks.length || phase !== 'idle') { setStale(false); return; }
+    let t = setTimeout(() => setStale(true), FAN_IDLE_MS);
+    const touch = () => { setStale(false); clearTimeout(t); t = setTimeout(() => setStale(true), FAN_IDLE_MS); };
+    const kinds = ['pointermove', 'pointerdown', 'keydown'] as const;
+    kinds.forEach(k => window.addEventListener(k, touch));
+    return () => { clearTimeout(t); kinds.forEach(k => window.removeEventListener(k, touch)); };
+  }, [hover, typeOpen, logOpen, asks.length, phase]);
   // The Type box goes away by itself: when another window is clicked, or soon after the pointer leaves an empty box.
   const typeLeave = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
@@ -327,7 +339,7 @@ function App() {
     if (browsing) back();
   }
 
-  const open = hover || busy || phase === 'recording' || browsing;
+  const open = (hover && !stale) || busy || phase === 'recording' || browsing;
   const pinned = shortcuts.filter(s => s.pinned);
   // While Blob works only the orb shows: no step-by-step text on the bubble (the Log has it).
   const shown = !busy && (caption || phase === 'ask' || phase === 'downloading');
@@ -356,13 +368,15 @@ function App() {
 
   // The bubble's buttons. The 2D liquid hides a closed one's icon; in the lit liquid an icon fades with its body.
   const shut = (out: boolean) => out || liquid ? '' : ' shut';
+  // A tucked-in button sits under Speak: out of the accessibility tree and the tab order, so nothing aims at it.
+  const tucked = open ? {} : { 'aria-hidden': true, tabIndex: -1 };
   const typeBtn = (
-    <button className={`blob small${shut(open)}`} aria-label="Type"
+    <button className={`blob small${shut(open)}`} aria-label="Type" {...tucked}
       onClick={() => { const next = !typeOpen; setTypeOpen(next); if (!next) back(); }}><Keys /></button>
   );
-  const logBtn = <button className={`blob small${shut(open)}`} aria-label="Log" onClick={() => { setLogOpen(v => !v); back(); }}><List /></button>;
+  const logBtn = <button className={`blob small${shut(open)}`} aria-label="Log" {...tucked} onClick={() => { setLogOpen(v => !v); back(); }}><List /></button>;
   const moreBtn = (
-    <button className={`blob small${shut(open)}`} aria-label="Shortcuts" onClick={() => {
+    <button className={`blob small${shut(open)}`} aria-label="Shortcuts" {...tucked} onClick={() => {
       if (!shortcuts.length) setCaption('No shortcuts yet. After a task, say "save that as a shortcut".');
       else setBrowsing(v => !v);
       back();
