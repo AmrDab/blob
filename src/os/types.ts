@@ -1,6 +1,7 @@
 // What Blob does differently from one operating system to the next. Each system fills this in, in its own file here;
 // nothing outside src/os/ asks which system it is on (test/os-boundary.test.ts). A member that is optional is one
 // that some system does not have.
+import type { Application } from '@webviewjs/webview';
 import type { Apply } from '../autostart.ts';
 import type { Cursor, Win } from '../clickthrough.ts';
 import type { LoadApps, Profile, Run } from '../computer.ts';
@@ -80,6 +81,8 @@ export interface Os {
    */
   desk?: { bridge(o: ConstructorParameters<typeof Bridge>[0]): Bridge };
 
+  /** What the window library has no option for, done once after the first web view is made (mac.ts). `quit`: Blob's own quit. */
+  appSetup?(app: Pick<Application, 'setMenu'>, quit: () => void): void;
   /** A reader of the cursor, for the bubble's click-through and drag (clickthrough.ts). Undefined when it can't be read. `now` is for tests. */
   cursor?(win: Win, now?: () => number): (() => Cursor) | undefined;
   /** Keeps note of the window (or app) the user was in, to hand the keyboard back to after a click on Blob (focus.ts). `own`: Blob's window. */

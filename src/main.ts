@@ -20,7 +20,6 @@ import { setAutostart, systemAutostart } from './autostart.ts';
 import type { FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
-import { macSetup } from './mac.ts';
 import { memoryBrief, memoryFile } from './memory.ts';
 import { os } from './os/index.ts';
 import { hideFromCapture, overlay, type Overlay } from './overlay.ts';
@@ -747,7 +746,7 @@ const view = win.createWebview({
   newWindowHandler: () => false,
 });
 // macOS: the Edit menu, the first click, Cmd+Q through quit(), no Dock icon, every Space (mac.ts). Nothing elsewhere.
-macSetup(app, quit, { platform: os.id });
+os.appSetup?.(app, quit);
 // clawdcursor's pill: a second window at the top centre of the primary display, as big as the page says its
 // content is, shown only while a relay is connected. Made here so it shares the first webview's browser flags.
 const PILL = { w: 320, h: 64 };

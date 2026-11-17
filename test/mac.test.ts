@@ -1,6 +1,7 @@
 // The macOS-only native set-up, against a fake Objective-C runtime: nothing here loads a system library.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EDIT_MENU, WEB_VIEW_CLASS, acceptFirstClick, afterLaunch, everywhere, loadObjC, macSetup, quitOnTerminate, type ObjC } from '../src/mac.ts';
+import { osFor } from '../src/os/index.ts';
 
 interface FakeClass { name: string }
 interface FakeView { cls: FakeClass; subs: () => FakeView[] }
@@ -112,19 +113,14 @@ describe('after the launch', () => {
 });
 
 describe('the whole set-up', () => {
-  it('does nothing off macOS', () => {
-    const setMenu = vi.fn(), load = vi.fn(), later = vi.fn();
-    macSetup({ setMenu }, () => {}, { platform: 'win32', load, later });
-    macSetup({ setMenu }, () => {}, { platform: 'linux', load, later });
-    expect(setMenu).not.toHaveBeenCalled();
-    expect(load).not.toHaveBeenCalled();
-    expect(later).not.toHaveBeenCalled();
+  it('is there on macOS only', () => {
+    expect(['win32', 'linux', 'freebsd', 'darwin'].map(p => !!osFor(p).appSetup)).toEqual([false, false, false, true]);
   });
 
   it('sets the menu, both replacements, and looks after the launch a few times', () => {
     const f = fake({ windows: [0] }), setMenu = vi.fn();
     const timers: Array<{ fn: () => void; ms: number }> = [];
-    macSetup({ setMenu }, () => {}, { platform: 'darwin', arch: 'arm64', load: () => f.objc, later: (fn, ms) => timers.push({ fn, ms }) });
+    macSetup({ setMenu }, () => {}, { arch: 'arm64', load: () => f.objc, later: (fn, ms) => timers.push({ fn, ms }) });
     expect(setMenu).toHaveBeenCalledWith(EDIT_MENU);
     expect([...f.replaced.keys()].sort()).toEqual(['acceptsFirstMouse:', 'terminate:']);
     expect(timers.length).toBeGreaterThan(1);
@@ -143,7 +139,7 @@ describe('the whole set-up', () => {
     f.objc.set = () => { throw new Error('boom'); };
     const timers: Array<() => void> = [];
     const setMenu = vi.fn(() => { throw new Error('no menu'); });
-    expect(() => macSetup({ setMenu }, () => {}, { platform: 'darwin', load: () => f.objc, later: fn => timers.push(fn) })).not.toThrow();
+    expect(() => macSetup({ setMenu }, () => {}, { load: () => f.objc, later: fn => timers.push(fn) })).not.toThrow();
     expect(f.replaced.has('terminate:')).toBe(true);           // the menu and the first-click step failed; this one still ran
     expect(() => timers.forEach(t => t())).not.toThrow();
     const lines = log.mock.calls.map(c => String(c[0]));
@@ -157,7 +153,7 @@ describe('the whole set-up', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const opts = { webview: false, windows: [0] }, f = fake(opts);
     const timers: Array<() => void> = [];
-    macSetup({ setMenu: vi.fn() }, () => {}, { platform: 'darwin', arch: 'arm64', load: () => f.objc, later: fn => timers.push(fn) });
+    macSetup({ setMenu: vi.fn() }, () => {}, { arch: 'arm64', load: () => f.objc, later: fn => timers.push(fn) });
     expect(f.replaced.has('acceptsFirstMouse:')).toBe(false);
     timers[0]();                                 // still not made at the first look
     opts.webview = true;
@@ -171,7 +167,7 @@ describe('the whole set-up', () => {
   it('stops quietly, with the menu set, when the runtime cannot be loaded', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const setMenu = vi.fn(), later = vi.fn();
-    macSetup({ setMenu }, () => {}, { platform: 'darwin', load: () => { throw new Error('no library'); }, later });
+    macSetup({ setMenu }, () => {}, { load: () => { throw new Error('no library'); }, later });
     expect(setMenu).toHaveBeenCalled();
     expect(later).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledTimes(1);

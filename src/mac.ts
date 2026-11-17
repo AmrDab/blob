@@ -4,7 +4,7 @@
 //  - Cmd+Q (and any other "terminate") runs Blob's own quit, so the brain is stopped and the temp folder removed;
 //  - no Dock icon, no Cmd+Tab entry and no menu bar of its own (an "accessory" app);
 //  - the bubble and the pill are on every Space, and over full-screen apps.
-// Every step is on its own: one that fails says so in the log and the rest still run. Nothing here runs elsewhere.
+// Every step is on its own: one that fails says so in the log and the rest still run. Only macOS has it (os.appSetup).
 import { createRequire } from 'node:module';
 import type { Application, MenuOptions } from '@webviewjs/webview';
 
@@ -221,15 +221,13 @@ export function afterLaunch(objc: ObjC): void {
 const LAUNCH_MS = [300, 1500, 4000];
 
 export interface MacDeps {
-  platform?: string;
   arch?: string;
   load?: () => ObjC;
   later?: (fn: () => void, ms: number) => unknown;
 }
 
-/** Everything above, in order. Call once, after the first web view is made. Does nothing unless `platform` is macOS. */
+/** Everything above, in order. Call once, after the first web view is made. */
 export function macSetup(app: Pick<Application, 'setMenu'>, quit: () => void, deps: MacDeps = {}): void {
-  if (deps.platform !== 'darwin') return;
   const step = (failed: string, fn: () => void): void => {
     try { fn(); } catch (e) { console.log(`Blob: ${failed} (${(e as Error).message})`); }
   };

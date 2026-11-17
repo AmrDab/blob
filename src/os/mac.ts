@@ -6,7 +6,7 @@ import { macAutostart, stableNode } from '../autostart.ts';
 import { macCursor } from '../clickthrough.ts';
 import { macProfile, namedApps } from '../computer.ts';
 import { macKeeper } from '../focus.ts';
-import { loadRunningApps } from '../mac.ts';
+import { loadRunningApps, macSetup } from '../mac.ts';
 import { posix, run } from './posix.ts';
 import type { Os } from './types.ts';
 
@@ -41,6 +41,7 @@ export const mac: Os = {
   readProfile: macProfile,
   openApps: self => namedApps(() => loadRunningApps(self)),
   autostart: { apply: macAutostart, exe: stableNode },
+  appSetup: (app, quit) => macSetup(app, quit),    // the Edit menu, the first click, Cmd+Q, no Dock icon, every Space
   cursor: macCursor,
   focusKeeper: () => macKeeper(),                  // whole apps, not windows: Blob is this process
   dockGap: 90,                                     // a Dock is taller than a taskbar
