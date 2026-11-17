@@ -7,6 +7,7 @@ import { macCursor } from '../clickthrough.ts';
 import { macProfile, namedApps } from '../computer.ts';
 import { macKeeper } from '../focus.ts';
 import { loadRunningApps, macSetup } from '../mac.ts';
+import { macOverlay, protect } from '../overlay.ts';
 import { posix, run } from './posix.ts';
 import type { Os } from './types.ts';
 
@@ -44,6 +45,8 @@ export const mac: Os = {
   appSetup: (app, quit) => macSetup(app, quit),    // the Edit menu, the first click, Cmd+Q, no Dock icon, every Space
   cursor: macCursor,
   focusKeeper: () => macKeeper(),                  // whole apps, not windows: Blob is this process
+  hideFromCapture: protect,
+  overlay: win => macOverlay(win),
   dockGap: 90,                                     // a Dock is taller than a taskbar
   topInset: 40,                                    // the menu bar and the notch
   quitHint: 'Cmd+Q on the bubble',

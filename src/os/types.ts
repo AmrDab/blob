@@ -1,12 +1,13 @@
 // What Blob does differently from one operating system to the next. Each system fills this in, in its own file here;
 // nothing outside src/os/ asks which system it is on (test/os-boundary.test.ts). A member that is optional is one
 // that some system does not have.
-import type { Application } from '@webviewjs/webview';
+import type { Application, BrowserWindow } from '@webviewjs/webview';
 import type { Apply } from '../autostart.ts';
 import type { Cursor, Win } from '../clickthrough.ts';
 import type { LoadApps, Profile, Run } from '../computer.ts';
 import type { Bridge } from '../desk.ts';
 import type { FocusKeeper } from '../focus.ts';
+import type { Overlay } from '../overlay.ts';
 import type { Proc } from '../own-ui.ts';
 
 /** Runs a program to its end; rejects with what it wrote on stderr. */
@@ -87,6 +88,10 @@ export interface Os {
   cursor?(win: Win, now?: () => number): (() => Cursor) | undefined;
   /** Keeps note of the window (or app) the user was in, to hand the keyboard back to after a click on Blob (focus.ts). `own`: Blob's window. */
   focusKeeper?(own: bigint | number): FocusKeeper;
+  /** Leaves a window out of screen captures (overlay.ts). False when the system can't. */
+  hideFromCapture(win: BrowserWindow): boolean;
+  /** The native side of the pill's window (overlay.ts): left out of captures, and kept from taking the keyboard as far as the system lets it. */
+  overlay(win: BrowserWindow): Overlay;
 
   /** How far the bubble starts above the bottom of the screen: clear of the taskbar or the Dock. */
   dockGap: number;

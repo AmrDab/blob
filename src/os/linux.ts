@@ -1,5 +1,6 @@
 // Linux.
 import { statfsSync } from 'node:fs';
+import { linuxOverlay, protect } from '../overlay.ts';
 import { posix, run } from './posix.ts';
 import type { Os } from './types.ts';
 
@@ -16,6 +17,8 @@ export const linux: Os = {
   isLocal(path) {
     try { return !NET_FS.has(Number(statfsSync(path).type)); } catch { return false; }
   },
+  hideFromCapture: protect,
+  overlay: linuxOverlay,
   dockGap: 56,
   topInset: 0,
   quitHint: 'close the bubble from the taskbar',

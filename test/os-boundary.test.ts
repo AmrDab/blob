@@ -11,11 +11,8 @@ const inOs = (f: string) => f.startsWith('os/');
 const text = (f: string) => readFileSync(join(SRC, f), 'utf8');
 const having = (re: RegExp) => all.filter(f => !inOs(f) && re.test(text(f)));
 
-/**
- * The files that still name a system: the window chrome (the
- * pill and capture hiding, and main.ts's reminder sound and web view flags) and setup.ts's Mac permissions.
- */
-const NAMES = ['main.ts', 'overlay.ts', 'setup.ts'];
+/** The files that still name a system: main.ts's reminder sound and web view flags, and setup.ts's Mac permissions. */
+const NAMES = ['main.ts', 'setup.ts'];
 /** The pages that still ask the browser (the host will tell them instead). */
 const PAGES = ['ui/main.tsx', 'ui/pill.tsx'];
 

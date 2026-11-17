@@ -1,15 +1,15 @@
-// The pill window's native side. It appears while clawdcursor types and clicks, so it must not take the keyboard.
-// It is left out of screen captures. On Windows (user32 through koffi) it is also shown without activating, not activated by
-// a click, and takes the keyboard only while the user types a reply. Elsewhere there is only the window library's
-// own show, hide and content protection: there the pill can take the front when it is shown or clicked. On macOS the
-// front is given back to the app the user was in when the reply box or the pill closes while the pill has the keyboard
-// (not while the user types in the bubble), and the pause card has a sound.
+// The pill window's native side, one per system (os.overlay). It appears while clawdcursor types and clicks, so it
+// must not take the keyboard. It is left out of screen captures (os.hideFromCapture, for the bubble too). On Windows
+// (user32 through koffi) it is also shown without activating, not activated by a click, and takes the keyboard only
+// while the user types a reply. Elsewhere there is only the window library's own show, hide and content protection:
+// there the pill can take the front when it is shown or clicked. On macOS the front is given back to the app the user
+// was in when the reply box or the pill closes while the pill has the keyboard (not while the user types in the
+// bubble), and the pause card has a sound.
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import type { BrowserWindow } from '@webviewjs/webview';
 import { macKeeper, winKeeper, type FocusKeeper } from './focus.ts';
 import { loadFrontApp } from './mac.ts';
-import { os } from './os/index.ts';
 
 export interface Overlay {
   show(): void;
@@ -24,11 +24,16 @@ export interface Overlay {
 
 /**
  * Leaves a window out of screen captures: what Blob shows (a question, the phone's QR code) is for the person at the
- * screen, never for a screenshot or OCR the agent takes. False when the system can't do it.
+ * screen, never for a screenshot or OCR the agent takes. False when the system can't do it. This one is the window
+ * library's own content protection.
  */
-export function hideFromCapture(win: BrowserWindow, platform: string = os.id): boolean {
+export function protect(win: BrowserWindow): boolean {
+  try { win.setContentProtection(true); return true; } catch { return false; }
+}
+
+/** Windows: the same, by the window's display affinity. */
+export function winProtect(win: BrowserWindow): boolean {
   try {
-    if (platform !== 'win32') { win.setContentProtection(true); return true; }
     const user32 = createRequire(import.meta.url)('koffi').load('user32.dll');
     const SetWindowDisplayAffinity = user32.func('int __stdcall SetWindowDisplayAffinity(intptr_t hwnd, uint32_t affinity)');
     return !!SetWindowDisplayAffinity(Number(win.getNativeHandle()), 0x11);   // WDA_EXCLUDEFROMCAPTURE (Windows 10 2004+)
@@ -54,19 +59,39 @@ function pillHasKeyboard(): () => boolean {
   }
 }
 
-/** `mac`: the macOS parts, for tests (the keeper that hands the front back, whether the pill has the keyboard, and the sound). */
-export function overlay(win: BrowserWindow, platform: string = os.id, mac: { keeper?: FocusKeeper; mine?: () => boolean; chime?: () => void } = {}): Overlay {
-  const darwin = platform === 'darwin';
-  const back = darwin ? mac.keeper ?? macKeeper() : undefined;   // remembers the user's app, to hand the front back to
-  const mine = darwin ? mac.mine ?? pillHasKeyboard() : undefined;            // the pill also closes while the user types in the bubble: not then
-  const plain: Overlay = {
+/**
+ * The window library's own show, hide and focus. `back` and `mine`: the front is handed back when the pill gives up
+ * the keyboard it has. `chime`: the pause card's sound.
+ */
+function plain(win: BrowserWindow, p: { back?: FocusKeeper; mine?: () => boolean; chime?: () => void; asksRefocus?: boolean } = {}): Overlay {
+  return {
     show: () => win.show(), hide: () => win.hide(),
-    keyboard: on => { if (on) win.focus(); else if (mine?.()) back?.restore(); },
-    beep: () => { if (darwin) (mac.chime ?? chime)(); },
-    asksRefocus: platform === 'linux',
+    keyboard: on => { if (on) win.focus(); else if (p.mine?.()) p.back?.restore(); },
+    beep: () => { p.chime?.(); },
+    asksRefocus: !!p.asksRefocus,
   };
-  hideFromCapture(win, platform);
-  if (platform !== 'win32') return plain;
+}
+
+/** macOS. `mac`: its parts, for tests (the keeper that hands the front back, whether the pill has the keyboard, and the sound). */
+export function macOverlay(win: BrowserWindow, mac: { keeper?: FocusKeeper; mine?: () => boolean; chime?: () => void } = {}): Overlay {
+  const o = plain(win, {
+    back: mac.keeper ?? macKeeper(),               // remembers the user's app, to hand the front back to
+    mine: mac.mine ?? pillHasKeyboard(),           // the pill also closes while the user types in the bubble: not then
+    chime: mac.chime ?? chime,
+  });
+  protect(win);
+  return o;
+}
+
+/** Linux: no hand-back of its own and no sound. */
+export function linuxOverlay(win: BrowserWindow): Overlay {
+  protect(win);
+  return plain(win, { asksRefocus: true });
+}
+
+/** Windows: shown without activating, not activated by a click, the keyboard only while the user types a reply. */
+export function winOverlay(win: BrowserWindow): Overlay {
+  winProtect(win);
   const h = Number(win.getNativeHandle());
   const NOACTIVATE = 0x08000000, EXSTYLE = -20;
   try {
@@ -107,6 +132,6 @@ export function overlay(win: BrowserWindow, platform: string = os.id, mac: { kee
     };
   } catch (e) {
     console.log(`Blob: the pill can take the keyboard and shows in captures (${(e as Error).message})`);
-    return plain;
+    return plain(win);
   }
 }

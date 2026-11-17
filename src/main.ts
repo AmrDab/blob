@@ -22,7 +22,7 @@ import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
 import { memoryBrief, memoryFile } from './memory.ts';
 import { os } from './os/index.ts';
-import { hideFromCapture, overlay, type Overlay } from './overlay.ts';
+import type { Overlay } from './overlay.ts';
 import { keepOwnUiFile } from './own-ui.ts';
 import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type Reply, type RoomInfo } from './pair.ts';
 import { persona } from './persona.ts';
@@ -778,12 +778,12 @@ delete process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS;
 view.setBackgroundColor(0, 0, 0, 0);
 pillView.setBackgroundColor(0, 0, 0, 0);
 placePill(PILL.w, PILL.h);
-pillUi = overlay(pillWin);
+pillUi = os.overlay(pillWin);
 // The bubble and its cards (a question, the phone's QR code) are for the person at the screen: not in any capture.
 // BLOB_CAPTURE=1 (development only): the bubble stays in captures, so a screenshot can check how it looks. Never set
 // it otherwise: a question or the phone's QR code would be in every capture too.
 if (process.env.BLOB_CAPTURE === '1') console.log('Blob: BLOB_CAPTURE=1, the bubble shows in screen captures (development only)');
-else if (!hideFromCapture(win)) console.log('Blob: the bubble shows in screen captures on this system');
+else if (!os.hideFromCapture(win)) console.log('Blob: the bubble shows in screen captures on this system');
 win.show();
 focus = os.focusKeeper?.(win.getNativeHandle()) ?? focus;
 void check();
