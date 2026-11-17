@@ -3,6 +3,7 @@
 // that some system does not have.
 import type { Apply } from '../autostart.ts';
 import type { LoadApps, Profile, Run } from '../computer.ts';
+import type { Bridge } from '../desk.ts';
 import type { Proc } from '../own-ui.ts';
 
 /** Runs a program to its end; rejects with what it wrote on stderr. */
@@ -70,6 +71,12 @@ export interface Os {
 
   /** Starting Blob at sign-in (autostart.ts). `exe`: a path to this Node that lasts, where the one it runs from may not. */
   autostart?: { apply: Apply; exe?(exe: string, path: string): string };
+
+  /**
+   * The desk: working an open window in the background, through its controls (desk.ts). Where a system has it, Blob
+   * starts the bridge (main.ts), the brain gets the desk server (brain.ts) and the brief names the desk tools (persona.ts).
+   */
+  desk?: { bridge(o: ConstructorParameters<typeof Bridge>[0]): Bridge };
 
   /** How far the bubble starts above the bottom of the screen: clear of the taskbar or the Dock. */
   dockGap: number;

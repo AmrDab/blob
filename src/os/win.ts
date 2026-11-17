@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { delimiter, dirname, join, parse } from 'node:path';
 import { windowsAutostart } from '../autostart.ts';
 import { windowsApps, windowsProfile } from '../computer.ts';
+import { Bridge } from '../desk.ts';
 import { processLister } from '../own-ui.ts';
 import { windowsFront } from '../watch.ts';
 import type { Os } from './types.ts';
@@ -97,6 +98,7 @@ export const win: Os = {
   processes: processLister,
   frontWindow: windowsFront,
   autostart: { apply: windowsAutostart },
+  desk: { bridge: o => new Bridge(o) },             // UI Automation, through desk-bridge.ps1
   dockGap: 56,
   topInset: 0,
   quitHint: 'close the bubble from the taskbar',

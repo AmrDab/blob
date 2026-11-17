@@ -5,7 +5,7 @@
 // log file and the first-run check.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
@@ -15,7 +15,7 @@ import { Brain, callLabel, mcpConfig, mcpServers, type BrainEvent, type Call, ty
 import { MAX_DETAIL, Questions } from './ask.ts';
 import { clickThrough, cursorReader, follower, type ClickThrough } from './clickthrough.ts';
 import { computerBrief, computerFile, computerNow, refreshProfile } from './computer.ts';
-import { Bridge, deskTools, ownPids } from './desk.ts';
+import { deskTools, ownPids } from './desk.ts';
 import { setAutostart, systemAutostart } from './autostart.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
@@ -129,12 +129,12 @@ const questions = new Questions({
 });
 
 // ── the desk ─────────────────────────────────────────────────────────────────
-// Windows: one bridge for as long as Blob runs, started now so the first read finds it warm. Its Yes card is a
-// question like any other; Blob's own windows and its web view's processes are looked up again at every call.
-const bridge = os.id !== 'win32' ? undefined : new Bridge({
+// Where the system has one (Windows): one bridge for as long as Blob runs, started now so the first read finds it warm.
+// Its Yes card is a question like any other; Blob's own windows and its web view's processes are looked up again at every call.
+const bridge = os.desk?.bridge({
   script: join(DIST, 'desk-bridge.ps1'),
   spawn: (command, args, o) => spawn(command, args, o),
-  kill: pid => { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }); },
+  kill: pid => os.killTree(pid, 'SIGKILL'),
 });
 const desk = bridge && deskTools({
   bridge, ask: (q, d) => questions.ask(q, undefined, d), own: () => ownPids(process.env.BLOB_OWN_UI_FILE), log: console.log,

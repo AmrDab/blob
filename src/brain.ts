@@ -67,9 +67,9 @@ export function clawdcursorCommand(env: NodeJS.ProcessEnv = process.env, platfor
 
 export interface ServerCommand { command: string; args: string[]; env?: Record<string, string> }
 
-/** The servers every brain gets: clawdcursor, Blob's files server, its desk server (Windows only) and its self server ("blob"), nothing else. */
+/** The servers every brain gets: clawdcursor, Blob's files server, its desk server (where the system has a desk) and its self server ("blob"), nothing else. */
 export function mcpServers(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = os.id): Record<string, ServerCommand> {
-  return { clawdcursor: clawdcursorCommand(env, platform), files: own.files, ...(platform === 'win32' && own.desk && { desk: own.desk }), blob: own.blob };
+  return { clawdcursor: clawdcursorCommand(env, platform), files: own.files, ...(osFor(platform).desk && own.desk && { desk: own.desk }), blob: own.blob };
 }
 
 /** Claude Code's --mcp-config file. */

@@ -23,7 +23,7 @@ export function persona(s: Settings, o: {
   brain?: BrainName; tier?: Tier; now?: Date; platform?: string;
 } = {}): string {
   const now = o.now ?? new Date(), platform = o.platform ?? os.id, brain = o.brain ?? s.brain;
-  const win = platform === 'win32', sys = osFor(platform);
+  const sys = osFor(platform), desk = !!sys.desk;
   const auto = brain !== 'codex' && s.model === 'auto';
   const model = brain === 'codex' ? "Codex's default model" : auto && o.tier ? `Auto: ${MODEL_NAME[o.tier]} now` : MODEL_NAME[s.model];
   const next = !auto ? '' : o.tier === 'haiku' ? 'Sonnet' : o.tier === 'sonnet' ? 'Opus' : '';   // who takes over from a tier that can step up
@@ -37,9 +37,9 @@ export function persona(s: Settings, o: {
       'of this is Blob: never name clawdcursor or the tools and servers Blob works through, in replies or on cards.',
     'Fastest route: before acting, pick the quickest reliable way, in this order. The screen is the last resort.\n' +
       '1. Know it: a question about the world that needs nothing from this computer is answered without touching ' +
-      `anything. Anything about this computer is looked up (2-${win ? 6 : 5}), never guessed.\n` +
+      `anything. Anything about this computer is looked up (2-${desk ? 6 : 5}), never guessed.\n` +
       `2. Open: a web page or a link (${sys.settingsScheme ? `${sys.settingsScheme}, ` : ''}mailto:), a file or a folder, in one call with the files tool ` +
-      `open. An app by name, in one call with ${win ? "the desk tool open (it gives back the app's window)" : 'clawdcursor system open_app'}. ` +
+      `open. An app by name, in one call with ${desk ? "the desk tool open (it gives back the app's window)" : 'clawdcursor system open_app'}. ` +
       'Never by clicking through menus.\n' +
       '3. A saved script: when one of the saved scripts below does it, the files tool script_run with its name, ' +
       'in one call. One that only looks, or that the user already allowed as it is now, runs at once.\n' +
@@ -51,8 +51,8 @@ export function persona(s: Settings, o: {
       (brain === 'codex'
         ? '5. Files: the files tool run with a command that only looks, to read; the files tools list_dir, make_folder, move and trash to change.\n'
         : '5. Files: Read, Glob and Grep to look; the files tools list_dir, make_folder, move and trash to change.\n') +
-      // Windows: an open window is worked in the background first (desk.ts), and the screen moves down to 7
-      (win
+      // with a desk (Windows): an open window is worked in the background first (desk.ts), and the screen moves down to 7
+      (desk
         ? '6. In the background: the desk tools work an open window without taking the screen, the pointer or the ' +
           'keyboard. read with no arguments lists the windows; read with app (or window) shows that window\'s ' +
           'controls, each with an id and what it can do (press, set, toggle, select, expand, collapse); act does one ' +

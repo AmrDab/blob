@@ -63,6 +63,15 @@ describe('the operating system', () => {
     expect([w, m].map(o => !!o.autostart!.exe)).toEqual([false, true]);            // Homebrew's Node moves at each upgrade
   });
 
+  it('reads the computer, and works windows in the background, where the system can', () => {
+    const [w, m, l, bsd] = ['win32', 'darwin', 'linux', 'freebsd'].map(osFor);
+    const has = (o: typeof w) => [!!o.readProfile, !!o.openApps, !!o.processes, !!o.frontWindow, !!o.desk];
+    expect(has(w)).toEqual([true, true, true, true, true]);
+    expect(has(m)).toEqual([true, true, false, false, false]);
+    expect([has(l), has(bsd)]).toEqual([Array(5).fill(false), Array(5).fill(false)]);
+    expect(typeof m.openApps!(1)).toBe('function');                                // macOS names its apps itself: no process list needed
+  });
+
   it('carries the words and sizes of each system', () => {
     const [w, m, l] = ['win32', 'darwin', 'linux'].map(osFor);
     expect([w, m, l].map(o => o.shell.label)).toEqual(['PowerShell', 'shell', 'shell']);
