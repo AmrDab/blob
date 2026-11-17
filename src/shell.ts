@@ -5,6 +5,9 @@ import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import type { ToolResult } from './files-mcp.ts';
 import { os, osFor } from './os/index.ts';
+import { HIDDEN, shellEnv } from './safe.ts';
+
+export { HIDDEN, shellEnv };
 
 export type Verdict = 'read' | 'ask';
 
@@ -51,10 +54,6 @@ const REMOTE = /[\\/]{2}|::/;   // any two separators of either kind (\\, //, \/
 // Anything that chains, redirects, substitutes or groups, quoted or not; and curly quotes, which PowerShell reads as quotes.
 const WIN_UNSAFE = /[;&<>(){}`$\r\n\u2018-\u201f]/;
 const UNIX_UNSAFE = /[;&<>(){}`$\r\n\\\u2018-\u201f]/;     // and the backslash, which can hide a quote from this file
-/** Characters that do not show, or that change the order text is shown in. */
-/** Characters that don't show on screen (controls, zero-width, bidi): text with them is never shown on a Yes card. */
-export const HIDDEN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0085\u00a0\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
-
 /** Splits on unquoted `|` into commands, and each command on unquoted spaces. Null: a quote never closes. */
 function pipeline(command: string): { text: string; quoted: boolean }[][] | null {
   const out: { text: string; quoted: boolean }[][] = [[]];
@@ -163,16 +162,6 @@ export async function execTool(command: string, changes: boolean, d: ShellDeps, 
   if (r.code !== 0) return { text: `${out}\n[failed · EXIT_${r.code} · hint: the command ended with an error; its output is above]`, isError: true };
   // A look has no outcome line (like list_dir); a change the user allowed is confirmed.
   return { text: changes ? `${out}\n[confirmed]` : out, isError: false };
-}
-
-/** The command's environment: none of Blob's own tokens, no API keys. */
-export function shellEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(env)) {
-    if (/^(ANTHROPIC_|CLAUDE_CODE_|BLOB_)/i.test(k) || /^CLAUDECODE$/i.test(k)) continue;
-    out[k] = v;
-  }
-  return out;
 }
 
 /** How the command is started: PowerShell (output as UTF-8, no progress bars), or the user's login shell. */

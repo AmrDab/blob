@@ -3,11 +3,12 @@
 import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  MAX_OPEN, MAX_PROFILE, appsOf, computerBrief, computerFile, computerNow, nowLine, parseMac, parseWindows, readProfile, refreshProfile,
-  render, stale, withNotes, type Profile, type Win,
+  MAX_OPEN, MAX_PROFILE, appsOf, computerBrief, computerFile, computerNow, namedApps, nowLine, parseMac, parseWindows, refreshProfile,
+  render, stale, windowsApps, withNotes, type Profile, type Win,
 } from '../src/computer.ts';
+import { osFor } from '../src/os/index.ts';
 import type { Proc } from '../src/own-ui.ts';
 
 const WINDOWS_JSON = JSON.stringify({
@@ -55,16 +56,20 @@ describe('the profile', () => {
 
   it('asks each system its own way, and nothing on Linux', async () => {
     const calls: string[] = [];
-    const win = await readProfile('win32', async (cmd, args) => { calls.push(cmd); expect(args.slice(0, 3)).toEqual(['-NoProfile', '-NonInteractive', '-EncodedCommand']); return WINDOWS_JSON; });
+    const win = await osFor('win32').readProfile!(async (cmd, args) => { calls.push(cmd); expect(args.slice(0, 3)).toEqual(['-NoProfile', '-NonInteractive', '-EncodedCommand']); return WINDOWS_JSON; });
     expect(win?.machine).toBe('LENOVO 83AC');
     expect(calls).toEqual(['powershell.exe']);
-    const mac = await readProfile('darwin', async cmd => {
+    const mac = await osFor('darwin').readProfile!(async cmd => {
       if (cmd === 'sw_vers') return 'ProductName: macOS\nProductVersion: 15.1\n';
       throw new Error('not here');                       // the rest may fail: those lines say unknown
     }, d => (d === '/Applications' ? ['Safari.app'] : d === join('/Users/me', 'Applications') ? ['Mine.app'] : []), '/Users/me');
     expect(mac).toEqual({ os: 'macOS 15.1', machine: 'unknown', memory: 'unknown', screens: [], browser: 'unknown', apps: ['Mine', 'Safari'] });
-    await expect(readProfile('darwin', async () => { throw new Error('no sw_vers'); }, () => [])).rejects.toThrow('no sw_vers');
-    expect(await readProfile('linux', async () => { throw new Error('never called'); })).toBeUndefined();
+    await expect(osFor('darwin').readProfile!(async () => { throw new Error('no sw_vers'); }, () => [])).rejects.toThrow('no sw_vers');
+    expect([osFor('linux').readProfile, osFor('freebsd').readProfile]).toEqual([undefined, undefined]);
+    // nothing to read with: nothing is written, and nothing is said
+    const none = join(tmpdir(), `blob-no-profile-${process.pid}.md`);
+    expect(await refreshProfile({ file: none, read: osFor('linux').readProfile })).toBe(false);
+    expect(() => readFileSync(none)).toThrow();
   });
 
   it('writes the facts as plain lines, and cuts the app list to fit', () => {
@@ -201,15 +206,27 @@ describe('the apps open now', () => {
   });
 
   it('are read through the system\'s own list on Windows and macOS, and never throw', () => {
-    const now = computerNow({ platform: 'win32', self: BLOB, procs: () => procs, wins: () => [win(300, { front: true }), win(400), win(200)] });
+    const now = computerNow(windowsApps(BLOB, () => procs, () => [win(300, { front: true }), win(400), win(200)]));
     expect(now()).toBe('<computer_now>Open apps: chrome, WINWORD. In front: chrome.</computer_now>');
-    const mac = computerNow({ platform: 'darwin', mac: () => ({ apps: ['Safari', 'Notes', 'Safari', 'Odd <b>'], front: 'Notes' }) });
+    const mac = computerNow(namedApps(() => () => ({ apps: ['Safari', 'Notes', 'Safari', 'Odd <b>'], front: 'Notes' })));
     expect(mac()).toBe('<computer_now>Open apps: Safari, Notes, Odd b. In front: Notes.</computer_now>');
-    expect(computerNow({ platform: 'win32', self: BLOB, procs: () => procs, wins: () => { throw new Error('no user32'); } })()).toBe('');
-    expect(computerNow({ platform: 'win32', self: BLOB, procs: () => { throw new Error('no snapshot'); }, wins: () => [win(300)] })()).toBe('');
-    expect(computerNow({ platform: 'darwin', mac: () => { throw new Error('no AppKit'); } })()).toBe('');
-    expect(computerNow({ platform: 'win32', wins: () => [win(300)] })()).toBe('');      // no process names: nothing to say
-    expect(computerNow({ platform: 'linux' })()).toBe('');
-    expect(computerNow({ platform: 'win32', self: BLOB, procs: () => procs, wins: () => [] })()).toBe('');
+    expect(computerNow(windowsApps(BLOB, () => procs, () => { throw new Error('no user32'); }))()).toBe('');
+    expect(computerNow(windowsApps(BLOB, () => { throw new Error('no snapshot'); }, () => [win(300)]))()).toBe('');
+    expect(computerNow(namedApps(() => () => { throw new Error('no AppKit'); }))()).toBe('');
+    expect(osFor('win32').openApps!(BLOB)).toBeUndefined();                            // no process names: nothing to say
+    expect([osFor('linux').openApps, osFor('freebsd').openApps]).toEqual([undefined, undefined]);
+    expect(computerNow(undefined)()).toBe('');
+    expect(computerNow(windowsApps(BLOB, () => procs, () => []))()).toBe('');
+  });
+
+  it('stop asking a system whose list can\'t be loaded, and say so once', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    let loads = 0;
+    try {
+      const now = computerNow(namedApps(() => { loads++; throw new Error('no AppKit'); }));
+      expect([now(), now(), now()]).toEqual(['', '', '']);
+      expect(loads).toBe(1);
+      expect(log.mock.calls).toEqual([["Blob: the open apps can't be read (no AppKit)"]]);
+    } finally { log.mockRestore(); }
   });
 });

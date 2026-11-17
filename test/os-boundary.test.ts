@@ -13,8 +13,8 @@ const having = (re: RegExp) => all.filter(f => !inOs(f) && re.test(text(f)));
 
 /** The files that still name a system. */
 const NAMES = [
-  'brain.ts', 'clickthrough.ts', 'computer.ts', 'focus.ts', 'mac.ts', 'main.ts', 'overlay.ts',
-  'own-ui.ts', 'persona.ts', 'setup.ts', 'watch.ts',
+  'brain.ts', 'clickthrough.ts', 'focus.ts', 'mac.ts', 'main.ts', 'overlay.ts',
+  'persona.ts', 'setup.ts',
 ];
 /** The pages that still ask the browser (the host will tell them instead). */
 const PAGES = ['ui/main.tsx', 'ui/pill.tsx'];

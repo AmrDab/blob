@@ -2,6 +2,8 @@
 // nothing outside src/os/ asks which system it is on (test/os-boundary.test.ts). A member that is optional is one
 // that some system does not have.
 import type { Apply } from '../autostart.ts';
+import type { LoadApps, Profile, Run } from '../computer.ts';
+import type { Proc } from '../own-ui.ts';
 
 /** Runs a program to its end; rejects with what it wrote on stderr. */
 export type Exec = (cmd: string, args: string[]) => Promise<void>;
@@ -56,6 +58,15 @@ export interface Os {
   isLocal(path: string): boolean;
   /** Whether a folder is a program, where folders can be. `ext`: its ending, lower case. */
   isProgram?(dir: string, ext: string): boolean;
+
+  /** Reads this computer's details (computer.ts). Throws when the system's own tools can't be run. The arguments are for tests. */
+  readProfile?(exec?: Run, ls?: (dir: string) => string[], home?: string): Promise<Profile>;
+  /** The reader of the apps open now, made at the first request; none when it has nothing to name them with. `procs`: this.processes(). */
+  openApps?(self: number, procs?: () => Proc[]): LoadApps | undefined;
+  /** A lister of every running process, where Blob needs one (its web view's processes, the open apps' names). Undefined when it can't be read. */
+  processes?(): (() => Proc[]) | undefined;
+  /** A cheap key for the window in front, for the watcher: null for none, or one of Blob's own. Undefined when it can't be read. */
+  frontWindow?(): (() => string | null) | undefined;
 
   /** Starting Blob at sign-in (autostart.ts). `exe`: a path to this Node that lasts, where the one it runs from may not. */
   autostart?: { apply: Apply; exe?(exe: string, path: string): string };

@@ -24,7 +24,7 @@ import { macSetup } from './mac.ts';
 import { memoryBrief, memoryFile } from './memory.ts';
 import { os } from './os/index.ts';
 import { hideFromCapture, overlay, type Overlay } from './overlay.ts';
-import { keepOwnUiFile, processLister } from './own-ui.ts';
+import { keepOwnUiFile } from './own-ui.ts';
 import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type Reply, type RoomInfo } from './pair.ts';
 import { persona } from './persona.ts';
 import { scriptsBrief, scriptsDir } from './scripts.ts';
@@ -35,7 +35,7 @@ import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, t
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
 import { fix, fixNote, macNeeds, openPane, pickBrain, runChecks, type Check } from './setup.ts';
-import { Watcher, activityFile, clawdcursorReader, windowsFront } from './watch.ts';
+import { Watcher, activityFile, clawdcursorReader } from './watch.ts';
 
 const HOME = blobHome();
 // Blob was called Pronto: move its shortcuts and logs over once
@@ -638,7 +638,7 @@ process.env.BLOB_PILL_URL = `http://127.0.0.1:${port}/pill`;
 process.env.BLOB_PILL_TOKEN = pillToken;
 // Blob's web view processes, named to clawdcursor as its own UI in a file that follows them (own-ui.ts).
 process.env.BLOB_OWN_UI_FILE = join(tmp, 'own-ui-pids');
-const procs = processLister();                      // made once: also names the open apps (computer.ts)
+const procs = os.processes?.();                     // made once: also names the open apps (computer.ts)
 const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, procs);
 writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer, desk: deskServer }), { mode: 0o600 });
 brain = new Brain({
@@ -646,16 +646,16 @@ brain = new Brain({
   persona: (b, tier) => persona(settings.get(), {
     memory: memoryBrief(memoryFile()), computer: computerBrief(computerFile()), scripts: scriptsBrief(scriptsDir()), brain: b, tier,
   }),
-  context: computerNow({ procs }),
+  context: computerNow(os.openApps?.(process.pid, procs)),
 });
-void refreshProfile();                              // this computer's details, in the background, when a day old
+void refreshProfile({ read: os.readProfile });      // this computer's details, in the background, when a day old
 sendShortcuts();
 sendSettings();
 
 // Watching (learn only): on while the setting is, quiet while Blob itself works. It reads through its own clawdcursor.
 watcher = new Watcher({
   file: activityFile(), reader: clawdcursorReader(mcpCaller(filesServer)),
-  busy: () => brain.busy || replaying, front: windowsFront(),
+  busy: () => brain.busy || replaying, front: os.frontWindow?.(),
 });
 if (settings.get().watching) watcher.start();
 // The self server writes the settings file after the user's Yes: follow it.

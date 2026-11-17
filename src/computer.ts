@@ -8,11 +8,9 @@ import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSy
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { loadRunningApps } from './mac.ts';
-import { os } from './os/index.ts';
 import { webviewPids, type Proc } from './own-ui.ts';
+import { HIDDEN, shellEnv } from './safe.ts';
 import { blobHome } from './settings.ts';
-import { HIDDEN, shellEnv } from './shell.ts';
 
 // ── the profile ──────────────────────────────────────────────────────────────
 
@@ -130,18 +128,20 @@ export function withNotes(profile: string, old: string): string {
 /** Older than a day, or not there. */
 export const stale = (mtimeMs: number | undefined, now: number = Date.now()): boolean => mtimeMs === undefined || now - mtimeMs > DAY_MS;
 
-type Run = (cmd: string, args: string[]) => Promise<string>;
+export type Run = (cmd: string, args: string[]) => Promise<string>;
 const run: Run = (cmd, args) => new Promise((res, rej) =>
   execFile(cmd, args, { windowsHide: true, timeout: 60_000, maxBuffer: 4_000_000, env: shellEnv() }, (err, out) => (err ? rej(err) : res(String(out)))));
 
-/** Reads this computer. Throws when the system's own tools can't be run; undefined where there is nothing to read with. */
-export async function readProfile(platform: string = os.id, exec: Run = run,
-  ls: (dir: string) => string[] = d => { try { return readdirSync(d); } catch { return []; } }, home: string = homedir()): Promise<Profile | undefined> {
-  if (platform === 'win32') {
-    // encoded, so no quote of the script has to survive a command line
-    return parseWindows(await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_READ, 'utf16le').toString('base64')]));
-  }
-  if (platform !== 'darwin') return undefined;
+// Reading this computer, each system its own way (os.readProfile; none where there is nothing to read with). Both
+// throw when the system's own tools can't be run.
+
+export async function windowsProfile(exec: Run = run): Promise<Profile> {
+  // encoded, so no quote of the script has to survive a command line
+  return parseWindows(await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_READ, 'utf16le').toString('base64')]));
+}
+
+export async function macProfile(exec: Run = run,
+  ls: (dir: string) => string[] = d => { try { return readdirSync(d); } catch { return []; } }, home: string = homedir()): Promise<Profile> {
   const soft = (cmd: string, args: string[]) => exec(cmd, args).catch(() => '');
   const [swVers, sysctl, displays, handlers] = await Promise.all([
     exec('sw_vers', []), soft('sysctl', ['-n', 'hw.model', 'hw.memsize']), soft('system_profiler', ['SPDisplaysDataType', '-json']),
@@ -152,14 +152,14 @@ export async function readProfile(platform: string = os.id, exec: Run = run,
 }
 
 /** At start, in the background: writes the file again when it is older than a day. A failed read says so in the log
- *  and leaves the old file. True when it wrote. */
+ *  and leaves the old file. True when it wrote. `read`: os.readProfile; without one nothing is written. */
 export async function refreshProfile(d: { file?: string; now?: number; read?: () => Promise<Profile | undefined> } = {}): Promise<boolean> {
   const file = d.file ?? computerFile();
   try {
     let mtime: number | undefined;
     try { mtime = statSync(file).mtimeMs; } catch { /* not there yet */ }
     if (!stale(mtime, d.now)) return false;
-    const p = await (d.read ?? readProfile)();
+    const p = await d.read?.();
     if (!p) return false;
     let old = '';
     try { old = readFileSync(file, 'utf8'); } catch { /* the first one */ }
@@ -275,28 +275,41 @@ function makeWindowsReader(): () => Win[] {
   };
 }
 
+/** The apps open now and the one in front, by name, ready for the line. */
+export interface OpenApps { apps: string[]; front: string }
+/** Makes a system's reader of the open apps, at the first request. Throws where the system's own list can't be loaded. */
+export type LoadApps = () => () => OpenApps;
+
+/** Windows: the windows, named by their programs. `procs`: own-ui.ts's process lister. `wins` is for tests. */
+export const windowsApps = (self: number, procs: () => Proc[], wins?: () => Win[]): LoadApps => () => {
+  const all = wins ?? loadWindows();
+  return () => appsOf(all(), procs(), self);
+};
+
+/** A system that names its apps itself (macOS, mac.ts): the names cleaned, no doubles, capped. */
+export const namedApps = (load: () => () => OpenApps): LoadApps => () => {
+  const read = load();
+  return () => {
+    const r = read();
+    return { apps: [...new Set(r.apps.map(a => clean(a, 40)).filter(Boolean))].slice(0, MAX_OPEN), front: clean(r.front, 40) };
+  };
+};
+
 /**
  * The reader main.ts hands to the brain: "<computer_now>Open apps: …. In front: ….</computer_now>", or '' when it
- * can't be read (and on Linux). Never throws. `procs`: own-ui.ts's process lister (Windows names an app by its program).
+ * can't be read. Never throws. `load`: os.openApps; without one (Linux) it is always ''.
  */
-export function computerNow(d: {
-  platform?: string; self?: number; procs?: () => Proc[]; wins?: () => Win[]; mac?: () => { apps: string[]; front: string };
-} = {}): () => string {
-  const platform = d.platform ?? os.id, self = d.self ?? process.pid;
-  let wins = d.wins, mac = d.mac, off = (platform !== 'win32' && platform !== 'darwin') || (platform === 'win32' && !d.procs);
+export function computerNow(load?: LoadApps): () => string {
+  let read: (() => OpenApps) | undefined, off = !load;
   return () => {
     if (off) return '';
     try {
-      if (platform === 'win32') wins ??= loadWindows(); else mac ??= loadRunningApps(self);
+      read ??= load!();
     } catch (e) {
       off = true;                                   // a second try would fail the same way
       console.log(`Blob: the open apps can't be read (${(e as Error).message})`);
       return '';
     }
-    try {
-      if (wins) { const r = appsOf(wins(), d.procs!(), self); return nowLine(r.apps, r.front); }
-      const r = mac!();
-      return nowLine([...new Set(r.apps.map(a => clean(a, 40)).filter(Boolean))].slice(0, MAX_OPEN), clean(r.front, 40));
-    } catch { return ''; }
+    try { const r = read(); return nowLine(r.apps, r.front); } catch { return ''; }
   };
 }

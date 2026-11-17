@@ -4,7 +4,6 @@
 // go, so their ids are kept in a file clawdcursor reads again while it runs (CLAWD_OWN_UI_PIDS_FILE, brain.ts).
 import { existsSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { os } from './os/index.ts';
 
 export interface Proc { pid: number; parent: number; name: string }
 
@@ -28,9 +27,8 @@ export function webviewPids(procs: Proc[], root: number): number[] {
   return out.sort((a, b) => a - b);
 }
 
-/** Windows: every running process (a toolhelp snapshot through koffi). Undefined where it isn't needed or can't be read. */
-export function processLister(platform: string = os.id): (() => Proc[]) | undefined {
-  if (platform !== 'win32') return undefined;
+/** Windows (os.processes): every running process (a toolhelp snapshot through koffi). Undefined when it can't be read. */
+export function processLister(): (() => Proc[]) | undefined {
   try {
     const koffi = createRequire(import.meta.url)('koffi');
     const kernel32 = koffi.load('kernel32.dll');

@@ -4,7 +4,6 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { os } from './os/index.ts';
 import type { Caller } from './replay.ts';
 import { blobHome } from './settings.ts';
 
@@ -74,9 +73,8 @@ export function clawdcursorReader(mcp: { call: Caller; close: () => Promise<void
   };
 }
 
-/** Windows: a cheap look at the window in front (user32, as focus.ts does). null: nothing, or one of Blob's own. */
+/** Windows (os.frontWindow): a cheap look at the window in front (user32, as focus.ts does). null: nothing, or one of Blob's own. */
 export function windowsFront(): (() => string | null) | undefined {
-  if (os.id !== 'win32') return undefined;
   try {
     const koffi = createRequire(import.meta.url)('koffi');
     const user32 = koffi.load('user32.dll');

@@ -4,6 +4,9 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { delimiter, dirname, join, parse } from 'node:path';
 import { windowsAutostart } from '../autostart.ts';
+import { windowsApps, windowsProfile } from '../computer.ts';
+import { processLister } from '../own-ui.ts';
+import { windowsFront } from '../watch.ts';
 import type { Os } from './types.ts';
 
 // koffi is loaded when a function first needs it, never when this file is: the MCP servers bundle this file too.
@@ -89,6 +92,10 @@ export const win: Os = {
   trash: async path => trash(path),
   open: async target => open(target),
   isLocal,
+  readProfile: windowsProfile,
+  openApps: (self, procs) => procs && windowsApps(self, procs),   // a window is named by its program
+  processes: processLister,
+  frontWindow: windowsFront,
   autostart: { apply: windowsAutostart },
   dockGap: 56,
   topInset: 0,
