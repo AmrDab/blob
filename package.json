@@ -2,7 +2,7 @@
   "name": "blob",
   "version": "0.1.0",
   "private": true,
-  "description": "A tiny floating bubble: tell your computer what to do, by voice or text. Runs your own Claude Code with clawdcursor as its hands.",
+  "description": "A tiny floating bubble that does tasks on your computer, by voice or text, with your own Claude Code or Codex. It takes the quickest route: a command or script first, then an app's controls in the background, and the mouse and keyboard only as a last resort.",
   "type": "module",
   "license": "MIT",
   "engines": {
