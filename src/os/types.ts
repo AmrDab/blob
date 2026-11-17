@@ -5,6 +5,7 @@ import type { Apply } from '../autostart.ts';
 import type { Cursor, Win } from '../clickthrough.ts';
 import type { LoadApps, Profile, Run } from '../computer.ts';
 import type { Bridge } from '../desk.ts';
+import type { FocusKeeper } from '../focus.ts';
 import type { Proc } from '../own-ui.ts';
 
 /** Runs a program to its end; rejects with what it wrote on stderr. */
@@ -81,6 +82,8 @@ export interface Os {
 
   /** A reader of the cursor, for the bubble's click-through and drag (clickthrough.ts). Undefined when it can't be read. `now` is for tests. */
   cursor?(win: Win, now?: () => number): (() => Cursor) | undefined;
+  /** Keeps note of the window (or app) the user was in, to hand the keyboard back to after a click on Blob (focus.ts). `own`: Blob's window. */
+  focusKeeper?(own: bigint | number): FocusKeeper;
 
   /** How far the bubble starts above the bottom of the screen: clear of the taskbar or the Dock. */
   dockGap: number;

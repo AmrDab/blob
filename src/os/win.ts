@@ -7,6 +7,7 @@ import { windowsAutostart } from '../autostart.ts';
 import { winCursor } from '../clickthrough.ts';
 import { windowsApps, windowsProfile } from '../computer.ts';
 import { Bridge } from '../desk.ts';
+import { winKeeper } from '../focus.ts';
 import { processLister } from '../own-ui.ts';
 import { windowsFront } from '../watch.ts';
 import type { Os } from './types.ts';
@@ -101,6 +102,7 @@ export const win: Os = {
   autostart: { apply: windowsAutostart },
   desk: { bridge: o => new Bridge(o) },             // UI Automation, through desk-bridge.ps1
   cursor: winCursor,
+  focusKeeper: winKeeper,
   dockGap: 56,
   topInset: 0,
   quitHint: 'close the bubble from the taskbar',

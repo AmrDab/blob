@@ -17,7 +17,7 @@ import { clickThrough, follower, type ClickThrough } from './clickthrough.ts';
 import { computerBrief, computerFile, computerNow, refreshProfile } from './computer.ts';
 import { deskTools, ownPids } from './desk.ts';
 import { setAutostart, systemAutostart } from './autostart.ts';
-import { focusKeeper, type FocusKeeper } from './focus.ts';
+import type { FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
 import { macSetup } from './mac.ts';
@@ -786,7 +786,7 @@ pillUi = overlay(pillWin);
 if (process.env.BLOB_CAPTURE === '1') console.log('Blob: BLOB_CAPTURE=1, the bubble shows in screen captures (development only)');
 else if (!hideFromCapture(win)) console.log('Blob: the bubble shows in screen captures on this system');
 win.show();
-focus = focusKeeper(win.getNativeHandle());
+focus = os.focusKeeper?.(win.getNativeHandle()) ?? focus;
 void check();
 
 // ── exit ─────────────────────────────────────────────────────────────────────

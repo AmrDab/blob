@@ -1,6 +1,7 @@
 // The keyboard hand-back on macOS, against a fake "app in front": nothing here loads a system library.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { focusKeeper } from '../src/focus.ts';
+import { macKeeper } from '../src/focus.ts';
+import { osFor } from '../src/os/index.ts';
 
 const ME = 100;
 
@@ -22,7 +23,7 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('the focus hand-back on macOS', () => {
   it('gives the front back to the app the user was in, once Blob is in front', () => {
     const f = fake(7);
-    const k = focusKeeper(0, 'darwin', f.load, ME);
+    const k = macKeeper(f.load, ME);
     vi.advanceTimersByTime(150);                   // app 7 is seen in front
     f.state.front = ME;                            // a click on the bubble
     vi.advanceTimersByTime(300);                   // Blob itself is never remembered
@@ -34,7 +35,7 @@ describe('the focus hand-back on macOS', () => {
 
   it('goes by Blob being active, not by the system\'s "app in front", which can lag a click', () => {
     const f = fake(7);
-    const k = focusKeeper(0, 'darwin', f.load, ME);
+    const k = macKeeper(f.load, ME);
     vi.advanceTimersByTime(150);
     f.state.active = true;                         // the click was handled; frontPid still says 7
     k.restore();
@@ -44,7 +45,7 @@ describe('the focus hand-back on macOS', () => {
 
   it('does nothing while another app is in front, or before any was seen', () => {
     const f = fake(ME);
-    const k = focusKeeper(0, 'darwin', f.load, ME);
+    const k = macKeeper(f.load, ME);
     vi.advanceTimersByTime(300);
     k.restore();                                   // nothing to go back to
     f.state.front = 7;
@@ -57,7 +58,7 @@ describe('the focus hand-back on macOS', () => {
 
   it('stops looking after stop()', () => {
     const f = fake(7);
-    const k = focusKeeper(0, 'darwin', f.load, ME);
+    const k = macKeeper(f.load, ME);
     k.stop();
     vi.advanceTimersByTime(600);
     f.state.front = ME;
@@ -67,7 +68,7 @@ describe('the focus hand-back on macOS', () => {
 
   it('does nothing, and says so, where the runtime cannot be loaded', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const k = focusKeeper(0, 'darwin', () => { throw new Error('no libobjc'); }, ME);
+    const k = macKeeper(() => { throw new Error('no libobjc'); }, ME);
     expect(() => { k.restore(); k.stop(); }).not.toThrow();
     expect(log.mock.calls[0][0]).toContain('focus hand-back unavailable (no libobjc)');
   });
@@ -75,15 +76,13 @@ describe('the focus hand-back on macOS', () => {
   it('a call that throws later is no crash', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     let bad = false;
-    const k = focusKeeper(0, 'darwin', () => ({ frontPid: () => { if (bad) throw new Error('gone'); return 7; }, activate: () => true, selfActive: () => { throw new Error('gone'); }, keyTitle: () => '' }), ME);
+    const k = macKeeper(() => ({ frontPid: () => { if (bad) throw new Error('gone'); return 7; }, activate: () => true, selfActive: () => { throw new Error('gone'); }, keyTitle: () => '' }), ME);
     bad = true;
     expect(() => { vi.advanceTimersByTime(300); k.restore(); }).not.toThrow();
     k.stop();
   });
 
   it('is not used on Linux', () => {
-    const load = vi.fn();
-    focusKeeper(0, 'linux', load, ME).restore();
-    expect(load).not.toHaveBeenCalled();
+    expect(osFor('linux').focusKeeper).toBeUndefined();
   });
 });

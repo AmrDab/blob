@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { macAutostart, stableNode } from '../autostart.ts';
 import { macCursor } from '../clickthrough.ts';
 import { macProfile, namedApps } from '../computer.ts';
+import { macKeeper } from '../focus.ts';
 import { loadRunningApps } from '../mac.ts';
 import { posix, run } from './posix.ts';
 import type { Os } from './types.ts';
@@ -41,6 +42,7 @@ export const mac: Os = {
   openApps: self => namedApps(() => loadRunningApps(self)),
   autostart: { apply: macAutostart, exe: stableNode },
   cursor: macCursor,
+  focusKeeper: () => macKeeper(),                  // whole apps, not windows: Blob is this process
   dockGap: 90,                                     // a Dock is taller than a taskbar
   topInset: 40,                                    // the menu bar and the notch
   quitHint: 'Cmd+Q on the bubble',

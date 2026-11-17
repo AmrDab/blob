@@ -1,17 +1,16 @@
 // Keyboard focus hand-back. Clicking the bubble makes Blob the window in front, and clawdcursor then refuses keys
 // (the window in front is the app driving it). So Blob keeps note of the last other window in front and gives the
 // front back to it after a click. Windows: user32 through koffi. macOS: the app in front, through the Objective-C
-// runtime (mac.ts). Elsewhere it does nothing.
+// runtime (mac.ts). A system with neither has no keeper (os.focusKeeper).
 import { createRequire } from 'node:module';
 import { loadFrontApp, type FrontApp } from './mac.ts';
-import { os } from './os/index.ts';
 
 export interface FocusKeeper { restore(): void; stop(): void }
 
 const NONE: FocusKeeper = { restore() {}, stop() {} };
 
 /** macOS: whole apps, not windows. `own` (a window pointer there) is not used: Blob is this process. */
-function macKeeper(load: () => FrontApp, me: number): FocusKeeper {
+export function macKeeper(load: () => FrontApp = loadFrontApp, me: number = process.pid): FocusKeeper {
   let mac: FrontApp;
   try { mac = load(); mac.frontPid(); } catch (e) {
     console.log(`Blob: focus hand-back unavailable (${(e as Error).message})`);
@@ -31,9 +30,8 @@ function macKeeper(load: () => FrontApp, me: number): FocusKeeper {
   };
 }
 
-export function focusKeeper(own: bigint | number, platform: string = os.id, mac: () => FrontApp = loadFrontApp, pid: number = process.pid): FocusKeeper {
-  if (platform === 'darwin') return macKeeper(mac, pid);
-  if (platform !== 'win32') return NONE;
+/** Windows: the window in front. `own`: Blob's window, the one the front is handed back from. */
+export function winKeeper(own: bigint | number): FocusKeeper {
   let f: {
     GetForegroundWindow: () => number; SetForegroundWindow: (h: number) => number; IsWindow: (h: number) => number;
     IsIconic: (h: number) => number; ShowWindow: (h: number, cmd: number) => number; BringWindowToTop: (h: number) => number;
