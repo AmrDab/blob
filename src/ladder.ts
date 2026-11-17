@@ -33,7 +33,7 @@ function failure(c: Call): boolean {
   // the desk saying "go to the screen", "tell the user" or "not allowed": a stronger model would hear the same
   if (c.server === 'desk' && /· (NO_PATTERN|NOT_IN_BACKGROUND|EMPTY|DID_NOTHING|NOT_RESPONDING|BRIDGE|NOT_FOUND|AMBIGUOUS|ELEVATED|PASSWORD|AI_HOST|OWN_UI|NOT_APP)\b/.test(c.line)) return false;
   if (c.server === 'files' && c.tool === 'list_dir') return false;
-  return !(c.server === 'files' && c.tool === 'run' && /· EXIT_\d+/.test(c.line));
+  return !(c.server === 'files' && (c.tool === 'run' || c.tool === 'script_run') && /· EXIT_\d+/.test(c.line));
 }
 
 /** The tier that takes over after this run, and why; nothing when the answer stands. */

@@ -217,6 +217,17 @@ export function userMessage(text: string): string {
   return JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } }) + '\n';
 }
 
+/**
+ * The request as the model gets it: what `context` says about right now (the open apps, computer.ts) on a line in
+ * front. Only the model sees that line: the log, habits and shortcuts keep the user's own words. A read that fails
+ * adds nothing.
+ */
+export function withContext(text: string, context?: () => string): string {
+  let now = '';
+  try { now = context?.() ?? ''; } catch { /* the request goes as it is */ }
+  return now ? `${now}\n${text}` : text;
+}
+
 function oneLine(s: string, max = 160): string {
   const t = s.replace(/\s+/g, ' ').trim();
   return t.length > max ? t.slice(0, max - 1) + '…' : t;
@@ -403,6 +414,8 @@ export class Brain {
   constructor(private o: {
     mcpConfigPath: string; servers: Record<string, ServerCommand>; cwd: string; emit: (e: BrainEvent) => void;
     persona?: (brain: BrainName, tier: Tier) => string;
+    /** Read at each request and sent in front of it (withContext). */
+    context?: () => string;
   }) {}
 
   get busy(): boolean { return !!this.child?.sent; }
@@ -428,7 +441,7 @@ export class Brain {
     this.o.emit({ type: 'busy', busy: true });
     this.o.emit({ type: 'caption', text: 'Thinking…' });
     for (const u of c.early.splice(0)) this.o.emit(u);   // e.g. "Blob's file tools are failed." from a prewarmed start
-    c.p.stdin.end(c.input(text));
+    c.p.stdin.end(c.input(withContext(text, this.o.context)));
     return true;
   }
 

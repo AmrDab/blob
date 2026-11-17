@@ -125,18 +125,31 @@ function capped(out: string): string {
   return `${t.slice(0, MAX_OUTPUT - 1500)}\n… ${t.length - MAX_OUTPUT} characters left out …\n${t.slice(-1500)}`;
 }
 
-export async function runTool(a: { command?: unknown; timeout_s?: unknown }, d: ShellDeps): Promise<ToolResult> {
-  const command = typeof a.command === 'string' ? a.command.trim() : '';
+/** What every command passes before it is shown or run (run, and a saved script): null when it is fit. */
+export function unfit(command: string): ToolResult | null {
   if (!command) return failed('NO_COMMAND', 'pass the command to run');
   if (command.length > MAX_COMMAND || command.split('\n').length > MAX_LINES) {
     return failed('TOO_LONG', `a command is at most ${MAX_COMMAND} characters and ${MAX_LINES} lines, so the user can read all of it; do it in smaller steps`);
   }
   if (HIDDEN.test(command)) return refused('HIDDEN_CHARACTERS', 'the command has characters that do not show on screen; write it in plain text');
+  return null;
+}
+
+export const saidNo = (): ToolResult =>
+  refused('USER_SAID_NO', 'the user did not allow this command (or did not answer); do not run it another way, tell them it was not run');
+
+export async function runTool(a: { command?: unknown; timeout_s?: unknown }, d: ShellDeps): Promise<ToolResult> {
+  const command = typeof a.command === 'string' ? a.command.trim() : '';
+  const bad = unfit(command);
+  if (bad) return bad;
   const asked = classify(command, d.platform) === 'ask';
-  if (asked && !(await d.ask('Run this command?', command))) {
-    return refused('USER_SAID_NO', 'the user did not allow this command (or did not answer); do not run it another way, tell them it was not run');
-  }
-  const secs = Number(a.timeout_s);
+  if (asked && !(await d.ask('Run this command?', command))) return saidNo();
+  return execTool(command, asked, d, a.timeout_s);
+}
+
+/** Runs a command that passed its checks and its question. `changes`: it is not a look, so a good end is confirmed. */
+export async function execTool(command: string, changes: boolean, d: ShellDeps, timeout_s?: unknown): Promise<ToolResult> {
+  const secs = Number(timeout_s);
   const timeoutMs = 1000 * (Number.isFinite(secs) && secs > 0 ? Math.min(secs, MAX_TIMEOUT_S) : DEFAULT_TIMEOUT_S);
   let r: ExecResult;
   try { r = await d.exec(command, timeoutMs); } catch (e) { return failed('CANT_RUN', (e as Error).message); }
@@ -144,7 +157,7 @@ export async function runTool(a: { command?: unknown; timeout_s?: unknown }, d: 
   if (r.timedOut) return { text: `${out}\n[failed · TIMEOUT · hint: stopped after ${timeoutMs / 1000} s; pass a longer timeout_s if it needs one]`, isError: true };
   if (r.code !== 0) return { text: `${out}\n[failed · EXIT_${r.code} · hint: the command ended with an error; its output is above]`, isError: true };
   // A look has no outcome line (like list_dir); a change the user allowed is confirmed.
-  return { text: asked ? `${out}\n[confirmed]` : out, isError: false };
+  return { text: changes ? `${out}\n[confirmed]` : out, isError: false };
 }
 
 /** The command's environment: none of Blob's own tokens, no API keys. */

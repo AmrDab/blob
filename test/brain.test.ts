@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { delimiter, isAbsolute, join } from 'node:path';
-import { PILL_HOST, StreamParser, callLabel, claudeArgs, claudeCommand, cleanEnv, clawdcursorCommand, knowsSnapshotFlag, mcpConfig, mcpServers, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
+import { PILL_HOST, StreamParser, callLabel, claudeArgs, claudeCommand, cleanEnv, clawdcursorCommand, knowsSnapshotFlag, mcpConfig, mcpServers, outcomeOf, splitToolName, userMessage, withContext } from '../src/brain.ts';
 
 describe('claude command line', () => {
   it('runs stream-json print mode with clawdcursor, the files (and shell), desk and self servers and the read-only built-ins', () => {
@@ -92,6 +92,16 @@ describe('claude command line', () => {
     const line = userMessage('open notepad');
     expect(line.endsWith('\n')).toBe(true);
     expect(JSON.parse(line)).toEqual({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'open notepad' }] } });
+  });
+
+  it('puts what is open now in front of the request, for the model only; a failed read adds nothing', () => {
+    const now = '<computer_now>Open apps: chrome, WINWORD. In front: chrome.</computer_now>';
+    const text = withContext('open notepad', () => now);
+    expect(text).toBe(`${now}\nopen notepad`);
+    expect(JSON.parse(userMessage(text)).message.content).toEqual([{ type: 'text', text: `${now}\nopen notepad` }]);
+    expect(withContext('open notepad')).toBe('open notepad');
+    expect(withContext('open notepad', () => '')).toBe('open notepad');
+    expect(withContext('open notepad', () => { throw new Error('no windows'); })).toBe('open notepad');
   });
 });
 

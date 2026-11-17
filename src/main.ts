@@ -14,6 +14,7 @@ import { Application } from '@webviewjs/webview';
 import { Brain, callLabel, mcpConfig, mcpServers, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
 import { MAX_DETAIL, Questions } from './ask.ts';
 import { clickThrough, cursorReader, follower, type ClickThrough } from './clickthrough.ts';
+import { computerBrief, computerFile, computerNow, refreshProfile } from './computer.ts';
 import { Bridge, deskTools, ownPids } from './desk.ts';
 import { setAutostart, supported as autostartSupported, systemAutostart } from './autostart.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
@@ -25,6 +26,7 @@ import { hideFromCapture, overlay, type Overlay } from './overlay.ts';
 import { keepOwnUiFile, processLister } from './own-ui.ts';
 import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type Reply, type RoomInfo } from './pair.ts';
 import { persona } from './persona.ts';
+import { scriptsBrief, scriptsDir } from './scripts.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
 import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } from './schedule.ts';
@@ -636,12 +638,17 @@ process.env.BLOB_PILL_URL = `http://127.0.0.1:${port}/pill`;
 process.env.BLOB_PILL_TOKEN = pillToken;
 // Blob's web view processes, named to clawdcursor as its own UI in a file that follows them (own-ui.ts).
 process.env.BLOB_OWN_UI_FILE = join(tmp, 'own-ui-pids');
-const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, processLister());
+const procs = processLister();                      // made once: also names the open apps (computer.ts)
+const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, procs);
 writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer, desk: deskServer }), { mode: 0o600 });
 brain = new Brain({
   mcpConfigPath, servers: mcpServers({ files: filesServer, blob: selfServer, desk: deskServer }), cwd: WORK, emit: onBrain,
-  persona: (b, tier) => persona(settings.get(), { memory: memoryBrief(memoryFile()), brain: b, tier }),
+  persona: (b, tier) => persona(settings.get(), {
+    memory: memoryBrief(memoryFile()), computer: computerBrief(computerFile()), scripts: scriptsBrief(scriptsDir()), brain: b, tier,
+  }),
+  context: computerNow({ procs }),
 });
+void refreshProfile();                              // this computer's details, in the background, when a day old
 sendShortcuts();
 sendSettings();
 

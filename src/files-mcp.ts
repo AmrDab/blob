@@ -1,5 +1,5 @@
-// Blob's files server (stdio MCP): list_dir, make_folder, move (also renames), trash, open, and run (a shell command,
-// shell.ts). Claude Code starts it from the --mcp-config Blob writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
+// Blob's files server (stdio MCP): list_dir, make_folder, move (also renames), trash, open, run (a shell command,
+// shell.ts) and the saved scripts (scripts.ts). Claude Code starts it from the --mcp-config Blob writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
 // onto an existing file ask the user on the bubble first (No, or no answer in 60 s, refuses).
 import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync, statfsSync } from 'node:fs';
 import { execFile, execFileSync } from 'node:child_process';
@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse, resolve } from 'node:path';
 import { askUser } from './ask.ts';
+import { scriptTools, scriptsDir } from './scripts.ts';
 import { MAX_COMMAND, runTool, systemExec } from './shell.ts';
 
 export interface FileDeps {
@@ -263,6 +264,7 @@ export async function serve(): Promise<void> {
     inputSchema: { target: z.string().describe('A URL, or a full path (a leading ~ means the home folder).') },
   }, async a => reply(await tools.open(a)));
   const shell = process.platform === 'win32' ? 'PowerShell' : 'shell';
+  const shellDeps = { ask: (q: string, detail: string) => askUser(q, { detail }), exec: systemExec };
   server.registerTool('run', {
     description: `Run one ${shell} command in the home folder and get its output. A command that only looks ` +
       '(list, read, search, status, version) runs at once. Anything else is shown to the user word for word with ' +
@@ -271,6 +273,33 @@ export async function serve(): Promise<void> {
       command: z.string().describe(`The ${shell} command, exactly as it should run.`),
       timeout_s: z.number().optional().describe('Seconds before it is stopped (default 60, at most 600).'),
     },
-  }, async a => reply(await runTool(a, { ask: (q, detail) => askUser(q, { detail }), exec: systemExec })));
+  }, async a => reply(await runTool(a, shellDeps)));
+  const scripts = scriptTools({ ...shellDeps, dir: scriptsDir() });
+  const name = z.string().describe('The script\'s name: lower-case letters, digits and dashes ("dark-mode-on").');
+  server.registerTool('script_save', {
+    description: 'Save a short command that just worked and is worth reusing (a settings toggle, opening a settings page, a ' +
+      'status lookup like battery or Wi-Fi), so the next time is one script_run. One purpose per script; never a ' +
+      'password, key or token; not a one-off task. Saving runs nothing and asks nothing. The same name replaces the old script.',
+    inputSchema: {
+      name,
+      description: z.string().describe('What it does, in one plain line (120 characters at most).'),
+      command: z.string().describe(`The ${shell} command, exactly as it ran (${MAX_COMMAND} characters at most).`),
+      consequential: z.boolean().optional().describe('True when it sends, deletes, pays, installs or can\'t be undone: the user is then asked every time.'),
+    },
+  }, async a => reply(scripts.script_save(a)));
+  server.registerTool('script_run', {
+    description: 'Run a saved script by name and get its output. One that only looks runs at once. One that changes something ' +
+      'is shown to the user with Yes and No the first time, and again only after its text changed; one that deletes, ' +
+      'sends, pays or shuts down asks every time.',
+    inputSchema: { name },
+  }, async a => reply(await scripts.script_run(a)));
+  server.registerTool('script_list', {
+    description: 'The saved scripts: name, what each does, and whether it changes something.',
+    inputSchema: {}, annotations: { readOnlyHint: true },
+  }, async () => reply(scripts.script_list()));
+  server.registerTool('script_remove', {
+    description: 'Delete a saved script. The user is asked first.',
+    inputSchema: { name }, annotations: { destructiveHint: true },
+  }, async a => reply(await scripts.script_remove(a)));
   await server.connect(new StdioServerTransport());
 }

@@ -46,6 +46,7 @@ describe('not stepping up', () => {
     const times = (c: Call) => [c, c, c];
     expect(up({ calls: times(call('files', 'list_dir', '[failed · NOT_FOUND · hint: /x]')) })).toBeUndefined();
     expect(up({ calls: times(call('files', 'run', '[failed · EXIT_1 · hint: the command ended with an error; its output is above]')) })).toBeUndefined();
+    expect(up({ calls: times(call('files', 'script_run', '[failed · EXIT_1 · hint: the command ended with an error; its output is above]')) })).toBeUndefined();
     expect(up({ calls: times(call('', 'Read', 'File does not exist.', 'error')) })).toBeUndefined();
   });
 

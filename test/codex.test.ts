@@ -1,7 +1,7 @@
 // Codex as the brain: its command line, its JSON events, and the tool names. Nothing is started.
 // The event lines are as `codex exec --json` (codex-cli 0.169.0) printed them against a local stand-in for the model.
 import { describe, expect, it } from 'vitest';
-import { CODEX_OFF, CodexParser, SYSTEM_PROMPT, codexArgs, codexCommand, codexInput, mcpServers, splitToolName, type ServerCommand } from '../src/brain.ts';
+import { CODEX_OFF, CodexParser, SYSTEM_PROMPT, codexArgs, codexCommand, codexInput, mcpServers, splitToolName, withContext, type ServerCommand } from '../src/brain.ts';
 import { persona } from '../src/persona.ts';
 import { DEFAULTS } from '../src/settings.ts';
 
@@ -84,6 +84,11 @@ describe('codex command line', () => {
   it('sends the request as it is, and on a resumed session the brief as it is now in front of it', () => {
     expect(codexInput('open notepad')).toBe('open notepad');
     expect(codexInput('open notepad', 'Local time now: 08:00.')).toBe('<brief_now>\nLocal time now: 08:00.\n</brief_now>\nopen notepad');
+    // what is open now goes between the brief and the request; a failed read leaves the request as it is
+    const now = () => '<computer_now>Open apps: Safari. In front: Safari.</computer_now>';
+    expect(codexInput(withContext('open notepad', now), 'Local time now: 08:00.'))
+      .toBe('<brief_now>\nLocal time now: 08:00.\n</brief_now>\n<computer_now>Open apps: Safari. In front: Safari.</computer_now>\nopen notepad');
+    expect(codexInput(withContext('open notepad', () => { throw new Error('x'); }))).toBe('open notepad');
   });
 
   it('starts Codex with no shell: its .exe, or on Windows the script npm\'s codex.cmd names, with this Node', () => {

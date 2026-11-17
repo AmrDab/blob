@@ -107,6 +107,38 @@ export function loadFrontApp(): FrontApp {
   };
 }
 
+/**
+ * The apps open now, by name: the regular ones (with a Dock icon), and the one in front ('' when that is Blob or
+ * nothing). Names only, for the request's <computer_now> (computer.ts). Throws where the runtime can't be loaded.
+ */
+export function loadRunningApps(self: number = process.pid): () => { apps: string[]; front: string } {
+  const objc = loadObjC();
+  const lib = createRequire(import.meta.url)('koffi').load('/usr/lib/libobjc.A.dylib');
+  const selector = lib.func('void *sel_registerName(const char *name)');
+  const pidOf = lib.func('int objc_msgSend(void *obj, void *sel)');                              // pid_t
+  const text = lib.func('const char *objc_msgSend(void *obj, void *sel)');
+  const push = lib.func('void *objc_autoreleasePoolPush()');
+  const pop = lib.func('void objc_autoreleasePoolPop(void *pool)');
+  // Blob itself is left out (it is a regular app until its launch is done, and in front while the user types to it)
+  const name = (app: unknown): string => {
+    if (!app || pidOf(app, selector('processIdentifier')) === self) return '';
+    const s = objc.send(app, 'localizedName');
+    return s ? String(text(s, selector('UTF8String')) ?? '') : '';
+  };
+  return () => {
+    const pool = push();
+    try {
+      const ws = objc.send(objc.cls('NSWorkspace'), 'sharedWorkspace'), all = objc.send(ws, 'runningApplications');
+      const apps: string[] = [];
+      for (let i = 0, n = all ? objc.num(all, 'count') : 0; i < n; i++) {
+        const app = objc.at(all, 'objectAtIndex:', i);
+        if (objc.num(app, 'activationPolicy') === 0) apps.push(name(app));          // NSApplicationActivationPolicyRegular
+      }
+      return { apps: apps.filter(Boolean), front: name(objc.send(ws, 'frontmostApplication')) };
+    } finally { pop(pool); }
+  };
+}
+
 /** The app menu comes first by itself (the window library adds it, with Quit); Blob adds only Edit. */
 export const EDIT_MENU: MenuOptions = {
   items: [{
