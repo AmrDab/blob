@@ -2,10 +2,10 @@
 // transparent pixel must not take a click meant for the desktop under it. The page says which pixels are Blob
 // (hit shapes, ui/liquid/hit.ts); this looks where the cursor is a few times a second and tells the window to
 // ignore the mouse whenever the cursor is on none of them. A window that ignores the mouse gets no mouse events at
-// all, which is why the host has to look. Where the cursor can't be read the window takes every click, as before.
+// all, which is why the host has to look. Where the cursor can't be read (os.cursor: user32 on Windows, the window
+// library on macOS) the window takes every click, as before.
 import { createRequire } from 'node:module';
 import type { BrowserWindow } from '@webviewjs/webview';
-import { os } from './os/index.ts';
 import { ignoreNext, parseShapes, type HitShape } from './ui/liquid/hit.ts';
 
 /**
@@ -14,7 +14,8 @@ import { ignoreNext, parseShapes, type HitShape } from './ui/liquid/hit.ts';
  * position is read and set in points too.
  */
 export type Cursor = { x: number; y: number; down?: boolean; points?: boolean };
-type Win = Pick<BrowserWindow, 'getPosition' | 'getInnerSize' | 'scaleFactor' | 'setIgnoreCursorEvents' | 'getCursorPosition'>;
+/** What of the bubble's window is used here. */
+export type Win = Pick<BrowserWindow, 'getPosition' | 'getInnerSize' | 'scaleFactor' | 'setIgnoreCursorEvents' | 'getCursorPosition'>;
 
 /**
  * A drag of the window that follows the cursor itself, in physical px: `start()` when a mouse's press begins (`stop()`
@@ -46,39 +47,41 @@ export function follower(win: Pick<BrowserWindow, 'getPosition' | 'setPosition' 
 const NEAR_MS = 25, FAR_MS = 100;      // how often to look: the cursor on or near the window, or far from it
 const NEAR_PX = 200;
 
-/** How to read the cursor here: user32 on Windows, the window library on macOS, undefined elsewhere or when it fails. */
-export function cursorReader(win: Win & Partial<Pick<BrowserWindow, 'getPrimaryMonitor'>>, platform: string = os.id, now: () => number = Date.now): (() => Cursor) | undefined {
+/** Windows: the cursor and the mouse buttons, from user32. Undefined when it can't be loaded. */
+export function winCursor(): (() => Cursor) | undefined {
   try {
-    if (platform === 'win32') {
-      const koffi = createRequire(import.meta.url)('koffi');
-      const user32 = koffi.load('user32.dll');
-      const POINT = koffi.struct({ x: 'long', y: 'long' });
-      const GetCursorPos = user32.func('GetCursorPos', 'int', [koffi.out(koffi.pointer(POINT))]);
-      const GetAsyncKeyState = user32.func('short __stdcall GetAsyncKeyState(int key)');
-      return () => {
-        const p = { x: 0, y: 0 };
-        GetCursorPos(p);
-        return { x: p.x, y: p.y, down: !!((GetAsyncKeyState(1) | GetAsyncKeyState(2)) & 0x8000) };   // VK_LBUTTON, VK_RBUTTON
-      };
-    }
-    if (platform === 'darwin' && typeof win.getCursorPosition === 'function') {
-      // the library gives the cursor in the primary screen's pixels, whatever screen it is on: back to points.
-      // Asking for the primary screen lists all its display modes, so its scale is kept for 2 s, not asked each read.
-      let k = 0, at = 0;
-      const scale = (): number => {
-        const t = now();
-        if (!k || t - at > 2000) { k = win.getPrimaryMonitor?.()?.scaleFactor || 1; at = t; }
-        return k;
-      };
-      const read = (): Cursor => {
-        const c = win.getCursorPosition(false), s = scale();
-        return { x: c.x / s, y: c.y / s, points: true };
-      };
-      read();                                      // throws now if it can't
-      return read;
-    }
-  } catch { /* below */ }
-  return undefined;
+    const koffi = createRequire(import.meta.url)('koffi');
+    const user32 = koffi.load('user32.dll');
+    const POINT = koffi.struct({ x: 'long', y: 'long' });
+    const GetCursorPos = user32.func('GetCursorPos', 'int', [koffi.out(koffi.pointer(POINT))]);
+    const GetAsyncKeyState = user32.func('short __stdcall GetAsyncKeyState(int key)');
+    return () => {
+      const p = { x: 0, y: 0 };
+      GetCursorPos(p);
+      return { x: p.x, y: p.y, down: !!((GetAsyncKeyState(1) | GetAsyncKeyState(2)) & 0x8000) };   // VK_LBUTTON, VK_RBUTTON
+    };
+  } catch { return undefined; }
+}
+
+/** macOS: the cursor from the window library, in points. Undefined when it can't be read. */
+export function macCursor(win: Win & Partial<Pick<BrowserWindow, 'getPrimaryMonitor'>>, now: () => number = Date.now): (() => Cursor) | undefined {
+  try {
+    if (typeof win.getCursorPosition !== 'function') return undefined;
+    // the library gives the cursor in the primary screen's pixels, whatever screen it is on: back to points.
+    // Asking for the primary screen lists all its display modes, so its scale is kept for 2 s, not asked each read.
+    let k = 0, at = 0;
+    const scale = (): number => {
+      const t = now();
+      if (!k || t - at > 2000) { k = win.getPrimaryMonitor?.()?.scaleFactor || 1; at = t; }
+      return k;
+    };
+    const read = (): Cursor => {
+      const c = win.getCursorPosition(false), s = scale();
+      return { x: c.x / s, y: c.y / s, points: true };
+    };
+    read();                                      // throws now if it can't
+    return read;
+  } catch { return undefined; }
 }
 
 export interface ClickThrough {

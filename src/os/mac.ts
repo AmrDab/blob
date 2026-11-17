@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { macAutostart, stableNode } from '../autostart.ts';
+import { macCursor } from '../clickthrough.ts';
 import { macProfile, namedApps } from '../computer.ts';
 import { loadRunningApps } from '../mac.ts';
 import { posix, run } from './posix.ts';
@@ -39,6 +40,7 @@ export const mac: Os = {
   readProfile: macProfile,
   openApps: self => namedApps(() => loadRunningApps(self)),
   autostart: { apply: macAutostart, exe: stableNode },
+  cursor: macCursor,
   dockGap: 90,                                     // a Dock is taller than a taskbar
   topInset: 40,                                    // the menu bar and the notch
   quitHint: 'Cmd+Q on the bubble',

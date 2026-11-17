@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { delimiter, dirname, join, parse } from 'node:path';
 import { windowsAutostart } from '../autostart.ts';
+import { winCursor } from '../clickthrough.ts';
 import { windowsApps, windowsProfile } from '../computer.ts';
 import { Bridge } from '../desk.ts';
 import { processLister } from '../own-ui.ts';
@@ -99,6 +100,7 @@ export const win: Os = {
   frontWindow: windowsFront,
   autostart: { apply: windowsAutostart },
   desk: { bridge: o => new Bridge(o) },             // UI Automation, through desk-bridge.ps1
+  cursor: winCursor,
   dockGap: 56,
   topInset: 0,
   quitHint: 'close the bubble from the taskbar',

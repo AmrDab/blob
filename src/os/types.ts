@@ -2,6 +2,7 @@
 // nothing outside src/os/ asks which system it is on (test/os-boundary.test.ts). A member that is optional is one
 // that some system does not have.
 import type { Apply } from '../autostart.ts';
+import type { Cursor, Win } from '../clickthrough.ts';
 import type { LoadApps, Profile, Run } from '../computer.ts';
 import type { Bridge } from '../desk.ts';
 import type { Proc } from '../own-ui.ts';
@@ -77,6 +78,9 @@ export interface Os {
    * starts the bridge (main.ts), the brain gets the desk server (brain.ts) and the brief names the desk tools (persona.ts).
    */
   desk?: { bridge(o: ConstructorParameters<typeof Bridge>[0]): Bridge };
+
+  /** A reader of the cursor, for the bubble's click-through and drag (clickthrough.ts). Undefined when it can't be read. `now` is for tests. */
+  cursor?(win: Win, now?: () => number): (() => Cursor) | undefined;
 
   /** How far the bubble starts above the bottom of the screen: clear of the taskbar or the Dock. */
   dockGap: number;

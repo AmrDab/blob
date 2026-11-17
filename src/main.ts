@@ -13,7 +13,7 @@ import { createInterface } from 'node:readline';
 import { Application } from '@webviewjs/webview';
 import { Brain, callLabel, mcpConfig, mcpServers, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
 import { MAX_DETAIL, Questions } from './ask.ts';
-import { clickThrough, cursorReader, follower, type ClickThrough } from './clickthrough.ts';
+import { clickThrough, follower, type ClickThrough } from './clickthrough.ts';
 import { computerBrief, computerFile, computerNow, refreshProfile } from './computer.ts';
 import { deskTools, ownPids } from './desk.ts';
 import { setAutostart, systemAutostart } from './autostart.ts';
@@ -727,7 +727,7 @@ function moveBy(dx: number, dy: number, start: unknown): { dx: number; dy: numbe
 }
 // Empty pixels of the bubble's window let clicks through to the desktop (clickthrough.ts); the page is told whether
 // they do (it keeps the window small when not) and when the cursor comes onto Blob or leaves it.
-const readCursor = cursorReader(win), dragged = follower(win, readCursor);
+const readCursor = os.cursor?.(win), dragged = follower(win, readCursor);
 through = clickThrough(win, { over: on => tell({ type: 'over', on }), gone: () => send({ type: 'stage', clickThrough: false }) }, readCursor);
 send({ type: 'stage', clickThrough: through.available });
 
