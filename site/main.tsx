@@ -163,7 +163,7 @@ const Bar = ({ calm }: { calm: boolean }) => (
 );
 const Foot = ({ style }: { style?: CSSProperties }) => (
   <footer className="foot" style={style}>
-    <span>Open source, MIT. Windows first.</span>
+    <span>Open source, Apache 2.0. Windows first.</span>
     <span><a href={REPO}>GitHub</a></span>
   </footer>
 );

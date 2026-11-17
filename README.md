@@ -171,4 +171,4 @@ State in `~/.blob/`: `settings.json`, `memory.md`, `schedule.json`, `shortcuts.j
 
 ## License
 
-MIT. See `LICENSE`.
+Apache License 2.0. See `LICENSE`.
