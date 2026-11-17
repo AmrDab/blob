@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { delimiter, isAbsolute, join } from 'node:path';
-import { PILL_HOST, StreamParser, callLabel, claudeArgs, claudeCommand, cleanEnv, clawdcursorCommand, mcpConfig, mcpServers, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
+import { PILL_HOST, StreamParser, callLabel, claudeArgs, claudeCommand, cleanEnv, clawdcursorCommand, knowsSnapshotFlag, mcpConfig, mcpServers, outcomeOf, splitToolName, userMessage } from '../src/brain.ts';
 
 describe('claude command line', () => {
   it('runs stream-json print mode with clawdcursor, the files (and shell), desk and self servers and the read-only built-ins', () => {
@@ -39,9 +39,17 @@ describe('claude command line', () => {
     expect(claudeArgs({ mcpConfigPath: 'm.json', model: 'haiku' })).not.toContain('--max-turns');
   });
 
-  it('sends a fresh brief on every start, a resume too', () => {
-    const a = claudeArgs({ mcpConfigPath: 'm.json', model: 'sonnet', resume: 'abc' });
+  it('sends a fresh brief on every start, a resume too, where Claude Code knows how', () => {
+    const a = claudeArgs({ mcpConfigPath: 'm.json', model: 'sonnet', resume: 'abc', snapshotOff: true });
     expect(a[a.indexOf('--system-prompt-snapshot') + 1]).toBe('off');
+    // an older Claude Code stops at an option it does not know: no flag for it
+    expect(claudeArgs({ mcpConfigPath: 'm.json', model: 'sonnet', resume: 'abc' })).not.toContain('--system-prompt-snapshot');
+  });
+
+  it('reads from --help whether Claude Code knows the snapshot option', () => {
+    expect(knowsSnapshotFlag('  --system-prompt-snapshot <on|off>     Record the system prompt once')).toBe(true);
+    expect(knowsSnapshotFlag('  --system-prompt <prompt>              System prompt to use')).toBe(false);
+    expect(knowsSnapshotFlag('')).toBe(false);
   });
 
   it('starts clawdcursor mcp --compact, through cmd on Windows, or the override', () => {

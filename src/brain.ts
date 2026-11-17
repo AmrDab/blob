@@ -1,6 +1,6 @@
 // One run at a time of the user's own `claude -p` or `codex exec`, with clawdcursor, Blob's files and shell tools,
 // its desk tools (Windows: an open window worked in the background) and its self tools.
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
@@ -81,7 +81,8 @@ export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand; desk
 }
 
 /** `persona`: what Blob knows about itself (persona.ts), as the settings are when the child starts. */
-export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: string; persona?: string; maxTurns?: number }): string[] {
+/** `snapshotOff`: only for a Claude Code that knows --system-prompt-snapshot (snapshotFlag); an older one stops at it. */
+export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: string; persona?: string; maxTurns?: number; snapshotOff?: boolean }): string[] {
   return [
     '-p',
     '--input-format', 'stream-json',
@@ -94,7 +95,8 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: str
     '--disable-slash-commands',
     '--no-chrome',
     '--append-system-prompt', o.persona ? `${SYSTEM_PROMPT}\n${o.persona}` : SYSTEM_PROMPT,
-    '--system-prompt-snapshot', 'off',      // each start sends its own brief: the time, settings and tier now, not the first request's
+    // each start sends its own brief: the time, settings and tier now, not the first request's
+    ...(o.snapshotOff ? ['--system-prompt-snapshot', 'off'] : []),
     ...(o.model === 'default' ? [] : ['--model', o.model]),
     ...(o.resume ? ['--resume', o.resume] : []),
     ...(o.maxTurns ? ['--max-turns', String(o.maxTurns)] : []),   // auto only: the tier's step budget (ladder.ts)
@@ -366,6 +368,24 @@ export class CodexParser {
   }
 }
 
+/**
+ * Whether the installed Claude Code takes --system-prompt-snapshot, read from its --help (older versions stop with
+ * "unknown option"). The flag stays off until a read says yes: the first start resumes nothing, so it needs none.
+ * Anything but a yes (an older version, no Claude Code yet, a failed read) is read again at the next start, so an
+ * update while Blob runs is picked up.
+ */
+let snapshotFlag = false;
+let readingFlags = false;
+export function knowsSnapshotFlag(help: string): boolean { return help.includes('--system-prompt-snapshot'); }
+function readClaudeFlags(command: string): void {
+  if (snapshotFlag || readingFlags) return;
+  readingFlags = true;
+  execFile(command, ['--help'], { env: cleanEnv(), windowsHide: true, timeout: 20_000 }, (err, out) => {
+    readingFlags = false;
+    if (!err) snapshotFlag = knowsSnapshotFlag(String(out));
+  });
+}
+
 function killTree(p: ChildProcessWithoutNullStreams): void {
   if (p.exitCode !== null || p.pid === undefined) return;
   if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true });
@@ -431,8 +451,9 @@ export class Brain {
     if (moved) this.session = undefined;
     const resume = this.session?.id, persona = this.o.persona?.(brain, tier), codex = brain === 'codex', name = BRAIN_NAME[brain];
     const cmd = codex ? codexCommand() : { command: claudeCommand(), args: [] };
+    if (!codex) readClaudeFlags(cmd.command);
     const args = codex ? codexArgs({ servers: this.o.servers, resume, persona })      // Codex runs its own default model
-      : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model: tier, resume, persona, maxTurns: model === 'auto' ? MAX_TURNS[tier] : undefined });
+      : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model: tier, resume, persona, maxTurns: model === 'auto' ? MAX_TURNS[tier] : undefined, snapshotOff: snapshotFlag });
     const p = spawn(cmd.command, [...cmd.args, ...args], {
       cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: process.platform !== 'win32',
     });
