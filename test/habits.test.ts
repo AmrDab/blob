@@ -83,7 +83,7 @@ describe('record', () => {
     writeFileSync(file, 'junk');
     for (let i = 0; i < 230; i++) run([cc('window', { action: 'open_app', name: `App ${i}` })], `open app ${i}`);
     expect(JSON.parse(readFileSync(file, 'utf8')).runs).toHaveLength(200);
-  });
+  }, 20_000);   // 230 file writes: about 2 s alone, past the default 5 s while the whole suite runs
 
   it('lists the tasks asked for more than once', () => {
     run(inbox()); run(inbox(), 'Open my inbox'); run(inbox(), 'something else');
