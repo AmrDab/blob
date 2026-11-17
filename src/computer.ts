@@ -231,8 +231,13 @@ export function nowLine(apps: string[], front: string): string {
   return `<computer_now>Open apps: ${apps.join(', ')}.${front ? ` In front: ${front}.` : ''}</computer_now>`;
 }
 
-/** Windows: every visible top-level window, front to back (user32 through koffi). No window text is read. */
-function loadWindows(): () => Win[] {
+/**
+ * Windows: every visible top-level window, front to back (user32 through koffi). No window text is read. Made once
+ * per process: koffi refuses a second type named BlobEachWindow, so a second reader shares the first.
+ */
+let windowsReader: (() => Win[]) | undefined;
+const loadWindows = (): (() => Win[]) => (windowsReader ??= makeWindowsReader());
+function makeWindowsReader(): () => Win[] {
   const koffi = createRequire(import.meta.url)('koffi');
   const user32 = koffi.load('user32.dll');
   const Each = koffi.pointer(koffi.proto('bool __stdcall BlobEachWindow(intptr_t hwnd, intptr_t arg)'));

@@ -119,6 +119,7 @@ describe('run', () => {
     f.allow();
     const yes = await runTool({ command, timeout_s: 300 }, f.deps);
     expect(outcome(yes)).toBe('confirmed');
+    expect(yes.text).toMatch(/script_save/);                          // a change that worked: the model is told it can be saved
     expect(f.ran).toEqual([[command, 300_000]]);
   });
 

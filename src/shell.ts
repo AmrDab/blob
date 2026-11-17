@@ -144,8 +144,12 @@ export async function runTool(a: { command?: unknown; timeout_s?: unknown }, d: 
   if (bad) return bad;
   const asked = classify(command, d.platform) === 'ask';
   if (asked && !(await d.ask('Run this command?', command))) return saidNo();
-  return execTool(command, asked, d, a.timeout_s);
+  const r = await execTool(command, asked, d, a.timeout_s);
+  // A change that worked: said here, where the model is, so the next time can be one script_run (a saved script
+  // runs through execTool, so it is not told to save itself again).
+  return r.text.endsWith('\n[confirmed]') ? { ...r, text: r.text.replace(/\[confirmed\]$/, SAVE_HINT) } : r;
 }
+const SAVE_HINT = '[confirmed · next: if the user may ask for this again, save this command with script_save before you answer]';
 
 /** Runs a command that passed its checks and its question. `changes`: it is not a look, so a good end is confirmed. */
 export async function execTool(command: string, changes: boolean, d: ShellDeps, timeout_s?: unknown): Promise<ToolResult> {
