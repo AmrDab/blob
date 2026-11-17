@@ -17,7 +17,6 @@ const post = (path: string, body: unknown = {}) =>
   fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-talk-token': TOKEN }, body: JSON.stringify(body) });
 const send = (a: PillAnswer) => void post('/pill/answer', a);
 const keyboard = (on: boolean) => void post('/pill/keyboard', { on });
-const MAC = /Mac/.test(navigator.platform);   // WKWebView says MacIntel, on Apple Silicon too
 const MORPH_MS = 600;    // the window shrinks only after the liquid has
 const CALM = matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -48,6 +47,7 @@ function Pill() {
   const [state, setState] = useState<PillState | null>(null);
   const [typing, setTyping] = useState(false);   // "Something else": the reply box in place of the buttons
   const [text, setText] = useState('');
+  const [sendKey, setSendKey] = useState('');    // the keys that send a longer reply, as the host names them
   const group = useRef<HTMLDivElement>(null);
   const sized = useRef({ w: 0, h: 0, timer: 0 });
   const [gl, setGl] = useState(!CALM.matches);
@@ -56,7 +56,8 @@ function Pill() {
   useEffect(() => {
     const es = new EventSource(`/pill-events?t=${encodeURIComponent(TOKEN)}`);
     es.onmessage = m => {
-      const next: PillState | null = JSON.parse(m.data).state;
+      const e: { state: PillState | null; sendKey: string } = JSON.parse(m.data), next = e.state;
+      setSendKey(e.sendKey);
       setState(next);
       if (next?.mode !== 'running') { setTyping(false); setText(''); }   // a new card, or none
     };
@@ -145,7 +146,7 @@ function Pill() {
                   <button className="btn strong" onClick={reply}>Send</button>
                 </div>
               )}
-              {input && <div className="note">Don't type passwords here.{input.multiline ? (MAC ? ' ⌘Return sends.' : ' Ctrl+Enter sends.') : ''}</div>}
+              {input && <div className="note">Don't type passwords here.{input.multiline ? ` ${sendKey} sends.` : ''}</div>}
               {!typing && (
                 <div className="row">
                   {!input && <button className="btn else" onClick={() => { setTyping(true); keyboard(true); }}>Something else…</button>}

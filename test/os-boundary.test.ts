@@ -1,5 +1,5 @@
-// The rule src/os/ exists for: no file outside it asks which operating system this is. The lists below name the
-// files that still do. They may only shrink: a file that stops is taken off its list, and none is ever added.
+// The rule src/os/ exists for: no file outside it asks which operating system this is, the pages included (the host
+// tells them what they need). There is no list of exceptions.
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -11,11 +11,6 @@ const inOs = (f: string) => f.startsWith('os/');
 const text = (f: string) => readFileSync(join(SRC, f), 'utf8');
 const having = (re: RegExp) => all.filter(f => !inOs(f) && re.test(text(f)));
 
-/** The files that still name a system: none. */
-const NAMES: string[] = [];
-/** The pages that still ask the browser (the host will tell them instead). */
-const PAGES = ['ui/main.tsx', 'ui/pill.tsx'];
-
 /** The files a file loads when it runs (`import type` loads nothing). */
 const imports = (f: string) => [...text(f).matchAll(/^(?:import|export)\s+(?!type\b)[^'"]*?from\s+'(\.[^']+)'/gm)]
   .map(m => slashes(relative(SRC, resolve(SRC, dirname(f), m[1]))));
@@ -25,12 +20,12 @@ describe('the operating system boundary', () => {
     expect(having(/process\.platform/)).toEqual([]);
   });
 
-  it('a system is named only in src/os/, and in the files still on the list', () => {
-    expect(having(/['"](win32|darwin|linux)['"]/)).toEqual(NAMES);
+  it('a system is named only in src/os/', () => {
+    expect(having(/['"](win32|darwin|linux)['"]/)).toEqual([]);
   });
 
-  it('only the pages still on the list ask the browser', () => {
-    expect(having(/navigator\.platform/)).toEqual(PAGES);
+  it('no page asks the browser', () => {
+    expect(having(/navigator\.platform/)).toEqual([]);
   });
 
   it('nothing src/os/ loads loads src/os/ back', () => {

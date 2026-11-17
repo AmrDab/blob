@@ -69,6 +69,7 @@ function App() {
   const [reminders, setReminders] = useState<{ id: string; text: string; at: string }[]>([]);   // each stays until dismissed
   const [checks, setChecks] = useState<Check[]>([]);
   const [micProblem, setMicProblem] = useState<string | null>(null);
+  const micOfLauncher = useRef(false);                        // the host says so: the microphone belongs to the app Blob was started from
   const [typeOpen, setTypeOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [browsing, setBrowsing] = useState(false);            // the + view: every saved shortcut, to pin or remove
@@ -109,6 +110,7 @@ function App() {
       if (e.type === 'ask-done') setAsks(a => a.filter(x => x.id !== e.id));
       if (e.type === 'settings') {
         setModel(e.model); setCodex(e.brain === 'codex'); setVoice(e.voice);
+        micOfLauncher.current = e.micOfLauncher;
         // the phone's card comes once, also after the first run (for someone onboarded before phones were on)
         setFirst({ onboarded: e.onboarded, cards: [...(e.onboarded ? [] : e.firstRun), ...(e.offerPair ? [PAIR_CARD] : [])] });
       }
@@ -193,7 +195,7 @@ function App() {
     const recorder = new Recorder();
     try { await recorder.start(); } catch (err) {
       console.log('microphone refused:', (err as Error).name, (err as Error).message);
-      setMicProblem(micProblemText(err as Error, /Mac/.test(navigator.platform)));
+      setMicProblem(micProblemText(err as Error, micOfLauncher.current));
       return false;
     }
     setMicProblem(null);

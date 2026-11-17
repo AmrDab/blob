@@ -56,4 +56,6 @@ export const mac: Os = {
   topInset: 40,                                    // the menu bar and the notch
   quitHint: 'Cmd+Q on the bubble',
   micSettings: ['open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone']],
+  micOfLauncher: true,
+  sendKey: '⌘Return',
 };

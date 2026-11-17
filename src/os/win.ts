@@ -115,4 +115,5 @@ export const win: Os = {
   topInset: 0,
   quitHint: 'close the bubble from the taskbar',
   micSettings: ['cmd', ['/c', 'start', '', 'ms-settings:privacy-microphone']],
+  sendKey: 'Ctrl+Enter',
 };

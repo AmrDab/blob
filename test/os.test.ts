@@ -80,6 +80,12 @@ describe('the operating system', () => {
     expect([w, m, l].map(o => !!o.reminderSound)).toEqual([false, true, false]);
   });
 
+  it('tells the pages what they used to ask the browser: the keys that send a longer reply, and whose the microphone is', () => {
+    const [w, m, l, bsd] = ['win32', 'darwin', 'linux', 'freebsd'].map(osFor);
+    expect([w, m, l, bsd].map(o => o.sendKey)).toEqual(['Ctrl+Enter', '⌘Return', 'Ctrl+Enter', 'Ctrl+Enter']);
+    expect([w, m, l, bsd].map(o => !!o.micOfLauncher)).toEqual([false, true, false, false]);
+  });
+
   it('carries the words and sizes of each system', () => {
     const [w, m, l] = ['win32', 'darwin', 'linux'].map(osFor);
     expect([w, m, l].map(o => o.shell.label)).toEqual(['PowerShell', 'shell', 'shell']);

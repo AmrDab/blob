@@ -22,4 +22,5 @@ export const linux: Os = {
   dockGap: 56,
   topInset: 0,
   quitHint: 'close the bubble from the taskbar',
+  sendKey: 'Ctrl+Enter',
 };

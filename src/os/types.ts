@@ -111,4 +111,8 @@ export interface Os {
   quitHint: string;
   /** The command that opens the microphone's privacy settings. */
   micSettings?: [command: string, args: string[]];
+  /** The microphone is given to the app Blob was started from, and a refusal comes with no prompt: the page's card says where to switch it on. */
+  micOfLauncher?: true;
+  /** The keys that send a reply of several lines, as the pill's note names them. */
+  sendKey: string;
 }

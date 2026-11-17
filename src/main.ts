@@ -94,11 +94,12 @@ const busy = (on: boolean) => { send({ type: 'busy', busy: on }); pairing?.statu
 let ready: BrainName[] = [];
 /** The brain in use: the setting's, or the other one when only that one is ready. */
 const brainNow = () => pickBrain(settings.get().brain, ready);
-/** What the page needs of the settings: the brain and model on the chip, whether Speak listens, and the first-run questions. */
+/** What the page needs of the settings: the brain and model on the chip, whether Speak listens, the first-run questions,
+ *  and whose the microphone is (the page never asks which system this is). */
 function sendSettings(): void {
   const s = settings.get();
   send({
-    type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, offerPair: offerPair(s, !!RELAY),
+    type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, offerPair: offerPair(s, !!RELAY), micOfLauncher: !!os.micOfLauncher,
     firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || os.autostart).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
   });
 }
