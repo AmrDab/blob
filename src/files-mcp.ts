@@ -1,11 +1,9 @@
 // Blob's files server (stdio MCP): list_dir, make_folder, move (also renames), trash, open, run (a shell command,
 // shell.ts) and the saved scripts (scripts.ts). Claude Code starts it from the --mcp-config Blob writes. Trash goes to the Recycle Bin / Trash, never a permanent delete, and it and a move
 // onto an existing file ask the user on the bubble first (No, or no answer in 60 s, refuses).
-import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync, statfsSync } from 'node:fs';
-import { execFile, execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';
+import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, extname, isAbsolute, join, parse, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { askUser } from './ask.ts';
 import { os, osFor } from './os/index.ts';
 import { scriptTools, scriptsDir } from './scripts.ts';
@@ -29,8 +27,6 @@ const refused = (code: string, hint: string): ToolResult => ({ text: `[refused �
 /** The files `open` opens: documents, pictures, audio and video. Anything else may be a program, and that is run's to ask about. */
 const OPENS = new Set(('pdf txt md rtf csv log json xml doc docx xls xlsx ppt pptx odt ods odp jpg jpeg png gif bmp webp heic tif tiff svg ' +
   'mp3 wav m4a aac flac ogg mp4 mov m4v mkv avi webm').split(' '));
-/** macOS folders that are programs. */
-const BUNDLES = new Set(['.app', '.workflow', '.bundle', '.pkg', '.mpkg', '.prefpane', '.terminal']);
 /** What a mail link may carry. */
 const MAIL_FIELDS = new Set(['to', 'subject', 'body', 'cc', 'bcc']);
 
@@ -51,7 +47,7 @@ function sameFile(a: string, b: string): boolean {
 }
 
 export function fileTools(deps: FileDeps) {
-  const platform = deps.platform ?? os.id, sys = osFor(platform), bin = sys.trashName;
+  const sys = osFor(deps.platform ?? os.id), bin = sys.trashName;
   return {
     list_dir(a: { path?: unknown }): ToolResult {
       const p = fullPath(a.path);
@@ -145,9 +141,8 @@ export function fileTools(deps: FileDeps) {
         if (!existsSync(p)) return failed('NOT_FOUND', `${p} does not exist`);
         const real = realpathSync(p), ext = extname(real).toLowerCase();   // a link is judged by what it points to
         if (/^[\\/]{2}/.test(real) || deps.local?.(real) === false) return refused('NOT_LOCAL', 'open only files and folders on this computer');
-        // a Mac folder can be a program (an .app, or any bundle with Contents/Info.plist)
-        const program = (d: string) => platform === 'darwin' && (BUNDLES.has(ext) || existsSync(join(d, 'Contents', 'Info.plist')));
-        if (statSync(real).isDirectory() ? program(real) : !OPENS.has(ext.slice(1))) {
+        // a folder can be a program (a Mac .app)
+        if (statSync(real).isDirectory() ? !!sys.isProgram?.(real, ext) : !OPENS.has(ext.slice(1))) {
           return refused('NOT_OPENABLE', 'open only folders, documents, pictures, audio and video; a program goes through run, which asks the user first');
         }
         target = p;
@@ -158,87 +153,13 @@ export function fileTools(deps: FileDeps) {
   };
 }
 
-// ── the OS trash ─────────────────────────────────────────────────────────────
-
-const run = (cmd: string, args: string[]) => new Promise<void>((res, rej) =>
-  execFile(cmd, args, { windowsHide: true, timeout: 60_000 }, (err, _out, stderr) => (err ? rej(new Error(stderr.trim() || err.message)) : res())));
-
-let shDelete: ((path: string) => { result: number; aborted: boolean }) | undefined;
-
-/** Windows: SHFileOperation with undo (the Recycle Bin); a file that can't be recycled asks first instead of vanishing. */
-function windowsTrash(path: string): void {
-  if (!shDelete) {
-    const koffi = createRequire(import.meta.url)('koffi');
-    if (process.arch === 'ia32') throw new Error('32-bit Windows is not supported');
-    const OP = koffi.struct('BLOB_SHFILEOPSTRUCTW', {
-      hwnd: 'intptr_t', wFunc: 'uint32_t', pFrom: 'const char16_t *', pTo: 'const char16_t *',
-      fFlags: 'uint16_t', fAnyOperationsAborted: 'int32_t', hNameMappings: 'void *', lpszProgressTitle: 'const char16_t *',
-    });
-    const fn = koffi.load('shell32.dll').func('int __stdcall SHFileOperationW(_Inout_ BLOB_SHFILEOPSTRUCTW *op)');
-    // FO_DELETE; FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI | FOF_WANTNUKEWARNING
-    shDelete = p => {
-      const op = { hwnd: 0, wFunc: 3, pFrom: p + '\0', pTo: null, fFlags: 0x40 | 0x10 | 0x4 | 0x400 | 0x4000, fAnyOperationsAborted: 0, hNameMappings: null, lpszProgressTitle: null };
-      const result = fn(op);
-      return { result, aborted: !!op.fAnyOperationsAborted };
-    };
-  }
-  const r = shDelete(path);
-  if (r.aborted) throw new Error('cancelled');
-  if (r.result !== 0) throw new Error(`Windows error ${r.result}`);
-  if (existsSync(path)) throw new Error('it is still there');
-}
-
-// macOS: NSFileManager moves the item itself to the Trash. (Asking Finder would follow a link and trash what it
-// points at, and needs the user's OK to control Finder.) isDirectory=false stops NSURL looking at the disk, which
-// would add a trailing slash to a link to a folder and so name the folder it points at.
-const MAC_TRASH = 'function run(a){var e=Ref();if(!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError($.NSURL.fileURLWithPathIsDirectory(a[0],false),null,e))'
-  + 'throw new Error(e[0]?ObjC.unwrap(e[0].localizedDescription):"could not move it to the Trash")}';
-
-export async function osTrash(path: string, platform: string = os.id, exec: (cmd: string, args: string[]) => Promise<void> = run): Promise<void> {
-  if (platform === 'win32') return windowsTrash(path);
-  if (platform === 'darwin') return exec('osascript', ['-l', 'JavaScript', '-e', MAC_TRASH, path]);
-  return exec('gio', ['trash', '--', path]);
-}
-
-let shOpen: ((...a: unknown[]) => unknown) | undefined;
-
-/** Opens a URL or a path in its usual app, with no shell in between. */
-export async function osOpen(target: string, platform: string = os.id): Promise<void> {
-  if (platform === 'darwin') return run('open', [target]);
-  if (platform !== 'win32') return run('xdg-open', [target]);
-  shOpen ??= createRequire(import.meta.url)('koffi').load('shell32.dll')
-    .func('intptr_t __stdcall ShellExecuteW(intptr_t hwnd, const char16_t *verb, const char16_t *file, const char16_t *params, const char16_t *dir, int show)');
-  const r = shOpen!(0, null, target, null, null, 1);   // SW_SHOWNORMAL; above 32 is success
-  if (Number(r) <= 32) throw new Error(`Windows error ${r}`);
-}
-
-let driveType: ((root: string) => number) | undefined;
-// Linux statfs types of network filesystems: NFS, SMB, CIFS, SMB2, AFS, Coda, NCP, 9P
-const NET_FS = new Set([0x6969, 0x517b, 0xff534d42, 0xfe534d42, 0x5346414f, 0x73757245, 0x564c, 0x01021997]);
-
-/** Whether a path is on this computer. Windows: its drive is not a network one (a mapped Z:). Linux: not a network
- *  mount. macOS: a network share mounts under /Volumes like a disk, so there it is the path's mount type. */
-export function osLocal(path: string, platform: string = os.id): boolean {
-  if (platform === 'win32') {
-    driveType ??= createRequire(import.meta.url)('koffi').load('kernel32.dll').func('uint32_t __stdcall GetDriveTypeW(const char16_t *root)');
-    return driveType!(parse(path).root) !== 4;   // DRIVE_REMOTE
-  }
-  if (platform === 'linux') {
-    try { return !NET_FS.has(Number(statfsSync(path).type)); } catch { return false; }
-  }
-  try {   // darwin: `df` names the mount; a network one is //user@host/share or host:/path
-    const dev = execFileSync('df', ['-P', path], { encoding: 'utf8', timeout: 5000 }).trim().split('\n').pop()?.split(/\s+/)[0] ?? '';
-    return !/^\/\/|^[^/]+:/.test(dev);
-  } catch { return false; }
-}
-
 // ── the MCP server ───────────────────────────────────────────────────────────
 
 export async function serve(): Promise<void> {
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const { z } = await import('zod');
-  const tools = fileTools({ ask: q => askUser(q), trash: p => osTrash(p), launch: t => osOpen(t), local: p => osLocal(p) });
+  const tools = fileTools({ ask: q => askUser(q), trash: p => os.trash(p), launch: t => os.open(t), local: p => os.isLocal(p) });
   const server = new McpServer({ name: 'blob-files', version: '0.1.0' });
   const reply = (r: ToolResult) => ({ content: [{ type: 'text' as const, text: r.text }], isError: r.isError });
   const path = z.string().describe('Full path (a leading ~ means the home folder).');

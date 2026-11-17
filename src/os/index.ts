@@ -9,9 +9,9 @@ export type { Os };
 
 const KNOWN = new Map<string, Os>([win, mac, linux].map(o => [o.id, o]));
 
-/** A system Blob has no file for runs as Linux does, under its own name. */
+/** A system Blob has no file for runs as Linux does, under its own name (and tells a network path by its mount, with `df`). */
 export function osFor(platform: string): Os {
-  return KNOWN.get(platform) ?? { ...linux, id: platform, name: platform };
+  return KNOWN.get(platform) ?? { ...linux, id: platform, name: platform, isLocal: mac.isLocal };
 }
 
 export const os: Os = osFor(process.platform);

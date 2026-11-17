@@ -6,7 +6,6 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { os } from './os/index.ts';
 import { blobHome } from './settings.ts';
 
 /** How this Blob was started: the program, its arguments and the folder it runs in. */
@@ -24,7 +23,6 @@ export function stableNode(execPath: string, path: string, real: (p: string) => 
 }
 
 export interface AutostartDeps {
-  platform: string;
   home: string;                // the user's home folder
   blobHome: string;            // ~/.blob
   command: StartCommand;
@@ -37,7 +35,6 @@ export interface AutostartDeps {
 export const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 export const RUN_NAME = 'Blob';
 export const AGENT = 'com.blob.start';
-export const supported = (platform: string = os.id) => platform === 'win32' || platform === 'darwin';
 
 /** ~/.blob/start.cmd: go to the folder, start Blob. (`%` is doubled: in a .cmd it starts a variable.) */
 export function windowsScript(c: StartCommand): string {
@@ -72,35 +69,44 @@ ${[c.exe, ...c.args].map(a => `    <string>${x(a)}</string>`).join('\n')}
 `;
 }
 
-/** Turns it on or off. `text` says what happened, in words for the user. */
-export async function setAutostart(on: boolean, d: AutostartDeps): Promise<{ ok: boolean; text: string }> {
+/** One system's way of turning it on or off. Returns why it could not, in words for the user, when it could not. */
+export type Apply = (on: boolean, d: AutostartDeps) => Promise<string | void>;
+
+export const windowsAutostart: Apply = async (on, d) => {
+  const script = join(d.blobHome, 'start.cmd');
+  if (on) {
+    d.write(script, windowsScript(d.command));
+    if (!(await d.run('reg', ['add', RUN_KEY, '/v', RUN_NAME, '/t', 'REG_SZ', '/d', windowsRunValue(script), '/f']))) {
+      d.remove(script);
+      return 'Windows did not take the start-up entry.';
+    }
+  } else {
+    await d.run('reg', ['delete', RUN_KEY, '/v', RUN_NAME, '/f']);   // fails when there is none: that is fine
+    d.remove(script);
+  }
+};
+
+export const macAutostart: Apply = async (on, d) => {
+  const plist = join(d.home, 'Library', 'LaunchAgents', `${AGENT}.plist`);
+  if (on) d.write(plist, macPlist(d.command, d.path)); else d.remove(plist);
+};
+
+/** Turns it on or off, the system's way (`apply`: os.autostart; none where it is not built). `text` says what happened, in words for the user. */
+export async function setAutostart(on: boolean, d: AutostartDeps, apply?: Apply): Promise<{ ok: boolean; text: string }> {
+  if (!apply) return { ok: false, text: 'Starting at sign-in is not built for this system yet.' };
   try {
-    if (d.platform === 'win32') {
-      const script = join(d.blobHome, 'start.cmd');
-      if (on) {
-        d.write(script, windowsScript(d.command));
-        if (!(await d.run('reg', ['add', RUN_KEY, '/v', RUN_NAME, '/t', 'REG_SZ', '/d', windowsRunValue(script), '/f']))) {
-          d.remove(script);
-          return { ok: false, text: 'Windows did not take the start-up entry.' };
-        }
-      } else {
-        await d.run('reg', ['delete', RUN_KEY, '/v', RUN_NAME, '/f']);   // fails when there is none: that is fine
-        d.remove(script);
-      }
-    } else if (d.platform === 'darwin') {
-      const plist = join(d.home, 'Library', 'LaunchAgents', `${AGENT}.plist`);
-      if (on) d.write(plist, macPlist(d.command, d.path)); else d.remove(plist);
-    } else return { ok: false, text: 'Starting at sign-in is not built for this system yet.' };
+    const why = await apply(on, d);
+    if (why) return { ok: false, text: why };
   } catch (e) { return { ok: false, text: `Could not change it: ${(e as Error).message}` }; }
   return { ok: true, text: on ? 'Blob will start when you sign in.' : 'Blob will not start when you sign in.' };
 }
 
-/** The real system. */
-export function systemAutostart(): AutostartDeps {
+/** The real system. `exe`: the system's lasting path to this Node (os.autostart.exe), where it has one. */
+export function systemAutostart(exe?: (exe: string, path: string) => string): AutostartDeps {
   const path = process.env.PATH ?? '', command = startCommand();
-  if (os.id === 'darwin') command.exe = stableNode(command.exe, path);
+  if (exe) command.exe = exe(command.exe, path);
   return {
-    platform: os.id, home: homedir(), blobHome: blobHome(), command, path,
+    home: homedir(), blobHome: blobHome(), command, path,
     run: (command, args) => new Promise(res => execFile(command, args, { windowsHide: true, timeout: 20_000 }, err => res(!err))),
     write: (file, text) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); },
     remove: file => rmSync(file, { force: true }),

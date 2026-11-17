@@ -16,7 +16,22 @@ describe('the operating system', () => {
     const bsd = osFor('freebsd');
     expect([bsd.id, bsd.name]).toEqual(['freebsd', 'freebsd']);
     expect(osFor('toString').id).toBe('toString');
-    expect({ ...bsd, id: 'linux', name: 'Linux' }).toEqual(osFor('linux'));
+    // as the code did before src/os: Linux's ways, but a network path told by its mount, as on macOS
+    expect(bsd.isLocal).toBe(osFor('darwin').isLocal);
+    expect({ ...bsd, id: 'linux', name: 'Linux', isLocal: osFor('linux').isLocal }).toEqual(osFor('linux'));
+  });
+
+  it('has a trash, an opener and start at sign-in where the system does', async () => {
+    const [w, m, l] = ['win32', 'darwin', 'linux'].map(osFor);
+    const ran: string[][] = [], exec = async (cmd: string, args: string[]) => { ran.push([cmd, ...args]); };
+    await l.trash('/home/a/x', exec);
+    await osFor('freebsd').trash('/home/a/y', exec);
+    expect(ran).toEqual([['gio', 'trash', '--', '/home/a/x'], ['gio', 'trash', '--', '/home/a/y']]);
+    expect([w, m, l].map(o => !!o.isProgram)).toEqual([false, true, false]);       // only a Mac folder can be a program
+    expect(m.isProgram!('/nowhere/Notes.app', '.app')).toBe(true);
+    expect(m.isProgram!('/nowhere/Notes', '')).toBe(false);
+    expect([w, m, l, osFor('freebsd')].map(o => !!o.autostart)).toEqual([true, true, false, false]);
+    expect([w, m].map(o => !!o.autostart!.exe)).toEqual([false, true]);            // Homebrew's Node moves at each upgrade
   });
 
   it('carries the words and sizes of each system', () => {

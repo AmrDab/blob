@@ -1,6 +1,10 @@
 // What Blob does differently from one operating system to the next. Each system fills this in, in its own file here;
 // nothing outside src/os/ asks which system it is on (test/os-boundary.test.ts). A member that is optional is one
 // that some system does not have.
+import type { Apply } from '../autostart.ts';
+
+/** Runs a program to its end; rejects with what it wrote on stderr. */
+export type Exec = (cmd: string, args: string[]) => Promise<void>;
 
 export interface Os {
   /** Node's name for the system (process.platform). */
@@ -27,6 +31,17 @@ export interface Os {
   trashName: string;
   /** The links that open the system's settings ("ms-settings:"), where it has them. */
   settingsScheme?: string;
+  /** Moves a file or folder to the trash, never a permanent delete. `exec` is for tests. */
+  trash(path: string, exec?: Exec): Promise<void>;
+  /** Opens a URL or a path in its usual app, with no shell in between. */
+  open(target: string): Promise<void>;
+  /** False when the path is on another machine (a mapped network drive, an NFS or SMB mount). */
+  isLocal(path: string): boolean;
+  /** Whether a folder is a program, where folders can be. `ext`: its ending, lower case. */
+  isProgram?(dir: string, ext: string): boolean;
+
+  /** Starting Blob at sign-in (autostart.ts). `exe`: a path to this Node that lasts, where the one it runs from may not. */
+  autostart?: { apply: Apply; exe?(exe: string, path: string): string };
 
   /** How far the bubble starts above the bottom of the screen: clear of the taskbar or the Dock. */
   dockGap: number;

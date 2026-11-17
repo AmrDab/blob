@@ -1,31 +1,32 @@
 // Starting at sign-in, with a fake system: nothing here touches the registry, the Startup folder or LaunchAgents.
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RUN_KEY, macPlist, setAutostart, stableNode, startCommand, supported, windowsRunValue, windowsScript, type AutostartDeps } from '../src/autostart.ts';
+import { RUN_KEY, macPlist, setAutostart, stableNode, startCommand, windowsRunValue, windowsScript, type AutostartDeps } from '../src/autostart.ts';
+import { osFor } from '../src/os/index.ts';
 
 function fake(platform: string, regOk = true) {
   const ran: string[][] = [], files = new Map<string, string>();
   const deps: AutostartDeps = {
-    platform, home: join('H'), blobHome: join('H', '.blob'), path: '/opt/homebrew/bin:/usr/bin',
+    home: join('H'), blobHome: join('H', '.blob'), path: '/opt/homebrew/bin:/usr/bin',
     command: { exe: 'C:\\Program Files\\nodejs\\node.exe', args: ['--import', 'file:///C:/Users/A%20B/tsx/loader.mjs', 'C:\\blob\\src\\main.ts'], cwd: 'C:\\blob' },
     run: async (c, a) => { ran.push([c, ...a]); return regOk; },
     write: (f, t) => { files.set(f, t); },
     remove: f => { files.delete(f); },
   };
-  return { deps, ran, files };
+  return { deps, ran, files, apply: osFor(platform).autostart?.apply };
 }
 
 describe('start at sign-in', () => {
   it('takes the start command from how this Blob was started', () => {
     expect(startCommand({ execPath: '/n/node', execArgv: ['--import', 'tsx'], argv: ['/n/node', '/b/src/main.ts'], cwd: () => '/b' }))
       .toEqual({ exe: '/n/node', args: ['--import', 'tsx', '/b/src/main.ts'], cwd: '/b' });
-    expect([supported('win32'), supported('darwin'), supported('linux')]).toEqual([true, true, false]);
+    expect(['win32', 'darwin', 'linux'].map(p => !!osFor(p).autostart)).toEqual([true, true, false]);
   });
 
   it('Windows: writes ~/.blob/start.cmd and one Run value that starts it hidden', async () => {
     const f = fake('win32');
     const script = join('H', '.blob', 'start.cmd');
-    expect(await setAutostart(true, f.deps)).toEqual({ ok: true, text: 'Blob will start when you sign in.' });
+    expect(await setAutostart(true, f.deps, f.apply)).toEqual({ ok: true, text: 'Blob will start when you sign in.' });
     expect(f.files.get(script)).toBe(
       '@echo off\r\ncd /d "C:\\blob"\r\n"C:\\Program Files\\nodejs\\node.exe" "--import" "file:///C:/Users/A%%20B/tsx/loader.mjs" "C:\\blob\\src\\main.ts"\r\n');
     expect(f.ran).toEqual([['reg', 'add', RUN_KEY, '/v', 'Blob', '/t', 'REG_SZ', '/d', windowsRunValue(script), '/f']]);
@@ -37,21 +38,21 @@ describe('start at sign-in', () => {
 
   it('Windows: off removes the value and the script; a refused entry leaves nothing behind', async () => {
     const f = fake('win32');
-    await setAutostart(true, f.deps);
-    expect(await setAutostart(false, f.deps)).toEqual({ ok: true, text: 'Blob will not start when you sign in.' });
+    await setAutostart(true, f.deps, f.apply);
+    expect(await setAutostart(false, f.deps, f.apply)).toEqual({ ok: true, text: 'Blob will not start when you sign in.' });
     expect(f.ran[1]).toEqual(['reg', 'delete', RUN_KEY, '/v', 'Blob', '/f']);
     expect(f.files.size).toBe(0);
     const bad = fake('win32', false);
-    expect((await setAutostart(true, bad.deps)).ok).toBe(false);
+    expect((await setAutostart(true, bad.deps, bad.apply)).ok).toBe(false);
     expect(bad.files.size).toBe(0);
-    expect((await setAutostart(false, bad.deps)).ok).toBe(true);      // nothing to remove is fine
+    expect((await setAutostart(false, bad.deps, bad.apply)).ok).toBe(true);      // nothing to remove is fine
   });
 
   it('macOS: a LaunchAgent that starts the same command with the user\'s PATH; off removes it', async () => {
     const f = fake('darwin');
     f.deps.command = { exe: '/usr/local/bin/node', args: ['--import', 'tsx', '/Users/a/blob/src/main.ts', 'a&b<c>'], cwd: '/Users/a/blob' };
     const plist = join('H', 'Library', 'LaunchAgents', 'com.blob.start.plist');
-    expect((await setAutostart(true, f.deps)).ok).toBe(true);
+    expect((await setAutostart(true, f.deps, f.apply)).ok).toBe(true);
     const text = f.files.get(plist)!;
     expect(text).toBe(macPlist(f.deps.command, f.deps.path));
     expect(text).toMatch(/<key>Label<\/key><string>com\.blob\.start<\/string>/);
@@ -61,7 +62,7 @@ describe('start at sign-in', () => {
     expect(text).toMatch(/<key>RunAtLoad<\/key><true\/>/);
     expect(text).toMatch(/<key>ProcessType<\/key><string>Interactive<\/string>/);   // not throttled as a background job
     expect(f.ran).toEqual([]);
-    await setAutostart(false, f.deps);
+    await setAutostart(false, f.deps, f.apply);
     expect(f.files.size).toBe(0);
   });
 
@@ -74,10 +75,10 @@ describe('start at sign-in', () => {
   });
 
   it('says so where it is not built, and when the system refuses', async () => {
-    expect(await setAutostart(true, fake('linux').deps)).toEqual({ ok: false, text: 'Starting at sign-in is not built for this system yet.' });
+    expect(await setAutostart(true, fake('linux').deps, fake('linux').apply)).toEqual({ ok: false, text: 'Starting at sign-in is not built for this system yet.' });
     const f = fake('darwin');
     f.deps.write = () => { throw new Error('read-only'); };
-    expect(await setAutostart(true, f.deps)).toEqual({ ok: false, text: 'Could not change it: read-only' });
+    expect(await setAutostart(true, f.deps, f.apply)).toEqual({ ok: false, text: 'Could not change it: read-only' });
   });
 
   it('quotes the script for cmd', () => {

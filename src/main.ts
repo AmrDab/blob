@@ -16,7 +16,7 @@ import { MAX_DETAIL, Questions } from './ask.ts';
 import { clickThrough, cursorReader, follower, type ClickThrough } from './clickthrough.ts';
 import { computerBrief, computerFile, computerNow, refreshProfile } from './computer.ts';
 import { Bridge, deskTools, ownPids } from './desk.ts';
-import { setAutostart, supported as autostartSupported, systemAutostart } from './autostart.ts';
+import { setAutostart, systemAutostart } from './autostart.ts';
 import { focusKeeper, type FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
@@ -100,7 +100,7 @@ function sendSettings(): void {
   const s = settings.get();
   send({
     type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, offerPair: offerPair(s, !!RELAY),
-    firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || autostartSupported()).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
+    firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || os.autostart).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
   });
 }
 
@@ -313,7 +313,7 @@ function checkSchedule(): void {
 
 /** The startAtLogin setting changed: make the system match. If it can't be turned on, the setting goes back to off. */
 async function applyAutostart(on: boolean): Promise<void> {
-  const r = await setAutostart(on, systemAutostart());
+  const r = await setAutostart(on, systemAutostart(os.autostart?.exe), os.autostart?.apply);
   if (r.ok || !on) return;
   caption(r.text);
   try { settings.set('startAtLogin', false); } catch { /* the caption said it */ }
