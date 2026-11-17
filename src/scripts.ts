@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import type { ToolResult } from './files-mcp.ts';
 import { SECRET, UNSAFE_FACT } from './memory.ts';
-import { os } from './os/index.ts';
+import { os, osFor } from './os/index.ts';
 import { blobHome } from './settings.ts';
 import { classify, execTool, saidNo, unfit, type ShellDeps } from './shell.ts';
 
@@ -42,7 +42,6 @@ export const CONSEQUENTIAL = new RegExp('\\b(' + [
 ].join('|') + ')\\b', 'i');
 
 export const scriptsDir = (env: NodeJS.ProcessEnv = process.env) => join(blobHome(env), 'scripts');
-const ext = (platform: string) => (platform === 'win32' ? '.ps1' : '.sh');
 const indexFile = (dir: string) => join(dir, 'scripts.json');
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const failed = (code: string, hint: string): ToolResult => ({ text: `[failed · ${code} · hint: ${hint}]`, isError: true });
@@ -89,7 +88,7 @@ export function scriptsBrief(dir: string, max: number = MAX_BRIEF): { name: stri
 
 export function scriptTools(d: ScriptDeps) {
   const platform = d.platform ?? os.id;
-  const fileOf = (name: string) => join(d.dir, name + ext(platform));
+  const fileOf = (name: string) => join(d.dir, name + osFor(platform).shell.scriptExt);
   const nameOf = (v: unknown): string | ToolResult => {
     const name = typeof v === 'string' ? v.trim() : '';
     if (!SLUG.test(name) || name.length > MAX_NAME || DEVICE.test(name)) {

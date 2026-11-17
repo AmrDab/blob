@@ -473,8 +473,7 @@ function watchMac(): void {
 
 function openMicSettings(): void {
   const o = { windowsHide: true, detached: true, stdio: 'ignore' as const };
-  if (os.id === 'win32') spawn('cmd', ['/c', 'start', '', 'ms-settings:privacy-microphone'], o).unref();
-  else if (os.id === 'darwin') spawn('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'], o).unref();
+  if (os.micSettings) spawn(...os.micSettings, o).unref();
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
@@ -693,7 +692,7 @@ const win = app.createBrowserWindow({
   const s = m?.scaleFactor ?? 1;
   const right = m ? (m.position.x + m.size.width) / s : 1280;
   const bottom = m ? (m.position.y + m.size.height) / s : 800;
-  win.setPosition(Math.round(right - START.w - 16), Math.round(bottom - START.h - (os.id === 'darwin' ? 90 : 56)), true);   // a Dock is taller
+  win.setPosition(Math.round(right - START.w - 16), Math.round(bottom - START.h - os.dockGap), true);
 }
 // The page asks for the size it needs. Keep the bottom-right corner where it is (the user may have dragged the bubble)
 // and grow up and left.
@@ -765,7 +764,7 @@ function placePill(w: number, h: number): void {
   const next = { w: Math.round(Math.min(520, Math.max(120, w))), h: Math.round(Math.min(700, Math.max(40, h))) };
   const m = pillWin.getPrimaryMonitor();
   const s = m?.scaleFactor ?? 1;
-  const left = m ? m.position.x / s : 0, width = m ? m.size.width / s : 1280, top = (m ? m.position.y / s : 0) + (os.id === 'darwin' ? 40 : 0);   // below the menu bar and the notch
+  const left = m ? m.position.x / s : 0, width = m ? m.size.width / s : 1280, top = (m ? m.position.y / s : 0) + os.topInset;   // below the menu bar and the notch
   pillWin.setSize(next.w, next.h, true);
   pillWin.setPosition(Math.round(left + (width - next.w) / 2), Math.round(top), true);
 }
@@ -813,4 +812,4 @@ process.on('SIGINT', quit);
 process.on('SIGTERM', quit);
 process.on('exit', () => brain.stop());
 app.run();
-console.log(`Blob: http://127.0.0.1:${port} (${os.id === 'darwin' ? 'Cmd+Q on the bubble' : 'close the bubble from the taskbar'}, or Ctrl+C here)`);
+console.log(`Blob: http://127.0.0.1:${port} (${os.quitHint}, or Ctrl+C here)`);

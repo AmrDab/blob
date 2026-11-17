@@ -14,7 +14,7 @@ const having = (re: RegExp) => all.filter(f => !inOs(f) && re.test(text(f)));
 /** The files that still name a system. */
 const NAMES = [
   'autostart.ts', 'brain.ts', 'clickthrough.ts', 'computer.ts', 'files-mcp.ts', 'focus.ts', 'mac.ts', 'main.ts', 'overlay.ts',
-  'own-ui.ts', 'persona.ts', 'scripts.ts', 'setup.ts', 'shell.ts', 'watch.ts',
+  'own-ui.ts', 'persona.ts', 'setup.ts', 'shell.ts', 'watch.ts',
 ];
 /** The pages that still ask the browser (the host will tell them instead). */
 const PAGES = ['ui/main.tsx', 'ui/pill.tsx'];

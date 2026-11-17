@@ -2,14 +2,13 @@
 // Codex: developer_instructions). What Blob can do, the order to try it in, and its settings and memory as they are
 // now. Plain facts: Blob has no character to play.
 import type { Tier } from './ladder.ts';
-import { os } from './os/index.ts';
+import { os, osFor } from './os/index.ts';
 import { BRAIN_NAME, type BrainName, type Settings } from './settings.ts';
 
 const MODEL_NAME: Record<Settings['model'], string> = {
   auto: 'Auto (Haiku first, Sonnet then Opus when needed)',
   default: "Claude Code's default model", sonnet: 'Sonnet', haiku: 'Haiku', opus: 'Opus',
 };
-const SYSTEM: Record<string, string> = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' };
 const DAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const onOff = (b: boolean) => (b ? 'on' : 'off');
 const two = (n: number) => String(n).padStart(2, '0');
@@ -24,15 +23,12 @@ export function persona(s: Settings, o: {
   brain?: BrainName; tier?: Tier; now?: Date; platform?: string;
 } = {}): string {
   const now = o.now ?? new Date(), platform = o.platform ?? os.id, brain = o.brain ?? s.brain;
-  const win = platform === 'win32';
-  const looks = win
-    ? 'Get-ChildItem, Get-Content, Select-String, Get-Process, Get-Command, Test-Path, winget list, winget search, --version'
-    : 'ls, cat, grep, ps, which, --version';
+  const win = platform === 'win32', sys = osFor(platform);
   const auto = brain !== 'codex' && s.model === 'auto';
   const model = brain === 'codex' ? "Codex's default model" : auto && o.tier ? `Auto: ${MODEL_NAME[o.tier]} now` : MODEL_NAME[s.model];
   const next = !auto ? '' : o.tier === 'haiku' ? 'Sonnet' : o.tier === 'sonnet' ? 'Opus' : '';   // who takes over from a tier that can step up
   return [
-    `Blob is an assistant on this computer (${SYSTEM[platform] ?? platform}). It carries out any task the user gives ` +
+    `Blob is an assistant on this computer (${sys.name}). It carries out any task the user gives ` +
       'it here: apps, files, the web, system settings, commands. Local time now: ' +
       `${DAY[now.getDay()]} ${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}:${two(now.getMinutes())}.`,
     'Replies: do the task, then answer in one short plain sentence that it is done, or with the information asked ' +
@@ -42,13 +38,13 @@ export function persona(s: Settings, o: {
     'Fastest route: before acting, pick the quickest reliable way, in this order. The screen is the last resort.\n' +
       '1. Know it: a question about the world that needs nothing from this computer is answered without touching ' +
       `anything. Anything about this computer is looked up (2-${win ? 6 : 5}), never guessed.\n` +
-      `2. Open: a web page or a link (${win ? 'ms-settings:, ' : platform === 'darwin' ? 'x-apple.systempreferences:, ' : ''}mailto:), a file or a folder, in one call with the files tool ` +
+      `2. Open: a web page or a link (${sys.settingsScheme ? `${sys.settingsScheme}, ` : ''}mailto:), a file or a folder, in one call with the files tool ` +
       `open. An app by name, in one call with ${win ? "the desk tool open (it gives back the app's window)" : 'clawdcursor system open_app'}. ` +
       'Never by clicking through menus.\n' +
       '3. A saved script: when one of the saved scripts below does it, the files tool script_run with its name, ' +
       'in one call. One that only looks, or that the user already allowed as it is now, runs at once.\n' +
-      `4. A command: the files tool run (${win ? 'PowerShell' : 'the login shell'}, starts in the home folder), ` +
-      `when a command or CLI does the job. A command that only looks (${looks}) runs at once. Anything else, ` +
+      `4. A command: the files tool run (${sys.shell.name}, starts in the home folder), ` +
+      `when a command or CLI does the job. A command that only looks (${sys.shell.looks}) runs at once. Anything else, ` +
       'and anything with ; & > < $( ) or a pipe into a command that changes something, is shown to the user word ' +
       'for word with Yes and No first: keep it short (500 characters at most) and to one purpose. Never put a ' +
       'password, key or token in a command.\n' +

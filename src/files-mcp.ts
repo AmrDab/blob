@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse, resolve } from 'node:path';
 import { askUser } from './ask.ts';
-import { os } from './os/index.ts';
+import { os, osFor } from './os/index.ts';
 import { scriptTools, scriptsDir } from './scripts.ts';
 import { MAX_COMMAND, runTool, systemExec } from './shell.ts';
 
@@ -26,7 +26,6 @@ const MAX_LIST = 500;
 const ok = (text: string): ToolResult => ({ text: `${text}\n[confirmed]`, isError: false });
 const failed = (code: string, hint: string): ToolResult => ({ text: `[failed · ${code} · hint: ${hint}]`, isError: true });
 const refused = (code: string, hint: string): ToolResult => ({ text: `[refused · ${code} · hint: ${hint}]`, isError: true });
-const binName = (platform: string) => (platform === 'win32' ? 'Recycle Bin' : 'Trash');
 /** The files `open` opens: documents, pictures, audio and video. Anything else may be a program, and that is run's to ask about. */
 const OPENS = new Set(('pdf txt md rtf csv log json xml doc docx xls xlsx ppt pptx odt ods odp jpg jpeg png gif bmp webp heic tif tiff svg ' +
   'mp3 wav m4a aac flac ogg mp4 mov m4v mkv avi webm').split(' '));
@@ -52,7 +51,7 @@ function sameFile(a: string, b: string): boolean {
 }
 
 export function fileTools(deps: FileDeps) {
-  const platform = deps.platform ?? os.id;
+  const platform = deps.platform ?? os.id, sys = osFor(platform), bin = sys.trashName;
   return {
     list_dir(a: { path?: unknown }): ToolResult {
       const p = fullPath(a.path);
@@ -90,10 +89,10 @@ export function fileTools(deps: FileDeps) {
         if (statSync(to).isDirectory()) {
           return failed('TARGET_IS_FOLDER', `"to" is the full new path; to put it inside that folder use ${join(to, basename(from))}`);
         }
-        if (!(await deps.ask(`Replace "${to}" with "${from}"? The old one goes to the ${binName(platform)}.`))) {
+        if (!(await deps.ask(`Replace "${to}" with "${from}"? The old one goes to the ${bin}.`))) {
           return refused('USER_SAID_NO', 'the user did not agree to replace it; ask them what to do instead');
         }
-        try { await deps.trash(to); } catch (e) { return failed('TRASH_FAILED', `could not move the old ${to} to the ${binName(platform)}: ${(e as Error).message}`); }
+        try { await deps.trash(to); } catch (e) { return failed('TRASH_FAILED', `could not move the old ${to} to the ${bin}: ${(e as Error).message}`); }
       }
       try {
         renameSync(from, to);
@@ -110,11 +109,11 @@ export function fileTools(deps: FileDeps) {
       const p = fullPath(a.path);
       if (typeof p !== 'string') return p;
       if (!existsSync(p)) return failed('NOT_FOUND', `${p} does not exist`);
-      if (!(await deps.ask(`Move "${p}" to the ${binName(platform)}?`))) {
+      if (!(await deps.ask(`Move "${p}" to the ${bin}?`))) {
         return refused('USER_SAID_NO', 'the user did not agree; leave it where it is');
       }
       try { await deps.trash(p); } catch (e) { return failed('TRASH_FAILED', (e as Error).message); }
-      return ok(`Moved ${p} to the ${binName(platform)}.`);
+      return ok(`Moved ${p} to the ${bin}.`);
     },
 
     /** A web, mail or settings link, a folder, or a document: never a program, so there is no question. */
@@ -124,7 +123,7 @@ export function fileTools(deps: FileDeps) {
         let url;
         if (/["\s\x00-\x1f]/.test(target)) return failed('BAD_URL', 'a URL has no spaces or quotes: encode them');   // nothing extra for the app's command line
         try { url = new URL(target); } catch { return failed('BAD_URL', `"${target}" is not a URL`); }
-        const schemes = ['http:', 'https:', 'mailto:', ...(platform === 'win32' ? ['ms-settings:'] : platform === 'darwin' ? ['x-apple.systempreferences:'] : [])];
+        const schemes = ['http:', 'https:', 'mailto:', ...(sys.settingsScheme ? [sys.settingsScheme] : [])];
         if (!schemes.includes(url.protocol)) return refused('SCHEME', 'open only web, mail and settings links');
         // a mail link fills in a new message, nothing more: no attach= of a file from this computer. What opens is
         // rebuilt from what was checked, so a mail app that reads the link another way sees the same fields.
@@ -264,7 +263,7 @@ export async function serve(): Promise<void> {
     description: 'Open a web page, a mailto: or settings link, a file or a folder in its usual app. Documents, pictures, audio, video and folders only; a program goes through run.',
     inputSchema: { target: z.string().describe('A URL, or a full path (a leading ~ means the home folder).') },
   }, async a => reply(await tools.open(a)));
-  const shell = os.id === 'win32' ? 'PowerShell' : 'shell';
+  const shell = os.shell.label;
   const shellDeps = { ask: (q: string, detail: string) => askUser(q, { detail }), exec: systemExec };
   server.registerTool('run', {
     description: `Run one ${shell} command in the home folder and get its output. A command that only looks ` +

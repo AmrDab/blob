@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { claudeCommand, cleanEnv, clawdcursorCommand, codexCommand, type ServerCommand } from './brain.ts';
-import { os } from './os/index.ts';
+import { os, osFor } from './os/index.ts';
 import { BRAINS, type BrainName } from './settings.ts';
 
 /**
@@ -93,7 +93,7 @@ export async function runChecks(platform: string = os.id, run: Runner = shell, h
   // Blob needs one of the two. With none installed both installs are offered; with one installed, its sign-in.
   checks.push({
     id: 'brain', ok: has.claude || has.codex, label: 'Install Claude Code or Codex', ready,
-    fix: platform === 'win32' ? 'irm https://claude.ai/install.ps1 | iex' : 'curl -fsSL https://claude.ai/install.sh | bash',
+    fix: osFor(platform).claudeInstall,
     alt: 'npm i -g @openai/codex',
     text: 'Blob thinks with your own Claude Code or Codex. Copy one of these, run it in a terminal, then come back.',
   });
