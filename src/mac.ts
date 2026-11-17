@@ -180,10 +180,20 @@ export function macSetup(app: Pick<Application, 'setMenu'>, quit: () => void, de
   step('running as a plain macOS app, with a Dock icon', () => { objc = (deps.load ?? loadObjC)(); });
   if (!objc) return;
   const oc = objc;
-  step('the first click on Blob only brings it forward', () => {
-    if (!acceptFirstClick(oc, deps.arch)) throw new Error('no web view class');
-  });
+  // The web view itself (and so its class) is made in the window library's first event pump, not by createWebview:
+  // looked for now and at each launch look, said only when the last one still finds none.
+  let firstClick = false;
+  const tryFirstClick = (last: boolean) => {
+    if (!firstClick) step('the first click on Blob only brings it forward', () => {
+      firstClick = acceptFirstClick(oc, deps.arch);
+      if (!firstClick && last) throw new Error('no web view class');
+    });
+  };
+  tryFirstClick(false);
   step('Cmd+Q closes Blob without its clean-up', () => quitOnTerminate(oc, quit));
   const later = deps.later ?? setTimeout;
-  for (const ms of LAUNCH_MS) later(() => step('Blob keeps its Dock icon and stays on one Space', () => afterLaunch(oc)), ms);
+  LAUNCH_MS.forEach((ms, i) => later(() => {
+    tryFirstClick(i === LAUNCH_MS.length - 1);
+    step('Blob keeps its Dock icon and stays on one Space', () => afterLaunch(oc));
+  }, ms));
 }

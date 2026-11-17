@@ -134,6 +134,21 @@ describe('the whole set-up', () => {
     expect(lines.every(l => l.startsWith('Blob: '))).toBe(true);
   });
 
+  it('finds the web view class when it comes later (made in the first event pump), once, and says nothing', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const opts = { webview: false, windows: [0] }, f = fake(opts);
+    const timers: Array<() => void> = [];
+    macSetup({ setMenu: vi.fn() }, () => {}, { platform: 'darwin', arch: 'arm64', load: () => f.objc, later: fn => timers.push(fn) });
+    expect(f.replaced.has('acceptsFirstMouse:')).toBe(false);
+    timers[0]();                                 // still not made at the first look
+    opts.webview = true;
+    const replace = vi.spyOn(f.objc, 'replace');
+    timers.slice(1).forEach(t => t());
+    expect(f.replaced.get('acceptsFirstMouse:')?.cls).toBe(f.webClass);
+    expect(replace).toHaveBeenCalledTimes(1);   // not again at the later looks
+    expect(log).not.toHaveBeenCalled();
+  });
+
   it('stops quietly, with the menu set, when the runtime cannot be loaded', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const setMenu = vi.fn(), later = vi.fn();
