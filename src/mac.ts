@@ -113,7 +113,12 @@ export function loadFrontApp(): FrontApp {
  */
 export function loadRunningApps(self: number = process.pid): () => { apps: string[]; front: string } {
   const objc = loadObjC();
-  const lib = createRequire(import.meta.url)('koffi').load('/usr/lib/libobjc.A.dylib');
+  const koffi = createRequire(import.meta.url)('koffi');
+  // NSWorkspace lives in AppKit: loaded by the web view inside Blob, but not in a plain node process, where the
+  // class would be nil and every read silently empty.
+  koffi.load('/System/Library/Frameworks/AppKit.framework/AppKit');
+  if (!objc.cls('NSWorkspace')) throw new Error('NSWorkspace is not available');
+  const lib = koffi.load('/usr/lib/libobjc.A.dylib');
   const selector = lib.func('void *sel_registerName(const char *name)');
   const pidOf = lib.func('int objc_msgSend(void *obj, void *sel)');                              // pid_t
   const text = lib.func('const char *objc_msgSend(void *obj, void *sel)');
