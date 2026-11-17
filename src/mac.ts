@@ -13,6 +13,8 @@ export interface ObjC {
   /** null when there is no such class. */
   cls(name: string): unknown;
   classOf(obj: unknown): unknown;
+  /** The runtime name of a class. */
+  name(cls: unknown): string;
   /** A message with no argument that answers an object. */
   send(obj: unknown, sel: string): unknown;
   /** A message with one whole-number argument that answers an object (objectAtIndex:). */
@@ -35,6 +37,7 @@ export function loadObjC(): ObjC {
   const lib = koffi.load('/usr/lib/libobjc.A.dylib');
   const getClass = lib.func('void *objc_getClass(const char *name)');
   const objectGetClass = lib.func('void *object_getClass(void *obj)');
+  const className = lib.func('const char *class_getName(void *cls)');
   const selector = lib.func('void *sel_registerName(const char *name)');
   const replaceMethod = lib.func('void *class_replaceMethod(void *cls, void *sel, void *imp, const char *types)');
   // objc_msgSend has no one signature: each shape of call is declared on its own
@@ -47,6 +50,7 @@ export function loadObjC(): ObjC {
   return loaded = {
     cls: name => getClass(name),
     classOf: obj => objectGetClass(obj),
+    name: cls => String(className(cls) ?? ''),
     send: (obj, sel) => send(obj, selector(sel)),
     at: (obj, sel, i) => at(obj, selector(sel), i),
     num: (obj, sel) => Number(num(obj, selector(sel))),
@@ -111,16 +115,33 @@ export const EDIT_MENU: MenuOptions = {
   }],
 };
 
+/** A web view's class. Its runtime name carries the library's module path and version, e.g. "wry::wkwebview::class::wry_web_view::WryWebView0.55.1". */
+export const WEB_VIEW_CLASS = /(?:^|::|_)WryWebView[\d.]*$/;
+
+/** The classes of the web views in Blob's windows, found by walking each window's views (a few levels down). */
+export function webViewClasses(objc: ObjC): unknown[] {
+  const found = new Map<string, unknown>();
+  const walk = (view: unknown, depth: number): void => {
+    if (!view || depth > 4) return;
+    const cls = objc.classOf(view), name = objc.name(cls);
+    if (WEB_VIEW_CLASS.test(name)) { found.set(name, cls); return; }
+    const subs = objc.send(view, 'subviews');
+    if (subs) for (let i = 0, n = objc.num(subs, 'count'); i < n; i++) walk(objc.at(subs, 'objectAtIndex:', i), depth + 1);
+  };
+  const wins = objc.send(objc.send(objc.cls('NSApplication'), 'sharedApplication'), 'windows');
+  if (wins) for (let i = 0, n = objc.num(wins, 'count'); i < n; i++) walk(objc.send(objc.at(wins, 'objectAtIndex:', i), 'contentView'), 0);
+  return [...found.values()];
+}
+
 /**
  * The web view's class says "no" to a first click on a window that is not in front, so the click only brings Blob
- * forward. Its answer is replaced with "yes", for every web view (the bubble and the pill share the class). The class
- * exists only once a web view was made. False: there is no such class.
+ * forward. Its answer is replaced with "yes", for every web view class found (the bubble and the pill share one).
+ * The web views exist only once the window library made them. False: none was found.
  */
 export function acceptFirstClick(objc: ObjC, arch: string = process.arch): boolean {
-  const cls = objc.cls('WryWebView');
-  if (!cls) return false;
-  objc.replace(cls, 'acceptsFirstMouse:', arch === 'arm64' ? 'B@:@' : 'c@:@', () => true);   // BOOL is a char on Intel
-  return true;
+  const classes = webViewClasses(objc);
+  for (const cls of classes) objc.replace(cls, 'acceptsFirstMouse:', arch === 'arm64' ? 'B@:@' : 'c@:@', () => true);   // BOOL is a char on Intel
+  return classes.length > 0;
 }
 
 /**

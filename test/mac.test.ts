@@ -1,20 +1,33 @@
 // The macOS-only native set-up, against a fake Objective-C runtime: nothing here loads a system library.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EDIT_MENU, acceptFirstClick, afterLaunch, everywhere, loadObjC, macSetup, quitOnTerminate, type ObjC } from '../src/mac.ts';
+import { EDIT_MENU, WEB_VIEW_CLASS, acceptFirstClick, afterLaunch, everywhere, loadObjC, macSetup, quitOnTerminate, type ObjC } from '../src/mac.ts';
 
-interface FakeWin { behavior: number; canHide: number }
-/** A runtime with an app, its windows and a record of what was replaced and set. */
+interface FakeClass { name: string }
+interface FakeView { cls: FakeClass; subs: () => FakeView[] }
+interface FakeWin { behavior: number; canHide: number; content: FakeView }
+/**
+ * A runtime with an app, its windows and a record of what was replaced and set. Each window's content view holds a
+ * web view (named as the window library names it at run time) while `webview` is not false; it is read on each walk.
+ */
 function fake(opts: { webview?: boolean; policy?: number; windows?: number[] } = {}) {
   const state = { policy: opts.policy ?? 0, sets: [] as string[] };
-  const wins: FakeWin[] = (opts.windows ?? []).map(behavior => ({ behavior, canHide: 1 }));
-  const nsapp = { app: true }, appClass = { cls: 'TaoApp' }, webClass = { cls: 'WryWebView' };
+  const webClass: FakeClass = { name: 'wry::wkwebview::class::wry_web_view::WryWebView0.55.1' };
+  const parentClass: FakeClass = { name: 'wry::wkwebview::class::wry_web_view_parent::WryWebViewParent0.55.1' };
+  const webView: FakeView = { cls: webClass, subs: () => [] };
+  const wins: FakeWin[] = (opts.windows ?? []).map(behavior => ({
+    behavior, canHide: 1,
+    content: { cls: parentClass, subs: () => (opts.webview === false ? [] : [webView]) },
+  }));
+  const nsapp = { app: true }, appClass: FakeClass = { name: 'TaoApp' };
   const replaced = new Map<string, { cls: unknown; types: string; fn: () => boolean | void }>();
   const objc: ObjC = {
-    cls: name => (name === 'NSApplication' ? { cls: name } : name === 'WryWebView' && opts.webview !== false ? webClass : null),
-    classOf: obj => (obj === nsapp ? appClass : null),
-    send: (_obj, sel) => (sel === 'sharedApplication' ? nsapp : sel === 'windows' ? wins : null),
-    at: (obj, _sel, i) => (obj as FakeWin[])[i],
-    num: (obj, sel) => (sel === 'activationPolicy' ? state.policy : sel === 'count' ? wins.length : (obj as FakeWin).behavior),
+    cls: name => (name === 'NSApplication' ? { name } : null),
+    classOf: obj => (obj === nsapp ? appClass : (obj as FakeView).cls),
+    name: cls => (cls as FakeClass).name,
+    send: (obj, sel) => (sel === 'sharedApplication' ? nsapp : sel === 'windows' ? wins
+      : sel === 'contentView' ? (obj as FakeWin).content : sel === 'subviews' ? (obj as FakeView).subs() : null),
+    at: (obj, _sel, i) => (obj as unknown[])[i],
+    num: (obj, sel) => (sel === 'activationPolicy' ? state.policy : sel === 'count' ? (obj as unknown[]).length : (obj as FakeWin).behavior),
     set(obj, sel, value) {
       state.sets.push(sel);
       if (sel === 'setActivationPolicy:') state.policy = value;
@@ -38,21 +51,27 @@ describe('the Edit menu', () => {
 
 describe('the first click on Blob', () => {
   it("reaches the page: the web view's answer becomes yes, with the BOOL of the machine", () => {
-    const arm = fake();
+    const arm = fake({ windows: [0, 0] });     // the bubble and the pill: one class, replaced once
+    const replace = vi.spyOn(arm.objc, 'replace');
     expect(acceptFirstClick(arm.objc, 'arm64')).toBe(true);
+    expect(replace).toHaveBeenCalledTimes(1);
     const m = arm.replaced.get('acceptsFirstMouse:')!;
     expect(m.cls).toBe(arm.webClass);
     expect(m.types).toBe('B@:@');
     expect(m.fn()).toBe(true);
-    const intel = fake();
+    const intel = fake({ windows: [0] });
     acceptFirstClick(intel.objc, 'x64');
     expect(intel.replaced.get('acceptsFirstMouse:')!.types).toBe('c@:@');
   });
 
-  it('is left alone when there is no web view class', () => {
-    const f = fake({ webview: false });
-    expect(acceptFirstClick(f.objc, 'arm64')).toBe(false);
-    expect(f.replaced.size).toBe(0);
+  it('is left alone when no window holds a web view yet', () => {
+    expect(acceptFirstClick(fake({ webview: false, windows: [0] }).objc, 'arm64')).toBe(false);
+    expect(acceptFirstClick(fake().objc, 'arm64')).toBe(false);
+  });
+
+  it("knows the web view's class by its run-time name, a versioned one or an observed copy, and not its parent or delegates", () => {
+    for (const n of ['WryWebView', 'wry::wkwebview::class::wry_web_view::WryWebView0.55.1', 'NSKVONotifying_wry::wkwebview::class::wry_web_view::WryWebView0.55.1']) expect(WEB_VIEW_CLASS.test(n)).toBe(true);
+    for (const n of ['wry::wkwebview::class::wry_web_view_parent::WryWebViewParent0.55.1', 'WryWebViewDelegate', 'WryWebViewUIDelegate0.55.1', 'WKWebView', 'MyWryWebView']) expect(WEB_VIEW_CLASS.test(n)).toBe(false);
   });
 });
 
