@@ -33,7 +33,7 @@ import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } fro
 import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, type BrainName, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
-import { fix, fixNote, macNeeds, openPane, pickBrain, runChecks, type Check } from './setup.ts';
+import { fix, fixNote, macNeeds, pickBrain, runChecks, type Check } from './setup.ts';
 import { Watcher, activityFile, clawdcursorReader } from './watch.ts';
 
 const HOME = blobHome();
@@ -460,11 +460,13 @@ async function setupFix(id: string): Promise<void> {
 let macTimer: ReturnType<typeof setTimeout> | undefined;
 let macPane = '';
 function watchMac(): void {
+  const panes = os.permissionPanes;
+  if (!panes) return;
   clearTimeout(macTimer);
   macTimer = setTimeout(async () => {
-    const m = await macNeeds().catch(() => ({ ok: false, pane: undefined }));
+    const m = await macNeeds(panes).catch(() => ({ ok: false, pane: undefined }));
     if (m.ok) { macPane = ''; await check(); return; }
-    if (m.pane && m.pane !== macPane) openPane(macPane = m.pane);   // Accessibility first, Screen Recording once that is on
+    if (m.pane && m.pane !== macPane) void os.open(macPane = m.pane).catch(() => {});   // Accessibility first, Screen Recording once that is on
     watchMac();
   }, 2000);
   macTimer.unref();

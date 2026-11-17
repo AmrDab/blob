@@ -48,6 +48,10 @@ export const mac: Os = {
   hideFromCapture: protect,
   overlay: win => macOverlay(win),
   reminderSound() { spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore' }).on('error', () => {}); },
+  permissionPanes: {
+    accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+    screenRecording: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+  },
   dockGap: 90,                                     // a Dock is taller than a taskbar
   topInset: 40,                                    // the menu bar and the notch
   quitHint: 'Cmd+Q on the bubble',

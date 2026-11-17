@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { osFor } from '../src/os/index.ts';
 import * as setup from '../src/setup.ts';
-import { MAC_PANES, fix, macNeeds, parseAuthStatus, parseMacStatus, pickBrain, runChecks, type Runner } from '../src/setup.ts';
+import { fix, macNeeds, parseAuthStatus, parseMacStatus, pickBrain, runChecks, type Runner } from '../src/setup.ts';
 
 describe('first-run check', () => {
   it('reads `claude auth status --json`', () => {
@@ -137,18 +138,20 @@ describe('one-tap setup, with a fake runner', () => {
 
   it('macOS: asks for the permissions with `clawdcursor grant`, and opens Accessibility first, then Screen Recording', async () => {
     pc.clawdcursor = true;
+    const MAC_PANES = osFor('darwin').permissionPanes!;
+    expect(['win32', 'linux'].map(p => osFor(p).permissionPanes)).toEqual([undefined, undefined]);
     expect(await failing('darwin')).toEqual(['consent', 'mac']);
     expect(await failing('win32')).toEqual(['consent']);              // only a Mac asks
     expect(await fix('mac', run, 'darwin')).toBe(true);
     expect(ran).toContain('clawdcursor grant');
     expect(await fix('mac', run, 'win32')).toBe(false);
-    expect(await macNeeds(run)).toEqual({ ok: false, pane: MAC_PANES.accessibility });
+    expect(await macNeeds(MAC_PANES, run)).toEqual({ ok: false, pane: MAC_PANES.accessibility });
     pc.mac = 'Accessibility: Granted\nScreen Recording: Not granted';
-    expect(await macNeeds(run)).toEqual({ ok: false, pane: MAC_PANES.screenRecording });
+    expect(await macNeeds(MAC_PANES, run)).toEqual({ ok: false, pane: MAC_PANES.screenRecording });
     pc.mac = 'Accessibility: Granted\nScreen Recording: Granted';
-    expect(await macNeeds(run)).toEqual({ ok: true });
+    expect(await macNeeds(MAC_PANES, run)).toEqual({ ok: true });
     pc.mac = 'Accessibility: Granted\nScreen Recording: Could not check (optional)';
-    expect(await macNeeds(run)).toEqual({ ok: true });                // the card clears
+    expect(await macNeeds(MAC_PANES, run)).toEqual({ ok: true });                // the card clears
     expect(MAC_PANES.accessibility).toMatch(/^x-apple\.systempreferences:.*Privacy_Accessibility$/);
     expect(MAC_PANES.screenRecording).toMatch(/^x-apple\.systempreferences:.*Privacy_ScreenCapture$/);
   });

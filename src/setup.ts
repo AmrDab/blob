@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { claudeCommand, cleanEnv, clawdcursorCommand, codexCommand, type ServerCommand } from './brain.ts';
-import { os, osFor } from './os/index.ts';
+import { os, osFor, type Os } from './os/index.ts';
 import { BRAINS, type BrainName } from './settings.ts';
 
 /**
@@ -31,12 +31,6 @@ const MAC_TEXT =
   'opens (it can be listed as the app you started Blob from, or as "node" when Blob started by itself at sign-in). I look again every 2 seconds, so there is nothing to ' +
   'press here. Screen Recording may only count after you quit Blob and open it again.';
 
-/** The System Settings panes for the two permissions. */
-export const MAC_PANES = {
-  accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
-  screenRecording: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
-};
-
 /** `claude auth status --json` → signed in? (It may exit non-zero when signed out; only the JSON counts.) */
 export function parseAuthStatus(stdout: string): boolean {
   try { return JSON.parse(stdout).loggedIn === true; } catch { return false; }
@@ -60,11 +54,11 @@ function clawd(args: string[]): [string, string[]] {
   return [cc.command, [...cc.args.filter(a => a !== 'mcp' && a !== '--compact'), ...args]];
 }
 
-/** macOS: which permission is still missing, and the pane to switch it on in (Accessibility first). */
-export async function macNeeds(run: Runner = shell): Promise<{ ok: boolean; pane?: string }> {
+/** macOS: which permission is still missing, and the pane to switch it on in (Accessibility first). `panes`: os.permissionPanes. */
+export async function macNeeds(panes: NonNullable<Os['permissionPanes']>, run: Runner = shell): Promise<{ ok: boolean; pane?: string }> {
   const m = parseMacStatus((await run(...clawd(['status']))).out);
-  if (!m.accessibility) return { ok: false, pane: MAC_PANES.accessibility };
-  if (!m.screenRecording) return { ok: false, pane: MAC_PANES.screenRecording };
+  if (!m.accessibility) return { ok: false, pane: panes.accessibility };
+  if (!m.screenRecording) return { ok: false, pane: panes.screenRecording };
   return { ok: true };
 }
 
@@ -116,8 +110,9 @@ export async function runChecks(platform: string = os.id, run: Runner = shell, h
     id: 'consent', ok: existsSync(join(home, '.clawdcursor', 'consent')),
     label: 'Let Blob use this computer', fix: 'clawdcursor consent --accept', tap: 'Agree', text: CONSENT_TEXT,
   });
-  if (platform === 'darwin') {
-    checks.push({ id: 'mac', ok: (await macNeeds(run)).ok, label: 'Allow Blob to use your Mac', fix: 'clawdcursor grant', tap: 'Allow', text: MAC_TEXT });
+  const panes = osFor(platform).permissionPanes;
+  if (panes) {
+    checks.push({ id: 'mac', ok: (await macNeeds(panes, run)).ok, label: 'Allow Blob to use your Mac', fix: 'clawdcursor grant', tap: 'Allow', text: MAC_TEXT });
   }
   return checks;
 }
@@ -144,11 +139,6 @@ export async function fix(id: string, run: Runner = shell, platform: string = os
     return r.ok;
   }
   if (id === 'consent') return (await run(...clawd(['consent', '--accept']))).ok;
-  if (id === 'mac' && platform === 'darwin') return (await run(...clawd(['grant']), 40_000)).ok;
+  if (id === 'mac' && osFor(platform).permissionPanes) return (await run(...clawd(['grant']), 40_000)).ok;
   return false;
-}
-
-/** macOS: opens a System Settings pane. */
-export function openPane(url: string, run: Runner = shell): void {
-  void run('open', [url]);
 }

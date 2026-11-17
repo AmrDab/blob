@@ -11,8 +11,8 @@ const inOs = (f: string) => f.startsWith('os/');
 const text = (f: string) => readFileSync(join(SRC, f), 'utf8');
 const having = (re: RegExp) => all.filter(f => !inOs(f) && re.test(text(f)));
 
-/** The files that still name a system: setup.ts's Mac permissions. */
-const NAMES = ['setup.ts'];
+/** The files that still name a system: none. */
+const NAMES: string[] = [];
 /** The pages that still ask the browser (the host will tell them instead). */
 const PAGES = ['ui/main.tsx', 'ui/pill.tsx'];
 

@@ -97,6 +97,12 @@ export interface Os {
   /** What the web view reads from the environment when it is made: set for that moment only (main.ts). */
   webviewEnv?: Record<string, string>;
 
+  /**
+   * The settings panes of the permissions the user has to switch on before Blob can use the computer, where the
+   * system has them: the first-run check asks for them and opens the pane of the one still missing (setup.ts).
+   */
+  permissionPanes?: { accessibility: string; screenRecording: string };
+
   /** How far the bubble starts above the bottom of the screen: clear of the taskbar or the Dock. */
   dockGap: number;
   /** What the top of the screen keeps for itself (a menu bar, a notch). */
