@@ -7,7 +7,7 @@ import { outcomeOf } from '../src/brain.ts';
 import { persona } from '../src/persona.ts';
 import { question, selfTools, type HostAction } from '../src/self-mcp.ts';
 import { DEFAULTS, SettingsStore, loadSettings, offerPair, parseValue } from '../src/settings.ts';
-import { micProblemText } from '../src/ui/speech.ts';
+import { micProblem } from '../src/ui/speech.ts';
 
 let dir = '';
 let file = '';
@@ -452,18 +452,28 @@ describe('the brief', () => {
 
 describe('the microphone message', () => {
   const refused = { name: 'NotAllowedError', message: 'The request is not allowed by the user agent' };
+  const none = { name: 'TypeError', message: "undefined is not an object (evaluating 'navigator.mediaDevices.getUserMedia')" };
 
-  it('on macOS a refusal names the settings pane, the app to allow, and the restart', () => {
-    const text = micProblemText(refused, true);
-    expect(text).toMatch(/System Settings, Privacy & Security, Microphone/);
-    expect(text).toMatch(/Terminal or iTerm/);
-    expect(text).toMatch(/then restart Blob\.$/);
-    expect(text).not.toMatch(/clawdcursor|node\b/i);
+  it('macOS, not started as Blob.app: a refusal or no microphone at all offers to restart Blob, in plain words', () => {
+    for (const err of [refused, none]) {
+      const m = micProblem(err, { launcher: true, restart: true });
+      expect(m.restart).toBe(true);
+      expect(m.text).toMatch(/Restart Blob and macOS will ask you about Blob itself\.$/);
+      expect(m.text).not.toMatch(/clawdcursor|node\b|Terminal|iTerm/i);
+    }
   });
 
-  it('elsewhere, and for other errors on macOS, it stays as it was', () => {
-    expect(micProblemText(refused, false)).toBe("Blob can't use the microphone (The request is not allowed by the user agent).");
-    expect(micProblemText({ name: 'NotReadableError', message: 'busy' }, true)).toBe("Blob can't use the microphone (busy).");
-    for (const mac of [true, false]) expect(micProblemText({ name: 'NotFoundError', message: 'x' }, mac)).toBe('No microphone found. Plug one in, then try Speak again.');
+  it('macOS when Blob cannot restart itself as its app: the settings pane to switch it on in, with no terminal named', () => {
+    const m = micProblem(refused, { launcher: true });
+    expect(m.restart).toBeUndefined();
+    expect(m.text).toMatch(/System Settings, Privacy & Security, Microphone/);
+    expect(m.text).toMatch(/then restart Blob\.$/);
+    expect(m.text).not.toMatch(/Terminal|iTerm/);
+  });
+
+  it('elsewhere, and for other errors, it stays as it was', () => {
+    expect(micProblem(refused)).toEqual({ text: "Blob can't use the microphone (The request is not allowed by the user agent)." });
+    expect(micProblem({ name: 'NotReadableError', message: 'busy' }, { launcher: true, restart: true })).toEqual({ text: "Blob can't use the microphone (busy)." });
+    for (const launcher of [true, false]) expect(micProblem({ name: 'NotFoundError', message: 'x' }, { launcher }).text).toBe('No microphone found. Plug one in, then try Speak again.');
   });
 });

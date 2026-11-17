@@ -50,13 +50,20 @@ export async function transcribe(audio: Float32Array): Promise<string> {
 
 /** What the card says when the microphone could not be opened. On macOS a refusal comes with no system prompt:
  *  the microphone belongs to the app Blob was started from, and WebKit keeps its answer until Blob restarts. */
-export function micProblemText(err: { name?: string; message?: string }, mac: boolean): string {
-  if (err.name === 'NotFoundError') return 'No microphone found. Plug one in, then try Speak again.';
-  if (mac && err.name === 'NotAllowedError') {
-    return 'macOS has not given the microphone to the app Blob was started from. In System Settings, Privacy & Security, ' +
-      'Microphone, turn it on for that app (Terminal or iTerm), then restart Blob.';
+/**
+ * What the card says when the microphone can't be had, and whether its button restarts Blob (else it opens the
+ * microphone settings). `launcher`: the microphone belongs to the app Blob was started from (macOS, not as Blob.app),
+ * where a refusal comes with no prompt and the web view may have no microphone at all (a TypeError).
+ * `restart`: Blob can start itself again as its own app, which macOS then asks about by name.
+ */
+export function micProblem(err: { name?: string; message?: string }, o: { launcher?: boolean; restart?: boolean } = {}): { text: string; restart?: true } {
+  if (err.name === 'NotFoundError') return { text: 'No microphone found. Plug one in, then try Speak again.' };
+  if (o.launcher && (err.name === 'NotAllowedError' || err.name === 'TypeError')) {
+    if (o.restart) return { text: 'macOS gave the microphone to the app Blob was started from. Restart Blob and macOS will ask you about Blob itself.', restart: true };
+    return { text: 'macOS has not given the microphone to the app Blob was started from. In System Settings, Privacy & Security, ' +
+      'Microphone, turn it on for that app, then restart Blob.' };
   }
-  return `Blob can't use the microphone (${err.message ?? err.name ?? 'unknown error'}).`;
+  return { text: `Blob can't use the microphone (${err.message ?? err.name ?? 'unknown error'}).` };
 }
 
 /** Records from the microphone; stop() gives 16 kHz mono samples. */

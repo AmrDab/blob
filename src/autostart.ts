@@ -1,6 +1,6 @@
 // Start Blob when the user signs in (the startAtLogin setting), so reminders and scheduled tasks work.
 //   Windows: a "Blob" value under HKCU\…\Run that starts ~/.blob/start.cmd with no window.
-//   macOS:   ~/Library/LaunchAgents/com.blob.start.plist (read by launchd at the next sign-in).
+//   macOS:   ~/Library/LaunchAgents/com.blob.start.plist (read by launchd at the next sign-in), which opens Blob.app.
 // Both start Blob the way this one was started. Everything that touches the system is passed in, so tests use fakes.
 import { execFile } from 'node:child_process';
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -86,9 +86,14 @@ export const windowsAutostart: Apply = async (on, d) => {
   }
 };
 
+/** Blob.app (launcher.ts), which Blob writes at every start on macOS. */
+export const macAppPath = (home: string) => join(home, 'Applications', 'Blob.app');
+
+/** It opens Blob.app, so macOS asks for the microphone as Blob. */
 export const macAutostart: Apply = async (on, d) => {
   const plist = join(d.home, 'Library', 'LaunchAgents', `${AGENT}.plist`);
-  if (on) d.write(plist, macPlist(d.command, d.path)); else d.remove(plist);
+  if (on) d.write(plist, macPlist({ exe: '/usr/bin/open', args: ['-a', macAppPath(d.home)], cwd: d.command.cwd }, d.path));
+  else d.remove(plist);
 };
 
 /** Turns it on or off, the system's way (`apply`: os.autostart; none where it is not built). `text` says what happened, in words for the user. */

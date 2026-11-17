@@ -48,16 +48,17 @@ describe('start at sign-in', () => {
     expect((await setAutostart(false, bad.deps, bad.apply)).ok).toBe(true);      // nothing to remove is fine
   });
 
-  it('macOS: a LaunchAgent that starts the same command with the user\'s PATH; off removes it', async () => {
+  it('macOS: a LaunchAgent that opens Blob.app with the user\'s PATH; off removes it', async () => {
     const f = fake('darwin');
-    f.deps.command = { exe: '/usr/local/bin/node', args: ['--import', 'tsx', '/Users/a/blob/src/main.ts', 'a&b<c>'], cwd: '/Users/a/blob' };
+    f.deps.command = { exe: '/usr/local/bin/node', args: ['--import', 'tsx', '/Users/a/blob/src/main.ts'], cwd: '/Users/a/blob' };
     const plist = join('H', 'Library', 'LaunchAgents', 'com.blob.start.plist');
     expect((await setAutostart(true, f.deps, f.apply)).ok).toBe(true);
     const text = f.files.get(plist)!;
-    expect(text).toBe(macPlist(f.deps.command, f.deps.path));
+    expect(text).toBe(macPlist({ exe: '/usr/bin/open', args: ['-a', join('H', 'Applications', 'Blob.app')], cwd: '/Users/a/blob' }, f.deps.path));
     expect(text).toMatch(/<key>Label<\/key><string>com\.blob\.start<\/string>/);
-    expect(text).toMatch(/<array>\n    <string>\/usr\/local\/bin\/node<\/string>\n    <string>--import<\/string>\n    <string>tsx<\/string>\n    <string>\/Users\/a\/blob\/src\/main\.ts<\/string>\n    <string>a&amp;b&lt;c&gt;<\/string>\n  <\/array>/);
+    expect(text).toContain(`<array>\n    <string>/usr/bin/open</string>\n    <string>-a</string>\n    <string>${join('H', 'Applications', 'Blob.app')}</string>\n  </array>`);
     expect(text).toMatch(/<key>WorkingDirectory<\/key><string>\/Users\/a\/blob<\/string>/);
+    expect(macPlist({ exe: '/x', args: ['a&b<c>'], cwd: '/' }, '')).toContain('<string>a&amp;b&lt;c&gt;</string>');   // XML-escaped
     expect(text).toMatch(/<key>PATH<\/key><string>\/opt\/homebrew\/bin:\/usr\/bin<\/string>/);
     expect(text).toMatch(/<key>RunAtLoad<\/key><true\/>/);
     expect(text).toMatch(/<key>ProcessType<\/key><string>Interactive<\/string>/);   // not throttled as a background job

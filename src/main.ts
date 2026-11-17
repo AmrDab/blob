@@ -16,9 +16,10 @@ import { MAX_DETAIL, Questions } from './ask.ts';
 import { clickThrough, follower, type ClickThrough } from './clickthrough.ts';
 import { computerBrief, computerFile, computerNow, refreshProfile } from './computer.ts';
 import { deskTools, ownPids } from './desk.ts';
-import { setAutostart, systemAutostart } from './autostart.ts';
+import { setAutostart, startCommand, systemAutostart } from './autostart.ts';
 import type { FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
+import { systemLauncher } from './launcher.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
 import { memoryBrief, memoryFile } from './memory.ts';
 import { os } from './os/index.ts';
@@ -55,6 +56,28 @@ const DIST = resolve(import.meta.dirname, '..', 'dist');
 const PORT = 47615;
 const START = { w: 320, h: 230 };
 const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.woff2': 'font/woff2' };
+
+// ── one Blob, opened the system's way ────────────────────────────────────────
+// Blob is already open for this home: that one comes forward, and this one leaves.
+try {
+  const r = await fetch(`http://127.0.0.1:${PORT}/show`, {
+    method: 'POST', headers: { 'x-blob-show': '1' }, body: JSON.stringify({ home: HOME }), signal: AbortSignal.timeout(1500),
+  });
+  if (r.ok && (await r.json() as { shown?: boolean }).shown) { console.log('Blob: already open, so that one came forward'); process.exit(0); }
+} catch { /* none is open */ }
+// The entry the user opens Blob from (launcher.ts), for the user's own Blob: not a test's or a second one's (BLOB_HOME).
+if (os.launcher && !process.env.BLOB_HOME && process.env.BLOB_NO_APP !== '1') {
+  const command = startCommand();
+  if (os.autostart?.exe) command.exe = os.autostart.exe(command.exe, process.env.PATH ?? '');
+  const version = (JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')) as { version: string }).version;
+  try { await os.launcher.install(systemLauncher(HOME, command, version)); }
+  catch (e) { console.log(`Blob: the entry to open Blob from was not written (${(e as Error).message})`); }
+  // macOS: started some other way (a terminal), Blob opens itself as Blob.app, so the microphone is asked for as Blob
+  if (os.launcher.app && !process.env.BLOB_APP && await os.launcher.app.open(process.env)) {
+    console.log(`Blob: opened as Blob.app (its output goes to ${join(LOGS, 'blob-app.log')})`);
+    process.exit(0);
+  }
+}
 
 mkdirSync(WORK, { recursive: true });
 const tmp = mkdtempSync(join(tmpdir(), 'blob-'));
@@ -99,7 +122,8 @@ const brainNow = () => pickBrain(settings.get().brain, ready);
 function sendSettings(): void {
   const s = settings.get();
   send({
-    type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, offerPair: offerPair(s, !!RELAY), micOfLauncher: !!os.micOfLauncher,
+    type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, offerPair: offerPair(s, !!RELAY),
+    micOfLauncher: !!os.micOfLauncher && !process.env.BLOB_APP, restart: !!os.launcher?.app && !process.env.BLOB_APP,
     firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || os.autostart).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
   });
 }
@@ -535,6 +559,12 @@ async function post(path: string, body: any): Promise<void> {
       return;
     }
     case '/setup/mic': openMicSettings(); return;
+    case '/restart': {                              // the microphone card: start again as Blob.app, once this one is gone
+      if (!os.launcher?.app) return;
+      os.launcher.app.later(process.env);
+      quit();
+      return;
+    }
     case '/pill/answer': answerPill(body); return;
     case '/pill/size': placePill(Number(body.w), Number(body.h)); return;
     case '/pill/keyboard': {                        // a click into the reply box takes the keyboard; Esc gives it back
@@ -552,6 +582,16 @@ let port = PORT;
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (req.headers.host !== `127.0.0.1:${port}`) { res.writeHead(403).end(); return; }   // no DNS rebinding
+  // Blob was opened again: this one comes forward, if it is the same user's (its own header: a web page can't send it)
+  if (req.method === 'POST' && url.pathname === '/show') {
+    if (req.headers['x-blob-show'] !== '1') { res.writeHead(403).end(); return; }
+    let home = '';
+    try { let s = ''; for await (const c of req) s += c; home = String(JSON.parse(s).home ?? ''); } catch { /* not ours */ }
+    const shown = home === HOME;
+    if (shown) try { win.show(); caption("I'm here."); } catch { /* the window is still being made */ }
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ shown }));
+    return;
+  }
   if (url.pathname === '/events') {
     if (url.searchParams.get('t') !== token) { res.writeHead(403).end(); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });

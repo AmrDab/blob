@@ -12,7 +12,7 @@ import { Bubble, type Item } from './liquid/Bubble.tsx';
 import { BOX, FAN, GAP_LIQUID, SLOTS, stage } from './liquid/stage.ts';
 import { useSettled } from './settle.ts';
 import { Command, Title, Words, useSwap, type Line } from './text.tsx';
-import { DOWNLOAD_MB, Recorder, isDownloaded, load, micProblemText, transcribe } from './speech.ts';
+import { DOWNLOAD_MB, Recorder, isDownloaded, load, micProblem as micText, transcribe } from './speech.ts';
 
 declare global { interface Window { webviewjs?: { startDragging(): void } } }
 
@@ -70,8 +70,9 @@ function App() {
   const [asks, setAsks] = useState<{ id: string; question: string; detail?: string }[]>([]);
   const [reminders, setReminders] = useState<{ id: string; text: string; at: string }[]>([]);   // each stays until dismissed
   const [checks, setChecks] = useState<Check[]>([]);
-  const [micProblem, setMicProblem] = useState<string | null>(null);
+  const [micProblem, setMicProblem] = useState<{ text: string; restart?: true } | null>(null);
   const micOfLauncher = useRef(false);                        // the host says so: the microphone belongs to the app Blob was started from
+  const canRestart = useRef(false);                           // ...and Blob can start itself again as its own app
   const [typeOpen, setTypeOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [browsing, setBrowsing] = useState(false);            // the + view: every saved shortcut, to pin or remove
@@ -113,6 +114,7 @@ function App() {
       if (e.type === 'settings') {
         setModel(e.model); setCodex(e.brain === 'codex'); setVoice(e.voice);
         micOfLauncher.current = e.micOfLauncher;
+        canRestart.current = e.restart;
         // the phone's card comes once, also after the first run (for someone onboarded before phones were on)
         setFirst({ onboarded: e.onboarded, cards: [...(e.onboarded ? [] : e.firstRun), ...(e.offerPair ? [PAIR_CARD] : [])] });
       }
@@ -208,7 +210,7 @@ function App() {
     const recorder = new Recorder();
     try { await recorder.start(); } catch (err) {
       console.log('microphone refused:', (err as Error).name, (err as Error).message);
-      setMicProblem(micProblemText(err as Error, micOfLauncher.current));
+      setMicProblem(micText(err as Error, { launcher: micOfLauncher.current, restart: canRestart.current }));
       return false;
     }
     setMicProblem(null);
@@ -467,7 +469,9 @@ function App() {
                 </>}
               </>}
               {micProblem && (
-                <div className="check">{micProblem} <button className="btn" onClick={() => { setMicProblem(null); void post('/setup/mic'); }}>Microphone settings</button></div>
+                <div className="check">{micProblem.text} {micProblem.restart
+                  ? <button className="btn" onClick={() => void post('/restart')}>Restart Blob</button>
+                  : <button className="btn" onClick={() => { setMicProblem(null); void post('/setup/mic'); }}>Microphone settings</button>}</div>
               )}
             </div>
           </Slot>

@@ -8,6 +8,7 @@ import { winCursor } from '../clickthrough.ts';
 import { windowsApps, windowsProfile } from '../computer.ts';
 import { Bridge } from '../desk.ts';
 import { winKeeper } from '../focus.ts';
+import { winInstall } from '../launcher.ts';
 import { winOverlay, winProtect } from '../overlay.ts';
 import { processLister } from '../own-ui.ts';
 import { windowsFront } from '../watch.ts';
@@ -100,6 +101,7 @@ export const win: Os = {
   openApps: (self, procs) => procs && windowsApps(self, procs),   // a window is named by its program
   processes: processLister,
   frontWindow: windowsFront,
+  launcher: { install: d => winInstall(d, process.env.APPDATA || join(d.home, 'AppData', 'Roaming')) },   // the Start menu
   autostart: { apply: windowsAutostart },
   desk: { bridge: o => new Bridge(o) },             // UI Automation, through desk-bridge.ps1
   cursor: winCursor,

@@ -53,7 +53,15 @@ npm install
 npm start
 ```
 
-The blob opens at the bottom right of your main screen. Close it from its taskbar button.
+The blob opens at the bottom right of your main screen. Close it from its taskbar button (Cmd+Q on a Mac).
+
+From then on, open Blob like any app. It adds itself the first time it starts:
+- **Windows:** *Blob* in the Start menu.
+- **macOS:** *Blob* in your Applications folder, Spotlight and Launchpad. A Blob started from a terminal reopens
+  itself through it, so macOS asks for the microphone for Blob by name.
+- **Linux:** *Blob* in the app menu.
+
+Opening it while it is already open brings the bubble forward.
 
 ## First run
 
@@ -139,11 +147,14 @@ isn't set up.
   `https://blob-relay.<you>.workers.dev`. Set to `''`: no phone pairing.
 - `BLOB_CLAWDCURSOR`: the clawdcursor command (default `clawdcursor mcp --compact`), e.g. a dev build:
   `node C:/path/to/clawdcursor/dist/surface/cli.js mcp --compact`.
-- `BLOB_HOME`: where Blob keeps its state (default `~/.blob`).
+- `BLOB_HOME`: where Blob keeps its state (default `~/.blob`). With it set, Blob adds no app entry and stays as it was
+  started.
+- `BLOB_NO_APP=1`: the same, keeping `~/.blob`. On a Mac the microphone is then the terminal's.
 - `BLOB_DEVTOOLS=1`: allow the window's devtools.
 
 State in `~/.blob/`: `settings.json`, `memory.md`, `schedule.json`, `shortcuts.json`, `habits.json`, `activity.jsonl`,
-`pair.json`, `logs/`, and `start.cmd` (Windows, when Blob starts at sign-in).
+`pair.json`, `logs/` (on a Mac also `blob-app.log`, Blob.app's output), `start.cmd` (Windows, when Blob starts at
+sign-in), and what the app entry starts: `launch.cmd` and `launcher.json` (Windows), `launch.sh` (Linux).
 
 ## Develop
 

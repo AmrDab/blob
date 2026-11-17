@@ -1,5 +1,6 @@
 // Linux.
 import { statfsSync } from 'node:fs';
+import { linuxInstall } from '../launcher.ts';
 import { linuxOverlay, protect } from '../overlay.ts';
 import { posix, run } from './posix.ts';
 import type { Os } from './types.ts';
@@ -17,6 +18,7 @@ export const linux: Os = {
   isLocal(path) {
     try { return !NET_FS.has(Number(statfsSync(path).type)); } catch { return false; }
   },
+  launcher: { install: linuxInstall },               // the app menu
   hideFromCapture: protect,
   overlay: linuxOverlay,
   dockGap: 56,

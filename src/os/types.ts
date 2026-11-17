@@ -7,6 +7,7 @@ import type { Cursor, Win } from '../clickthrough.ts';
 import type { LoadApps, Profile, Run } from '../computer.ts';
 import type { Bridge } from '../desk.ts';
 import type { FocusKeeper } from '../focus.ts';
+import type { LauncherDeps } from '../launcher.ts';
 import type { Overlay } from '../overlay.ts';
 import type { Proc } from '../own-ui.ts';
 
@@ -72,6 +73,15 @@ export interface Os {
   processes?(): (() => Proc[]) | undefined;
   /** A cheap key for the window in front, for the watcher: null for none, or one of Blob's own. Undefined when it can't be read. */
   frontWindow?(): (() => string | null) | undefined;
+
+  /**
+   * How the user opens Blob: an entry the system shows, written at every start (launcher.ts). `app`: on macOS Blob is
+   * its own app (the microphone is asked for as Blob), so it opens itself through it: now, or once this process is gone.
+   */
+  launcher?: {
+    install(d: LauncherDeps): Promise<void>;
+    app?: { open(env: NodeJS.ProcessEnv): Promise<boolean>; later(env: NodeJS.ProcessEnv): void };
+  };
 
   /** Starting Blob at sign-in (autostart.ts). `exe`: a path to this Node that lasts, where the one it runs from may not. */
   autostart?: { apply: Apply; exe?(exe: string, path: string): string };
