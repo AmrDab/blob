@@ -34,15 +34,16 @@ describe('saved skills', () => {
     expect(existsSync(join(dir, 'skills.json.tmp'))).toBe(false);
   });
 
-  it('keeps a No: nothing is saved, and that name is refused from then on without asking', async () => {
+  it('keeps a No as a declined name; asked for again, it asks again, and a Yes clears it', async () => {
     const t = tools();
     const no = await t.skill_save(report);
     expect(no.text).toMatch(/^\[refused · USER_SAID_NO · hint: [^]*do not offer this skill again/);
     expect(existsSync(join(dir, 'send-weekly-report.md'))).toBe(false);
     expect(loadSkills(dir)).toEqual({ saved: [], declined: ['send-weekly-report'] });
     answer = true;
-    expect((await tools().skill_save(report)).text).toMatch(/^\[refused · DECLINED/);   // also after a restart
-    expect(asked).toHaveLength(1);
+    expect(outcome(await tools().skill_save(report))).toBe('confirmed');                 // also after a restart
+    expect(asked).toHaveLength(2);
+    expect(loadSkills(dir).declined).toEqual([]);
     expect(outcome(await t.skill_save({ ...report, name: 'other-task' }))).toBe('confirmed');
     answer = false;
     for (let i = 0; i < MAX_DECLINED + 5; i++) await t.skill_save({ ...report, name: `task-${i}` });

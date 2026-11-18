@@ -97,7 +97,8 @@ export function skillTools(d: SkillDeps) {
       if (HIDDEN.test(steps)) return failed('HIDDEN_CHARACTERS', 'the recipe has characters that do not show on screen; write it in plain text');
       if (SECRET.test(steps) || SECRET.test(description)) return refused('SECRET', 'a skill never holds a password, code, key or token');
       const all = loadSkills(d.dir), old = all.saved.find(s => s.name === name);
-      if (!old && all.declined.includes(name)) return refused('DECLINED', 'the user said No to this skill before; do not offer it again');
+      // a declined name still asks: a No may have been no answer, and the user may ask for it later; the brief keeps
+      // the model from offering it again unasked
       if (old && old.description === description && textOf(fileOf(d.dir, name)) === steps) return ok(`The skill "${name}" is saved already.`);
       if (!(await d.ask(`Save "${name}" as a skill?`, `${description}\n\n${steps}`))) {
         // a No to a changed text leaves the saved skill as it was, and its name open to a later correction
@@ -108,7 +109,7 @@ export function skillTools(d: SkillDeps) {
         const entry: Skill = { name, description };
         mkdirSync(d.dir, { recursive: true });
         write(fileOf(d.dir, name), steps + '\n');     // the file first: an index entry with no file could not be read
-        saveSkills(d.dir, { saved: old ? all.saved.map(s => (s === old ? entry : s)) : [...all.saved, entry], declined: all.declined });
+        saveSkills(d.dir, { saved: old ? all.saved.map(s => (s === old ? entry : s)) : [...all.saved, entry], declined: all.declined.filter(n => n !== name) });
       } catch (e) { return failed('CANT_SAVE', (e as Error).message); }
       return ok(`Saved the skill "${name}".`);
     },
