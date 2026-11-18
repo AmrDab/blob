@@ -120,8 +120,12 @@ export async function install(d: UpdateDeps, version: string): Promise<string> {
   return cli;
 }
 
-/** Starts the new version, which waits for this one to quit: the caller quits now. BLOB_UPDATED: the version it took over from. */
-export const switchTo = (d: UpdateDeps, cli: string): void => d.start(d.node, [cli], { BLOB_UPDATED: d.pkg.version });
+/**
+ * Starts the new version, which waits for this one to quit: the caller quits now. BLOB_UPDATED: the version it took
+ * over from. BLOB_UPDATED_PID: this process, which the new one waits to be gone before its "already open" check.
+ */
+export const switchTo = (d: UpdateDeps, cli: string, pid: number = process.pid): void =>
+  d.start(d.node, [cli], { BLOB_UPDATED: d.pkg.version, BLOB_UPDATED_PID: String(pid) });
 
 // ── the real system ─────────────────────────────────────────────────────────
 

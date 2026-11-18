@@ -60,12 +60,16 @@ const START = { w: 320, h: 230 };
 // This Blob's own package.json: its version, and its name (`theblob`: the installed package; else a source checkout).
 const PKG = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')) as { name: string; version: string };
 const UPDATED = process.env.BLOB_UPDATED;           // this Blob was started by the version it updated from
+const UPDATED_PID = Number(process.env.BLOB_UPDATED_PID);   // and that version's process, which is quitting
 delete process.env.BLOB_UPDATED;                    // said once: not handed on to a restart
+delete process.env.BLOB_UPDATED_PID;
 const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.woff2': 'font/woff2' };
 
 // ── one Blob, opened the system's way ────────────────────────────────────────
 // Blob is already open for this home: that one comes forward, and this one leaves.
-if (UPDATED) await new Promise(r => setTimeout(r, 1000));   // the version that started this one is quitting
+// The version that started this one is quitting: wait for it to be gone (15 s at most), or this one would hand over to it.
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+for (let i = 0; UPDATED_PID && i < 60 && alive(UPDATED_PID); i++) await new Promise(r => setTimeout(r, 250));
 try {
   const r = await fetch(`http://127.0.0.1:${PORT}/show`, {
     method: 'POST', headers: { 'x-blob-show': '1' }, body: JSON.stringify({ home: HOME }), signal: AbortSignal.timeout(1500),

@@ -156,7 +156,7 @@ describe('the switch', () => {
   it('starts the new version\'s cli.js with the real Node, and tells it which version it took over from', () => {
     const f = fake();
     switchTo(f.d, cliOf(f.d, '0.2.0'));
-    expect(f.started).toEqual([{ exe: NODE, args: [cliOf(f.d, '0.2.0')], env: { BLOB_UPDATED: '0.1.0' } }]);
+    expect(f.started).toEqual([{ exe: NODE, args: [cliOf(f.d, '0.2.0')], env: { BLOB_UPDATED: '0.1.0', BLOB_UPDATED_PID: String(process.pid) } }]);
   });
 });
 
