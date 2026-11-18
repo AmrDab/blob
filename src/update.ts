@@ -149,9 +149,10 @@ export function systemUpdate(blobHome: string, pkg: UpdateDeps['pkg'], env: Node
     run: (exe, args) => new Promise(res => spawn(exe, args, { windowsHide: true, stdio: 'ignore', timeout: INSTALL_MS, env: shellEnv(env) })
       .on('error', () => res(false)).on('close', code => res(code === 0))),
     // Without BLOB_APP: on macOS the new version writes its own start and opens itself as Blob.app (main.ts).
+    // Detached: on Windows Node ends a child that is not when its parent exits, and this parent is about to.
     start: (exe, args, add) => {
       const { BLOB_APP: _app, ...rest } = env;
-      spawn(exe, args, { detached: os.spawnGroup, stdio: 'ignore', windowsHide: true, env: { ...rest, ...add } }).unref();
+      spawn(exe, args, { detached: true, stdio: 'ignore', windowsHide: true, env: { ...rest, ...add } }).unref();
     },
   };
 }
