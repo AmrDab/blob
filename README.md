@@ -13,7 +13,8 @@ and it does it while you watch, then says in a sentence that it is done.
 - **Memory.** "Remember that I use Outlook for mail." It is a plain file on your computer that you can read and edit.
 - **Simple.** One blob. No settings menu: to change something, just ask ("use Haiku" always uses that one model,
   "pick the model yourself" goes back to Auto, "stop watching").
-- **It learns.** A task that worked 3 times becomes a shortcut by itself. If you let it, it also learns which apps
+- **It learns.** A task that worked 3 times becomes a shortcut by itself. After a longer task, Blob asks whether to
+  save how it did it as a skill, and follows that the next time. If you let it, it also learns which apps
   and sites you use.
 
 Blob runs **your own Claude Code or Codex** (signed in with your own plan, no API key). It opens links, files and
