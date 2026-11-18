@@ -24,6 +24,8 @@ export interface ObjC {
   num(obj: unknown, sel: string): number;
   /** A message with one whole-number argument, the answer not used. */
   set(obj: unknown, sel: string, value: number): void;
+  /** Sends the Apple Event `eventClass`/`eventID` to `target`'s method `sel` (NSAppleEventManager). */
+  appleEvent(target: unknown, sel: string, eventClass: number, eventID: number): void;
   /** Puts `fn` in place of a method that takes one object. `types`: its type encoding ('v@:@' answers nothing, else a BOOL). */
   replace(cls: unknown, sel: string, types: string, fn: () => boolean | void): void;
 }
@@ -46,6 +48,7 @@ export function loadObjC(): ObjC {
   const at = lib.func('void *objc_msgSend(void *obj, void *sel, unsigned long i)');
   const num = lib.func('unsigned long objc_msgSend(void *obj, void *sel)');
   const set = lib.func('void objc_msgSend(void *obj, void *sel, unsigned long value)');
+  const handler = lib.func('void objc_msgSend(void *obj, void *sel, void *target, void *handler, uint32_t cls, uint32_t id)');
   const Bool = koffi.pointer(koffi.proto('bool BlobBoolMethod(void *self, void *cmd, void *arg)'));
   const Void = koffi.pointer(koffi.proto('void BlobVoidMethod(void *self, void *cmd, void *arg)'));
   return loaded = {
@@ -56,6 +59,10 @@ export function loadObjC(): ObjC {
     at: (obj, sel, i) => at(obj, selector(sel), i),
     num: (obj, sel) => Number(num(obj, selector(sel))),
     set: (obj, sel, value) => { set(obj, selector(sel), value); },
+    appleEvent(target, sel, eventClass, eventID) {
+      const manager = send(getClass('NSAppleEventManager'), selector('sharedAppleEventManager'));
+      handler(manager, selector('setEventHandler:andSelector:forEventClass:andEventID:'), target, selector(sel), eventClass, eventID);
+    },
     replace(cls, sel, types, fn) {
       const imp = koffi.register(fn, types.startsWith('v') ? Void : Bool);
       kept.push(imp);
@@ -192,17 +199,19 @@ export function quitOnTerminate(objc: ObjC, quit: () => void): void {
   objc.replace(objc.classOf(nsapp), 'terminate:', 'v@:@', () => { setImmediate(quit); });
 }
 
+/** The "reopen" Apple Event ('aevt' 'rapp'): macOS sends it when an app that is open is opened again. */
+export const REOPEN = { eventClass: 0x61657674, eventID: 0x72617070 };
+const REOPEN_SEL = 'blobReopen:withReply:';
+
 /**
- * Opened again while open (Spotlight, Finder, `open`): macOS asks the app's delegate whether to handle it, and launches
- * nothing. Blob's answer runs `reopen` just after (not from inside the event pump) and says no to the default handling.
- * False: the window library has not set its delegate yet.
+ * Opened again while open (Spotlight, Finder, `open`): macOS launches nothing and sends the app the reopen event.
+ * Blob takes that event itself, in place of AppKit's own handler (set at launch, so this runs after it), and runs
+ * `reopen` just after (not from inside the event pump). Safe to run again.
  */
-export function onReopen(objc: ObjC, reopen: () => void, arch: string = process.arch): boolean {
-  const delegate = objc.send(objc.send(objc.cls('NSApplication'), 'sharedApplication'), 'delegate');
-  if (!delegate) return false;
-  objc.replace(objc.classOf(delegate), 'applicationShouldHandleReopen:hasVisibleWindows:', arch === 'arm64' ? 'B@:@B' : 'c@:@c',
-    () => { setImmediate(reopen); return false; });
-  return true;
+export function onReopen(objc: ObjC, reopen: () => void): void {
+  const nsapp = objc.send(objc.cls('NSApplication'), 'sharedApplication');
+  objc.replace(objc.classOf(nsapp), REOPEN_SEL, 'v@:@@', () => { setImmediate(reopen); });
+  objc.appleEvent(nsapp, REOPEN_SEL, REOPEN.eventClass, REOPEN.eventID);
 }
 
 const ACCESSORY = 1;                                                    // NSApplicationActivationPolicyAccessory
@@ -263,18 +272,10 @@ export function macSetup(app: Pick<Application, 'setMenu'>, quit: () => void, de
   };
   tryFirstClick(false);
   step('Cmd+Q closes Blob without its clean-up', () => quitOnTerminate(oc, quit));
-  let reopen = !deps.reopen;
-  const tryReopen = (last: boolean) => {
-    if (!reopen) step('opening Blob again does not bring it forward', () => {
-      reopen = onReopen(oc, deps.reopen!, deps.arch);
-      if (!reopen && last) throw new Error('no app delegate');
-    });
-  };
-  tryReopen(false);
   const later = deps.later ?? setTimeout;
   LAUNCH_MS.forEach((ms, i) => later(() => {
     tryFirstClick(i === LAUNCH_MS.length - 1);
-    tryReopen(i === LAUNCH_MS.length - 1);
+    if (deps.reopen) step('opening Blob again does not bring it forward', () => onReopen(oc, deps.reopen!));
     step('Blob keeps its Dock icon and stays on one Space', () => afterLaunch(oc));
   }, ms));
 }

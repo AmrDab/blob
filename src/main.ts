@@ -792,7 +792,10 @@ const view = win.createWebview({
   newWindowHandler: () => false,
 });
 // macOS: the Edit menu, the first click, Cmd+Q through quit(), opened again, no Dock icon, every Space (mac.ts). Nothing elsewhere.
-os.appSetup?.(app, quit, () => { try { win.show(); caption("I'm here."); } catch { /* the window is still being made */ } });
+os.appSetup?.(app, quit, () => {
+  console.log('Blob: opened again, so the bubble came forward');
+  try { win.show(); caption("I'm here."); } catch { /* the window is still being made */ }
+});
 // clawdcursor's pill: a second window at the top centre of the primary display, as big as the page says its
 // content is, shown only while a relay is connected. Made here so it shares the first webview's browser flags.
 const PILL = { w: 320, h: 64 };

@@ -6,8 +6,8 @@
 //   Windows: "Blob" in the Start menu.
 //   Linux:   "Blob" in the app menu.
 // Each runs this same start command (autostart.ts). The icons in assets/ were made once from site/favicon.svg.
-import { execFile, spawn } from 'node:child_process';
-import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { type StartCommand, cleanPath, macAppPath, windowsRunValue, windowsScript } from './autostart.ts';
@@ -34,8 +34,8 @@ export interface LauncherDeps {
   real(file: string): string;
   /** A folder's file names; none when there is no such folder. */
   list(dir: string): string[];
-  /** Changes when the file does (its size and time). */
-  stamp(file: string): string;
+  /** The program starts and ends well (`node -e 0`). */
+  runs(exe: string): boolean;
   run(command: string, args: string[], env?: Record<string, string>): Promise<boolean>;
 }
 
@@ -70,7 +70,7 @@ export const macAppNode = (home: string) => join(macAppPath(home), 'Contents', '
 
 /**
  * Contents/MacOS/blob-launch, the app's start. `exec`: the app's copy of Node takes this process's place. When the copy
- * no longer runs (an upgrade removed a library it needs), Node itself does, until this Blob copies it again.
+ * no longer runs (an upgrade removed a library it needs), Node itself does, and that Blob copies it again.
  * BLOB_NODE: the Node it was copied from, for that next copy.
  */
 export function macLauncher(c: StartCommand, path: string, log: string, own: string): string {
@@ -88,13 +88,14 @@ exec "$node" ${c.args.map(sh).join(' ')} >> ${sh(log)} 2>&1
 export async function macInstall(d: LauncherDeps): Promise<void> {
   const app = macAppPath(d.home), contents = join(app, 'Contents'), node = macAppNode(d.home);
   const plist = join(contents, 'Info.plist'), launch = join(contents, 'MacOS', 'blob-launch');
-  const icon = join(contents, 'Resources', 'blob.icns'), copied = join(contents, 'Resources', 'node.json'), libDir = join(contents, 'lib');
+  const icon = join(contents, 'Resources', 'blob.icns'), libDir = join(contents, 'lib');
   const info = macInfoPlist(d.version), launcher = macLauncher(d.command, d.path, join(d.blobHome, 'logs', 'blob-app.log'), node);
-  // Node, and Homebrew's libnode, which Node finds next to itself through @loader_path/../lib
+  // Node is copied once, and again only when the copy no longer runs (not at every Node upgrade): a new copy is a new
+  // program to macOS, which then asks again for every permission the user gave Blob.
   const real = d.real(d.command.exe), lib = join(dirname(real), '..', 'lib');
-  const libs = real === node ? [] : d.list(lib).filter(f => /^libnode\..*dylib$/.test(f)).map(f => join(lib, f));
-  const stamp = JSON.stringify([real, ...libs].map(f => `${f} ${d.stamp(f)}`));
-  const nodeNew = real !== node && !(d.read(copied) === stamp && d.exists(node));
+  const nodeNew = real !== node && !(d.exists(node) && d.runs(node));
+  // with Homebrew's libnode, which Node finds next to itself through @loader_path/../lib
+  const libs = nodeNew ? d.list(lib).filter(f => /^libnode\..*dylib$/.test(f)).map(f => join(lib, f)) : [];
   // Rewritten only when it changed: a new signature is a new app to macOS, which would ask for the microphone again.
   if (!nodeNew && d.read(plist) === info && d.read(launch) === launcher && d.exists(icon)) return;
   d.write(plist, info);
@@ -108,7 +109,6 @@ export async function macInstall(d: LauncherDeps): Promise<void> {
     }
     d.copy(real, node);
     await d.run('codesign', ['--force', '--sign', '-', '--identifier', APP_ID, node]);
-    d.write(copied, stamp);
   }
   await d.run('codesign', ['--force', '--sign', '-', app]);   // ad hoc: a signature macOS can tie the permission to
 }
@@ -196,7 +196,7 @@ export function systemLauncher(blobHome: string, command: StartCommand, version:
     exists: existsSync,
     real: realpathSync,
     list: dir => { try { return readdirSync(dir); } catch { return []; } },
-    stamp: file => { const s = statSync(file); return `${s.size} ${s.mtimeMs}`; },
+    runs: exe => spawnSync(exe, ['-e', '0'], { stdio: 'ignore', timeout: 20_000 }).status === 0,
     run: (cmd, args, env) => new Promise(res => execFile(cmd, args, { windowsHide: true, timeout: 20_000, env: { ...process.env, ...env } }, err => res(!err))),
   };
 }

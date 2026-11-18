@@ -12,11 +12,11 @@ const COMMAND = { exe: '/opt/homebrew/bin/node', args: ['--import', 'file:///Use
 // Homebrew's Node: the link on PATH leads to the Cellar, with libnode in the Cellar's lib folder
 const CELLAR = join('/opt/homebrew/Cellar/node/25.0.0', 'bin', 'node'), CELLAR_LIB = join('/opt/homebrew/Cellar/node/25.0.0', 'lib');
 
-function fake(): LauncherDeps & { files: Map<string, string>; modes: Map<string, number>; ran: { cmd: string; args: string[]; env?: Record<string, string> }[]; stamps: Map<string, string> } {
-  const files = new Map<string, string>(), modes = new Map<string, number>(), stamps = new Map<string, string>();
+function fake(): LauncherDeps & { files: Map<string, string>; modes: Map<string, number>; ran: { cmd: string; args: string[]; env?: Record<string, string> }[]; broken: Set<string> } {
+  const files = new Map<string, string>(), modes = new Map<string, number>(), broken = new Set<string>();
   const ran: { cmd: string; args: string[]; env?: Record<string, string> }[] = [];
   return {
-    files, modes, ran, stamps,
+    files, modes, ran, broken,
     home: 'H', blobHome: join('H', '.blob'), command: COMMAND, path: '/opt/homebrew/bin:/usr/bin', assets: 'A', version: '0.1.0',
     read: f => files.get(f),
     write: (f, t, mode) => { files.set(f, t); if (mode) modes.set(f, mode); },
@@ -25,7 +25,7 @@ function fake(): LauncherDeps & { files: Map<string, string>; modes: Map<string,
     exists: f => files.has(f),
     real: f => (f === COMMAND.exe ? CELLAR : f),
     list: dir => (dir === join(CELLAR, '..', '..', 'lib') ? ['libnode.141.dylib', 'node_modules'] : [...files.keys()].filter(f => join(f, '..') === dir).map(f => f.slice(dir.length + 1))),
-    stamp: f => stamps.get(f) ?? '1',
+    runs: f => files.has(f) && !broken.has(f),
     run: async (cmd, args, env) => { ran.push({ cmd, args, env }); return true; },
   };
 }
@@ -75,11 +75,13 @@ describe('Blob.app (macOS)', () => {
     expect(f.ran.slice(3).map(r => r.args)).toEqual([['--force', '--sign', '-', app]]);
   });
 
-  it('copies Node again when it was upgraded, without the old libnode', async () => {
+  it('keeps its copy of Node through upgrades (a new copy would lose the permissions), and copies it again only when it no longer runs', async () => {
     const f = fake();
     await macInstall(f);
     f.files.set(join(app, 'Contents', 'lib', 'libnode.140.dylib'), 'old');
-    f.stamps.set(CELLAR, '2');
+    await macInstall(f);
+    expect(f.ran).toHaveLength(3);
+    f.broken.add(macAppNode('H'));                // an upgrade removed a library the copy needs
     await macInstall(f);
     expect(f.ran).toHaveLength(6);
     expect(f.files.has(join(app, 'Contents', 'lib', 'libnode.140.dylib'))).toBe(false);
