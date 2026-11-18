@@ -77,10 +77,11 @@ export interface Os {
   /**
    * How the user opens Blob: an entry the system shows, written at every start (launcher.ts). `app`: on macOS Blob is
    * its own app (the microphone is asked for as Blob), so it opens itself through it: now, or once this process is gone.
+   * `inApp`: this process is the app's own (it runs the app's copy of Node).
    */
   launcher?: {
     install(d: LauncherDeps): Promise<void>;
-    app?: { open(env: NodeJS.ProcessEnv): Promise<boolean>; later(env: NodeJS.ProcessEnv): void };
+    app?: { open(env: NodeJS.ProcessEnv): Promise<boolean>; later(env: NodeJS.ProcessEnv): void; inApp(): boolean };
   };
 
   /** Starting Blob at sign-in (autostart.ts). `exe`: a path to this Node that lasts, where the one it runs from may not. */
@@ -92,8 +93,9 @@ export interface Os {
    */
   desk?: { bridge(o: ConstructorParameters<typeof Bridge>[0]): Bridge };
 
-  /** What the window library has no option for, done once after the first web view is made (mac.ts). `quit`: Blob's own quit. */
-  appSetup?(app: Pick<Application, 'setMenu'>, quit: () => void): void;
+  /** What the window library has no option for, done once after the first web view is made (mac.ts). `quit`: Blob's own
+   *  quit. `reopen`: Blob was opened again (from Spotlight, Finder) while open. */
+  appSetup?(app: Pick<Application, 'setMenu'>, quit: () => void, reopen?: () => void): void;
   /** A reader of the cursor, for the bubble's click-through and drag (clickthrough.ts). Undefined when it can't be read. `now` is for tests. */
   cursor?(win: Win, now?: () => number): (() => Cursor) | undefined;
   /** Keeps note of the window (or app) the user was in, to hand the keyboard back to after a click on Blob (focus.ts). `own`: Blob's window. */

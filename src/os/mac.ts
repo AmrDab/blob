@@ -7,7 +7,7 @@ import { macAutostart, stableNode } from '../autostart.ts';
 import { macCursor } from '../clickthrough.ts';
 import { macProfile, namedApps } from '../computer.ts';
 import { macKeeper } from '../focus.ts';
-import { macInstall, macOpen, macOpenLater } from '../launcher.ts';
+import { macAppNode, macInstall, macOpen, macOpenLater } from '../launcher.ts';
 import { loadRunningApps, macSetup } from '../mac.ts';
 import { macOverlay, protect } from '../overlay.ts';
 import { posix, run } from './posix.ts';
@@ -44,9 +44,12 @@ export const mac: Os = {
   readProfile: macProfile,
   openApps: self => namedApps(() => loadRunningApps(self)),
   // ~/Applications/Blob.app: Blob is its own app, so the microphone is asked for as Blob
-  launcher: { install: macInstall, app: { open: env => macOpen(homedir(), env), later: env => macOpenLater(homedir(), env) } },
+  launcher: {
+    install: macInstall,
+    app: { open: env => macOpen(homedir(), env), later: env => macOpenLater(homedir(), env), inApp: () => process.execPath === macAppNode(homedir()) },
+  },
   autostart: { apply: macAutostart, exe: stableNode },
-  appSetup: (app, quit) => macSetup(app, quit),    // the Edit menu, the first click, Cmd+Q, no Dock icon, every Space
+  appSetup: (app, quit, reopen) => macSetup(app, quit, { reopen }),   // the Edit menu, the first click, Cmd+Q, opened again, no Dock icon, every Space
   cursor: macCursor,
   focusKeeper: () => macKeeper(),                  // whole apps, not windows: Blob is this process
   hideFromCapture: protect,

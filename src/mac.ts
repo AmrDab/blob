@@ -2,6 +2,7 @@
 //  - an Edit menu, so Cmd+C/V/X/A/Z reach the page's text boxes (AppKit sends those keys through the app's menu);
 //  - the first click on Blob while another app is in front reaches the page, not just brings Blob forward;
 //  - Cmd+Q (and any other "terminate") runs Blob's own quit, so the brain is stopped and the temp folder removed;
+//  - opened again while open (Spotlight, Finder), the bubble comes forward and says so;
 //  - no Dock icon, no Cmd+Tab entry and no menu bar of its own (an "accessory" app);
 //  - the bubble and the pill are on every Space, and over full-screen apps.
 // Every step is on its own: one that fails says so in the log and the rest still run. Only macOS has it (os.appSetup).
@@ -191,6 +192,19 @@ export function quitOnTerminate(objc: ObjC, quit: () => void): void {
   objc.replace(objc.classOf(nsapp), 'terminate:', 'v@:@', () => { setImmediate(quit); });
 }
 
+/**
+ * Opened again while open (Spotlight, Finder, `open`): macOS asks the app's delegate whether to handle it, and launches
+ * nothing. Blob's answer runs `reopen` just after (not from inside the event pump) and says no to the default handling.
+ * False: the window library has not set its delegate yet.
+ */
+export function onReopen(objc: ObjC, reopen: () => void, arch: string = process.arch): boolean {
+  const delegate = objc.send(objc.send(objc.cls('NSApplication'), 'sharedApplication'), 'delegate');
+  if (!delegate) return false;
+  objc.replace(objc.classOf(delegate), 'applicationShouldHandleReopen:hasVisibleWindows:', arch === 'arm64' ? 'B@:@B' : 'c@:@c',
+    () => { setImmediate(reopen); return false; });
+  return true;
+}
+
 const ACCESSORY = 1;                                                    // NSApplicationActivationPolicyAccessory
 const ALL_SPACES = 1 << 0, MOVE_TO_ACTIVE = 1 << 1;                     // NSWindowCollectionBehavior: these two can't be set together
 const FULL_PRIMARY = 1 << 7, FULL_AUXILIARY = 1 << 8, FULL_NONE = 1 << 9;   // nor can these three
@@ -224,6 +238,8 @@ export interface MacDeps {
   arch?: string;
   load?: () => ObjC;
   later?: (fn: () => void, ms: number) => unknown;
+  /** Blob was opened again while open. */
+  reopen?: () => void;
 }
 
 /** Everything above, in order. Call once, after the first web view is made. */
@@ -247,9 +263,18 @@ export function macSetup(app: Pick<Application, 'setMenu'>, quit: () => void, de
   };
   tryFirstClick(false);
   step('Cmd+Q closes Blob without its clean-up', () => quitOnTerminate(oc, quit));
+  let reopen = !deps.reopen;
+  const tryReopen = (last: boolean) => {
+    if (!reopen) step('opening Blob again does not bring it forward', () => {
+      reopen = onReopen(oc, deps.reopen!, deps.arch);
+      if (!reopen && last) throw new Error('no app delegate');
+    });
+  };
+  tryReopen(false);
   const later = deps.later ?? setTimeout;
   LAUNCH_MS.forEach((ms, i) => later(() => {
     tryFirstClick(i === LAUNCH_MS.length - 1);
+    tryReopen(i === LAUNCH_MS.length - 1);
     step('Blob keeps its Dock icon and stays on one Space', () => afterLaunch(oc));
   }, ms));
 }

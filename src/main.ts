@@ -66,9 +66,11 @@ try {
   if (r.ok && (await r.json() as { shown?: boolean }).shown) { console.log('Blob: already open, so that one came forward'); process.exit(0); }
 } catch { /* none is open */ }
 // The entry the user opens Blob from (launcher.ts), for the user's own Blob: not a test's or a second one's (BLOB_HOME).
+const inApp = !!os.launcher?.app?.inApp();
 if (os.launcher && !process.env.BLOB_HOME && process.env.BLOB_NO_APP !== '1') {
   const command = startCommand();
   if (os.autostart?.exe) command.exe = os.autostart.exe(command.exe, process.env.PATH ?? '');
+  if (inApp && process.env.BLOB_NODE) command.exe = process.env.BLOB_NODE;   // the Node the app's copy came from
   const version = (JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')) as { version: string }).version;
   try { await os.launcher.install(systemLauncher(HOME, command, version)); }
   catch (e) { console.log(`Blob: the entry to open Blob from was not written (${(e as Error).message})`); }
@@ -123,7 +125,7 @@ function sendSettings(): void {
   const s = settings.get();
   send({
     type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, offerPair: offerPair(s, !!RELAY),
-    micOfLauncher: !!os.micOfLauncher && !process.env.BLOB_APP, restart: !!os.launcher?.app && !process.env.BLOB_APP,
+    micOfLauncher: !!os.micOfLauncher && !inApp, restart: !!os.launcher?.app && !inApp,
     firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || os.autostart).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
   });
 }
@@ -789,8 +791,8 @@ const view = win.createWebview({
   navigationHandler: u => u.startsWith(`http://127.0.0.1:${port}/`),
   newWindowHandler: () => false,
 });
-// macOS: the Edit menu, the first click, Cmd+Q through quit(), no Dock icon, every Space (mac.ts). Nothing elsewhere.
-os.appSetup?.(app, quit);
+// macOS: the Edit menu, the first click, Cmd+Q through quit(), opened again, no Dock icon, every Space (mac.ts). Nothing elsewhere.
+os.appSetup?.(app, quit, () => { try { win.show(); caption("I'm here."); } catch { /* the window is still being made */ } });
 // clawdcursor's pill: a second window at the top centre of the primary display, as big as the page says its
 // content is, shown only while a relay is connected. Made here so it shares the first webview's browser flags.
 const PILL = { w: 320, h: 64 };

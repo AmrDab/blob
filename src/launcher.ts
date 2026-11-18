@@ -1,15 +1,16 @@
 // How the user opens Blob: an entry the system shows, which Blob writes itself at every start (only what changed).
 //   macOS:   ~/Applications/Blob.app (Spotlight, Launchpad, Finder). Its Info.plist names Blob and says why it asks for
-//            the microphone; its launcher execs Node, so the process stays Blob.app's and macOS asks for the
-//            microphone as Blob. Started any other way, Blob opens itself through the app (main.ts).
+//            the microphone. Its launcher runs the app's own copy of Node (Contents/MacOS/Blob): a program inside the
+//            app, so macOS shows the process as Blob and its web view finds the app's microphone line. Started any
+//            other way, Blob opens itself through the app (main.ts).
 //   Windows: "Blob" in the Start menu.
 //   Linux:   "Blob" in the app menu.
 // Each runs this same start command (autostart.ts). The icons in assets/ were made once from site/favicon.svg.
 import { execFile, spawn } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { type StartCommand, macAppPath, windowsRunValue, windowsScript } from './autostart.ts';
+import { basename, dirname, join, resolve } from 'node:path';
+import { type StartCommand, cleanPath, macAppPath, windowsRunValue, windowsScript } from './autostart.ts';
 
 export const ASSETS = resolve(import.meta.dirname, '..', 'assets');
 export const APP_ID = 'com.blob.app';
@@ -25,8 +26,16 @@ export interface LauncherDeps {
   version: string;
   read(file: string): string | undefined;
   write(file: string, text: string, mode?: number): void;
+  /** A copy that is a new file: a program running from the old one carries on. */
   copy(from: string, to: string): void;
+  remove(file: string): void;
   exists(file: string): boolean;
+  /** The file a link leads to. */
+  real(file: string): string;
+  /** A folder's file names; none when there is no such folder. */
+  list(dir: string): string[];
+  /** Changes when the file does (its size and time). */
+  stamp(file: string): string;
   run(command: string, args: string[], env?: Record<string, string>): Promise<boolean>;
 }
 
@@ -45,7 +54,7 @@ export function macInfoPlist(version: string): string {
   <key>CFBundleName</key><string>Blob</string>
   <key>CFBundleDisplayName</key><string>Blob</string>
   <key>CFBundleIdentifier</key><string>${APP_ID}</string>
-  <key>CFBundleExecutable</key><string>Blob</string>
+  <key>CFBundleExecutable</key><string>blob-launch</string>
   <key>CFBundleIconFile</key><string>blob</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${xml(version)}</string>
@@ -56,26 +65,51 @@ export function macInfoPlist(version: string): string {
 `;
 }
 
-/** Contents/MacOS/Blob. `exec`: Node takes this process's place, so macOS still counts it as Blob.app. */
-export function macLauncher(c: StartCommand, path: string, log: string): string {
+/** Blob.app's own copy of Node: the program the app's process runs. */
+export const macAppNode = (home: string) => join(macAppPath(home), 'Contents', 'MacOS', 'Blob');
+
+/**
+ * Contents/MacOS/blob-launch, the app's start. `exec`: the app's copy of Node takes this process's place. When the copy
+ * no longer runs (an upgrade removed a library it needs), Node itself does, until this Blob copies it again.
+ * BLOB_NODE: the Node it was copied from, for that next copy.
+ */
+export function macLauncher(c: StartCommand, path: string, log: string, own: string): string {
   return `#!/bin/sh
 # Blob's launcher, written by Blob (launcher.ts).
 cd ${sh(c.cwd)} || exit 1
 export PATH=${sh(path)}
-export BLOB_APP=1
-exec ${[c.exe, ...c.args].map(sh).join(' ')} >> ${sh(log)} 2>&1
+export BLOB_APP=1 BLOB_NODE=${sh(c.exe)}
+node=${sh(own)}
+"$node" -e 0 2>/dev/null || node="$BLOB_NODE"
+exec "$node" ${c.args.map(sh).join(' ')} >> ${sh(log)} 2>&1
 `;
 }
 
 export async function macInstall(d: LauncherDeps): Promise<void> {
-  const app = macAppPath(d.home), plist = join(app, 'Contents', 'Info.plist'), exe = join(app, 'Contents', 'MacOS', 'Blob');
-  const icon = join(app, 'Contents', 'Resources', 'blob.icns');
-  const info = macInfoPlist(d.version), launcher = macLauncher(d.command, d.path, join(d.blobHome, 'logs', 'blob-app.log'));
+  const app = macAppPath(d.home), contents = join(app, 'Contents'), node = macAppNode(d.home);
+  const plist = join(contents, 'Info.plist'), launch = join(contents, 'MacOS', 'blob-launch');
+  const icon = join(contents, 'Resources', 'blob.icns'), copied = join(contents, 'Resources', 'node.json'), libDir = join(contents, 'lib');
+  const info = macInfoPlist(d.version), launcher = macLauncher(d.command, d.path, join(d.blobHome, 'logs', 'blob-app.log'), node);
+  // Node, and Homebrew's libnode, which Node finds next to itself through @loader_path/../lib
+  const real = d.real(d.command.exe), lib = join(dirname(real), '..', 'lib');
+  const libs = real === node ? [] : d.list(lib).filter(f => /^libnode\..*dylib$/.test(f)).map(f => join(lib, f));
+  const stamp = JSON.stringify([real, ...libs].map(f => `${f} ${d.stamp(f)}`));
+  const nodeNew = real !== node && !(d.read(copied) === stamp && d.exists(node));
   // Rewritten only when it changed: a new signature is a new app to macOS, which would ask for the microphone again.
-  if (d.read(plist) === info && d.read(exe) === launcher && d.exists(icon)) return;
+  if (!nodeNew && d.read(plist) === info && d.read(launch) === launcher && d.exists(icon)) return;
   d.write(plist, info);
-  d.write(exe, launcher, 0o755);
+  d.write(launch, launcher, 0o755);
   d.copy(join(d.assets, 'blob.icns'), icon);
+  if (nodeNew) {
+    for (const f of d.list(libDir)) d.remove(join(libDir, f));          // an older libnode
+    for (const f of libs) {
+      d.copy(f, join(libDir, basename(f)));
+      await d.run('codesign', ['--force', '--sign', '-', join(libDir, basename(f))]);
+    }
+    d.copy(real, node);
+    await d.run('codesign', ['--force', '--sign', '-', '--identifier', APP_ID, node]);
+    d.write(copied, stamp);
+  }
   await d.run('codesign', ['--force', '--sign', '-', app]);   // ad hoc: a signature macOS can tie the permission to
 }
 
@@ -150,11 +184,19 @@ export async function linuxInstall(d: LauncherDeps): Promise<void> {
 
 export function systemLauncher(blobHome: string, command: StartCommand, version: string): LauncherDeps {
   return {
-    home: homedir(), blobHome, command, path: process.env.PATH ?? '', assets: ASSETS, version,
+    home: homedir(), blobHome, command, path: cleanPath(process.env.PATH ?? ''), assets: ASSETS, version,
     read: file => { try { return readFileSync(file, 'utf8'); } catch { return undefined; } },
     write: (file, text, mode) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); if (mode) chmodSync(file, mode); },
-    copy: (from, to) => { mkdirSync(dirname(to), { recursive: true }); copyFileSync(from, to); },
+    copy: (from, to) => {
+      mkdirSync(dirname(to), { recursive: true });
+      rmSync(to, { force: true });
+      copyFileSync(from, to, constants.COPYFILE_FICLONE);                // a clone where the disk can: no second 100 MB
+    },
+    remove: file => rmSync(file, { force: true }),
     exists: existsSync,
+    real: realpathSync,
+    list: dir => { try { return readdirSync(dir); } catch { return []; } },
+    stamp: file => { const s = statSync(file); return `${s.size} ${s.mtimeMs}`; },
     run: (cmd, args, env) => new Promise(res => execFile(cmd, args, { windowsHide: true, timeout: 20_000, env: { ...process.env, ...env } }, err => res(!err))),
   };
 }

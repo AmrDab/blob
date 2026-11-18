@@ -1,7 +1,7 @@
 // Starting at sign-in, with a fake system: nothing here touches the registry, the Startup folder or LaunchAgents.
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RUN_KEY, macPlist, setAutostart, stableNode, startCommand, windowsRunValue, windowsScript, type AutostartDeps } from '../src/autostart.ts';
+import { RUN_KEY, cleanPath, macPlist, setAutostart, stableNode, startCommand, windowsRunValue, windowsScript, type AutostartDeps } from '../src/autostart.ts';
 import { osFor } from '../src/os/index.ts';
 
 function fake(platform: string, regOk = true) {
@@ -80,6 +80,12 @@ describe('start at sign-in', () => {
     const f = fake('darwin');
     f.deps.write = () => { throw new Error('read-only'); };
     expect(await setAutostart(true, f.deps, f.apply)).toEqual({ ok: false, text: 'Could not change it: read-only' });
+  });
+
+  it("drops what npm start put on PATH, for this run only", () => {
+    expect(cleanPath('/Users/a/blob/node_modules/.bin:/Users/node_modules/.bin:/x/npm/node-gyp-bin:/opt/homebrew/bin::/usr/bin'))
+      .toBe('/opt/homebrew/bin:/usr/bin');
+    expect(cleanPath('C:\\blob\\node_modules\\.bin;C:\\Windows;C:\\Program Files\\nodejs')).toBe('C:\\Windows;C:\\Program Files\\nodejs');
   });
 
   it('quotes the script for cmd', () => {

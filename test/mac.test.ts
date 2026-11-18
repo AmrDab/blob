@@ -1,6 +1,6 @@
 // The macOS-only native set-up, against a fake Objective-C runtime: nothing here loads a system library.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EDIT_MENU, WEB_VIEW_CLASS, acceptFirstClick, afterLaunch, everywhere, loadObjC, macSetup, quitOnTerminate, type ObjC } from '../src/mac.ts';
+import { EDIT_MENU, WEB_VIEW_CLASS, acceptFirstClick, afterLaunch, everywhere, loadObjC, macSetup, onReopen, quitOnTerminate, type ObjC } from '../src/mac.ts';
 import { osFor } from '../src/os/index.ts';
 
 interface FakeClass { name: string }
@@ -10,7 +10,7 @@ interface FakeWin { behavior: number; canHide: number; content: FakeView }
  * A runtime with an app, its windows and a record of what was replaced and set. Each window's content view holds a
  * web view (named as the window library names it at run time) while `webview` is not false; it is read on each walk.
  */
-function fake(opts: { webview?: boolean; policy?: number; windows?: number[] } = {}) {
+function fake(opts: { webview?: boolean; policy?: number; windows?: number[]; delegate?: boolean } = {}) {
   const state = { policy: opts.policy ?? 0, sets: [] as string[] };
   const webClass: FakeClass = { name: 'wry::wkwebview::class::wry_web_view::WryWebView0.55.1' };
   const parentClass: FakeClass = { name: 'wry::wkwebview::class::wry_web_view_parent::WryWebViewParent0.55.1' };
@@ -20,12 +20,14 @@ function fake(opts: { webview?: boolean; policy?: number; windows?: number[] } =
     content: { cls: parentClass, subs: () => (opts.webview === false ? [] : [webView]) },
   }));
   const nsapp = { app: true }, appClass: FakeClass = { name: 'TaoApp' };
+  const delegate = { cls: { name: 'TaoAppDelegate' } };
   const replaced = new Map<string, { cls: unknown; types: string; fn: () => boolean | void }>();
   const objc: ObjC = {
     cls: name => (name === 'NSApplication' ? { name } : null),
     classOf: obj => (obj === nsapp ? appClass : (obj as FakeView).cls),
     name: cls => (cls as FakeClass).name,
     send: (obj, sel) => (sel === 'sharedApplication' ? nsapp : sel === 'windows' ? wins
+      : sel === 'delegate' ? (opts.delegate === false ? null : delegate)
       : sel === 'contentView' ? (obj as FakeWin).content : sel === 'subviews' ? (obj as FakeView).subs() : null),
     at: (obj, _sel, i) => (obj as unknown[])[i],
     num: (obj, sel) => (sel === 'activationPolicy' ? state.policy : sel === 'count' ? (obj as unknown[]).length : (obj as FakeWin).behavior),
@@ -37,7 +39,7 @@ function fake(opts: { webview?: boolean; policy?: number; windows?: number[] } =
     },
     replace: (cls, sel, types, fn) => { replaced.set(sel, { cls, types, fn }); },
   };
-  return { objc, state, wins, replaced, appClass, webClass };
+  return { objc, state, wins, replaced, appClass, webClass, delegate };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -87,6 +89,34 @@ describe('Cmd+Q', () => {
     expect(quit).not.toHaveBeenCalled();         // not from inside the event pump
     await new Promise(r => setImmediate(r));
     expect(quit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('opened again while open', () => {
+  it("the app delegate's answer runs reopen just after, and says no to macOS's own handling", async () => {
+    const f = fake(), reopen = vi.fn();
+    expect(onReopen(f.objc, reopen, 'arm64')).toBe(true);
+    const m = f.replaced.get('applicationShouldHandleReopen:hasVisibleWindows:')!;
+    expect(m.cls).toBe(f.delegate.cls);
+    expect(m.types).toBe('B@:@B');
+    expect(m.fn()).toBe(false);
+    expect(reopen).not.toHaveBeenCalled();       // not from inside the event pump
+    await new Promise(r => setImmediate(r));
+    expect(reopen).toHaveBeenCalledTimes(1);
+    const intel = fake();
+    onReopen(intel.objc, reopen, 'x64');
+    expect(intel.replaced.get('applicationShouldHandleReopen:hasVisibleWindows:')!.types).toBe('c@:@c');
+  });
+
+  it('waits for the delegate, and is set once', () => {
+    const opts = { delegate: false }, f = fake(opts);
+    expect(onReopen(f.objc, () => {}, 'arm64')).toBe(false);
+    const timers: Array<() => void> = [];
+    macSetup({ setMenu: vi.fn() }, () => {}, { arch: 'arm64', load: () => f.objc, later: fn => timers.push(fn), reopen: () => {} });
+    opts.delegate = true;
+    const replace = vi.spyOn(f.objc, 'replace');
+    timers.forEach(t => t());
+    expect(replace.mock.calls.filter(c => c[1] === 'applicationShouldHandleReopen:hasVisibleWindows:')).toHaveLength(1);
   });
 });
 

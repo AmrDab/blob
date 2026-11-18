@@ -22,6 +22,10 @@ export function stableNode(execPath: string, path: string, real: (p: string) => 
   return path.split(':').filter(Boolean).map(d => join(d, 'node')).find(same) ?? execPath;
 }
 
+/** PATH without what `npm start` put in front of it (node_modules/.bin, node-gyp-bin): only for that one run. */
+export const cleanPath = (path: string, sep = path.includes(';') ? ';' : ':') =>
+  path.split(sep).filter(d => d && !/node_modules[\\/]\.bin|node-gyp-bin/.test(d)).join(sep);
+
 export interface AutostartDeps {
   home: string;                // the user's home folder
   blobHome: string;            // ~/.blob
@@ -108,7 +112,7 @@ export async function setAutostart(on: boolean, d: AutostartDeps, apply?: Apply)
 
 /** The real system. `exe`: the system's lasting path to this Node (os.autostart.exe), where it has one. */
 export function systemAutostart(exe?: (exe: string, path: string) => string): AutostartDeps {
-  const path = process.env.PATH ?? '', command = startCommand();
+  const path = cleanPath(process.env.PATH ?? ''), command = startCommand();
   if (exe) command.exe = exe(command.exe, path);
   return {
     home: homedir(), blobHome: blobHome(), command, path,
