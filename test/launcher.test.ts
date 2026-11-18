@@ -3,7 +3,7 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  MIC_REASON, handedOn, linuxDesktopEntry, linuxInstall, linuxLauncherScript, macAppNode, macInfoPlist, macInstall, macLauncher, macOpenArgs,
+  MIC_REASON, handedOn, linuxDesktopEntry, linuxInstall, linuxLauncherScript, macAppNode, macInfoPlist, macInstall, macLauncher, macOpenArgs, macStart,
   winInstall, winShortcut, winShortcutPath, type LauncherDeps,
 } from '../src/launcher.ts';
 
@@ -17,7 +17,7 @@ function fake(): LauncherDeps & { files: Map<string, string>; modes: Map<string,
   const ran: { cmd: string; args: string[]; env?: Record<string, string> }[] = [];
   return {
     files, modes, ran, broken,
-    home: 'H', blobHome: join('H', '.blob'), command: COMMAND, path: '/opt/homebrew/bin:/usr/bin', assets: 'A', version: '0.1.0',
+    home: 'H', blobHome: join('H', '.blob'), command: COMMAND, path: '/opt/homebrew/bin:/usr/bin', assets: 'A',
     read: f => files.get(f),
     write: (f, t, mode) => { files.set(f, t); if (mode) modes.set(f, mode); },
     copy: (from, to) => files.set(to, `copy of ${from}`),
@@ -33,19 +33,25 @@ function fake(): LauncherDeps & { files: Map<string, string>; modes: Map<string,
 describe('Blob.app (macOS)', () => {
   const app = join('H', 'Applications', 'Blob.app');
 
-  it('names Blob, has no Dock icon, and says why it asks for the microphone', () => {
-    const p = macInfoPlist('1.2.3');
+  it('names Blob, has no Dock icon, says why it asks for the microphone, and carries no version (an update leaves it alone)', () => {
+    const p = macInfoPlist();
     expect(p).toContain('<key>CFBundleName</key><string>Blob</string>');
     expect(p).toContain('<key>CFBundleExecutable</key><string>blob-launch</string>');
     expect(p).toContain('<key>LSUIElement</key><true/>');
     expect(p).toContain(`<key>NSMicrophoneUsageDescription</key><string>${MIC_REASON}</string>`);
-    expect(p).toContain('<key>CFBundleShortVersionString</key><string>1.2.3</string>');
+    expect(p).not.toMatch(/Version/);
     expect(MIC_REASON).not.toMatch(/clawdcursor|node|terminal/i);
   });
 
-  it("its launcher runs the app's copy of Node with this same start, quoted for sh, and Node itself when the copy can't run", () => {
-    const s = macLauncher(COMMAND, '/opt/homebrew/bin:/usr/bin', '/H/.blob/logs/blob-app.log', '/H/Applications/Blob.app/Contents/MacOS/Blob');
+  it('its launcher only reads the start command from ~/.blob/launch.sh, so it is the same for every version', () => {
+    const s = macLauncher("/Users/a/it's/.blob/launch.sh");
     expect(s.startsWith('#!/bin/sh\n')).toBe(true);
+    expect(s).toContain("\n. '/Users/a/it'\\''s/.blob/launch.sh'\n");
+    expect(s).not.toMatch(/node|main\.ts/);
+  });
+
+  it("the start command runs the app's copy of Node with this same start, quoted for sh, and Node itself when the copy can't run", () => {
+    const s = macStart(COMMAND, '/opt/homebrew/bin:/usr/bin', '/H/.blob/logs/blob-app.log', '/H/Applications/Blob.app/Contents/MacOS/Blob');
     expect(s).toContain("cd '/Users/a/it'\\''s' || exit 1");
     expect(s).toContain("export PATH='/opt/homebrew/bin:/usr/bin'");
     expect(s).toContain("export BLOB_APP=1 BLOB_NODE='/opt/homebrew/bin/node'\n");
@@ -57,8 +63,9 @@ describe('Blob.app (macOS)', () => {
     const f = fake(), node = macAppNode('H'), lib = join(app, 'Contents', 'lib', 'libnode.141.dylib');
     expect(node).toBe(join(app, 'Contents', 'MacOS', 'Blob'));
     await macInstall(f);
-    expect(f.files.get(join(app, 'Contents', 'Info.plist'))).toBe(macInfoPlist('0.1.0'));
-    expect(f.files.get(join(app, 'Contents', 'MacOS', 'blob-launch'))).toContain('export BLOB_APP=1');
+    expect(f.files.get(join(app, 'Contents', 'Info.plist'))).toBe(macInfoPlist());
+    expect(f.files.get(join(app, 'Contents', 'MacOS', 'blob-launch'))).toBe(macLauncher(join('H', '.blob', 'launch.sh')));
+    expect(f.files.get(join('H', '.blob', 'launch.sh'))).toContain('export BLOB_APP=1');
     expect(f.modes.get(join(app, 'Contents', 'MacOS', 'blob-launch'))).toBe(0o755);
     expect(f.files.get(join(app, 'Contents', 'Resources', 'blob.icns'))).toBe(`copy of ${join('A', 'blob.icns')}`);
     expect(f.files.get(node)).toBe(`copy of ${CELLAR}`);                     // the real file, not the link
@@ -70,9 +77,17 @@ describe('Blob.app (macOS)', () => {
     ]);
     await macInstall(f);
     expect(f.ran).toHaveLength(3);
-    f.version = '0.2.0';                           // an update: written and signed again, Node not copied again
+  });
+
+  it('an update changes only ~/.blob/launch.sh: the app is not written or signed again, so macOS keeps its permissions', async () => {
+    const f = fake(), inApp = () => [...f.files].filter(([k]) => k.startsWith(app)).sort().join();
     await macInstall(f);
-    expect(f.ran.slice(3).map(r => r.args)).toEqual([['--force', '--sign', '-', app]]);
+    const before = inApp();
+    f.command = { ...COMMAND, args: ['/Users/a/.blob/app/0.2.0/node_modules/theblob/cli.js'] };
+    await macInstall(f);
+    expect(f.files.get(join('H', '.blob', 'launch.sh'))).toContain("'/Users/a/.blob/app/0.2.0/node_modules/theblob/cli.js'");
+    expect(inApp()).toBe(before);
+    expect(f.ran).toHaveLength(3);
   });
 
   it('keeps its copy of Node through upgrades (a new copy would lose the permissions), and copies it again only when it no longer runs', async () => {

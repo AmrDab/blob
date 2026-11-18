@@ -235,6 +235,13 @@ describe('the other self tools', () => {
     expect(hosted).toHaveLength(1);
   });
 
+  it('hands "check for updates" to the host, which looks and asks in its own words', async () => {
+    expect(outcome(await tools().update())).toBe('confirmed');
+    expect(hosted).toEqual([['update', undefined]]);
+    expect(asked).toEqual([]);
+    expect(persona(DEFAULTS)).toMatch(/"check for updates" or "update yourself" call update/);
+  });
+
   it('pair_phone asks first: no QR without a Yes, and none at all without a relay', async () => {
     expect(outcome(await tools().pair_phone())).toBe('refused');   // the user said No
     expect(asked).toEqual(['Pair a phone with Blob?']);

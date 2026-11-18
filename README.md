@@ -121,6 +121,20 @@ is at `/phone/` there). To run your own, deploy `relay/` (a small Cloudflare Wor
 in `phone/`) and name it in `BLOB_RELAY`. `BLOB_RELAY=''` turns phones off: Blob then says plainly that phone pairing
 isn't set up.
 
+## Updates
+
+A Blob installed from npm (`npx theblob`) updates itself. When it starts, and once a day, it asks npm for the newest
+version; nothing is sent but that request. When there is a newer one and Blob is idle, a card asks: "Blob 0.2.0 is
+out. Update now?" On Yes it installs it and starts again by itself, then says "Updated to 0.2.0". On No it never
+asks about that version again. You can also say "check for updates" or "update yourself" at any time.
+
+Each version goes into its own folder, `~/.blob/app/<version>`, with no admin rights and no terminal. The version
+before is kept (to go back, start its `node_modules/theblob/cli.js` with Node); older ones are removed. If an update
+fails, Blob says so and stays as it was. On a Mac, Blob.app itself is not changed by an update, so macOS keeps the
+permissions you gave it.
+
+A Blob run from a clone of this repository does not update itself: use `git pull`.
+
 ## Privacy
 
 - **Watching is learn-only**, and off until you say Yes. Blob notes which app, window title and website are in
@@ -154,7 +168,8 @@ isn't set up.
 
 State in `~/.blob/`: `settings.json`, `memory.md`, `schedule.json`, `shortcuts.json`, `habits.json`, `activity.jsonl`,
 `pair.json`, `logs/` (on a Mac also `blob-app.log`, Blob.app's output), `start.cmd` (Windows, when Blob starts at
-sign-in), and what the app entry starts: `launch.cmd` and `launcher.json` (Windows), `launch.sh` (Linux).
+sign-in), what the app entry starts: `launch.cmd` and `launcher.json` (Windows), `launch.sh` (macOS, Linux), and for
+updates `app/` (the installed versions) and `update.json` (a version you said No to).
 
 ## Develop
 
@@ -176,6 +191,7 @@ sign-in), and what the app entry starts: `launch.cmd` and `launcher.json` (Windo
 - `src/pill-host.ts`, `src/pill.ts`, `src/overlay.ts`, `src/own-ui.ts`: clawdcursor's pill, drawn by Blob, and
   keeping Blob's own windows out of the agent's reach.
 - `src/pair.ts`, `src/pair-crypto.ts`, `relay/`, `phone/`: phone pairing.
+- `src/update.ts`: the look at npm for a newer version, its install into `~/.blob/app/<version>` and the switch.
 - `src/setup.ts`: the first-run check and its one-tap fixes. `src/focus.ts`: gives the keyboard back after a click.
 - `src/ui/`: the blob and its cards (`liquid-gooey`, `voice-ring`, `thinking-orbs`, `border-beam` from
   [Libraries.dev](https://libraries.dev)) and speech (`@huggingface/transformers`).

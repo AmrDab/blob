@@ -1,6 +1,6 @@
 // What macOS and Linux share.
 import { execFile } from 'node:child_process';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import type { Exec, Os } from './types.ts';
 
 const shell: Os['shell'] = {
@@ -33,6 +33,7 @@ export const posix = {
     return 'claude';                                  // not found: starting it fails, and the first-run check says so
   },
   findCodex: () => ({ command: 'codex', args: [] }),
+  npmCli: node => join(dirname(dirname(node)), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),   // <prefix>/bin/node
   claudeInstall: 'curl -fsSL https://claude.ai/install.sh | bash',
   trashName: 'Trash',
 } satisfies Partial<Os>;
