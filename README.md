@@ -3,6 +3,8 @@
 A small floating blob on your desktop that does tasks on your computer. Tell it what to do, by voice or by typing,
 and it does it while you watch, then says in a sentence that it is done.
 
+![Blob at rest, with its buttons out on hover, asking Yes or No before a command, and its pill while it works](docs/look.png)
+
 - **Any task, the fastest way.** It opens a link, a file or an app directly, runs a command when one does the job,
   uses its file tools for files, and works an app's window only as the last resort.
 - **The right model for the job.** On Auto (the default) each request starts on Haiku; Sonnet, then Opus, take over
@@ -41,6 +43,13 @@ so with Codex too Blob's tools are the only way to act. With Codex the chip says
 model.
 
 > Early and in progress. Windows first; macOS and Linux are planned.
+
+## How it works
+
+![You speak or type; Blob passes it to your own Claude Code or Codex, which takes the fastest route, asks Yes before any change, and answers in one sentence](docs/how-it-works.svg)
+
+The quickest way that works comes first and the screen comes last. Anything that changes something waits for your
+Yes. The picture at the top of this page is Blob's own interface, drawn by its own code.
 
 ## Install
 
