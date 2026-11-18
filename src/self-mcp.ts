@@ -9,6 +9,7 @@ import { frequentTasks, habitsFile } from './habits.ts';
 import { MAX_FACT, SECRET, UNSAFE_FACT, facts, forget, matching, memoryBrief, memoryFile, normalFact, remember } from './memory.ts';
 import { persona } from './persona.ts';
 import { MAX_TEXT, addEntry, describe, loadSchedule, nextDue, parseWhen, removeEntry, scheduleFile, stamp } from './schedule.ts';
+import { MAX_DESCRIPTION, MAX_STEPS, skillTools, skillsBrief, skillsDir } from './skills.ts';
 import { BRAINS, BRAIN_NAME, CHANGEABLE, DEFAULTS, MODELS, SettingsStore, WHAT, parseValue, type BrainName, type Key, type Settings } from './settings.ts';
 import { claudeCommand } from './brain.ts';
 import { brains } from './setup.ts';
@@ -34,6 +35,7 @@ export interface SelfDeps {
   habitsFile: string;
   memoryFile: string;
   scheduleFile: string;
+  skillsDir: string;
   now?: () => number;
 }
 
@@ -85,7 +87,7 @@ export function selfTools(d: SelfDeps) {
     about(): ToolResult {
       const s = d.settings.get();
       const lines = (Object.keys(DEFAULTS) as Key[]).map(k => `- ${k} = ${String(s[k])}: ${WHAT[k]}`);
-      return { text: `${persona(s, { memory: memoryBrief(d.memoryFile) })}\n\nSettings (the user can change ${CHANGEABLE.join(', ')}):\n${lines.join('\n')}`, isError: false };
+      return { text: `${persona(s, { memory: memoryBrief(d.memoryFile), skills: skillsBrief(d.skillsDir) })}\n\nSettings (the user can change ${CHANGEABLE.join(', ')}):\n${lines.join('\n')}`, isError: false };
     },
 
     /** Changes nothing here: on auto, the host hands the request to the next model once this one's turn has ended (ladder.ts). */
@@ -225,6 +227,9 @@ export function selfTools(d: SelfDeps) {
       try { removeEntry(d.scheduleFile, id); } catch (err) { return failed('CANT_SAVE', (err as Error).message); }
       return ok('Removed.');
     },
+
+    // ── skills (skills.ts) ──
+    ...skillTools({ dir: d.skillsDir, ask: d.ask }),
   };
 }
 
@@ -245,6 +250,7 @@ export async function serve(): Promise<void> {
     habitsFile: habitsFile(),
     memoryFile: memoryFile(),
     scheduleFile: scheduleFile(),
+    skillsDir: skillsDir(),
   });
   const server = new McpServer({ name: 'blob', version: '0.1.0' });
   const reply = (r: ToolResult) => ({ content: [{ type: 'text' as const, text: r.text }], isError: r.isError });
@@ -322,5 +328,28 @@ export async function serve(): Promise<void> {
     description: 'Remove a reminder or scheduled task by its id. The user is asked first.',
     inputSchema: { id: z.string() }, annotations: { destructiveHint: true },
   }, async a => reply(await tools.schedule_remove(a)));
+  server.registerTool('skill_save', {
+    description: 'Offer to save a skill: a short written recipe for a task that just worked and could come up again, ' +
+      'to read and follow the next time. The user is shown the description and the recipe and asked Yes or No; ' +
+      'the same name replaces a saved skill (asked too). Never a password, code, key or personal data. A name the ' +
+      'user said No to is not offered again.',
+    inputSchema: {
+      name: z.string().describe('Lower-case words joined by dashes, at most 40 characters: "send-weekly-report".'),
+      description: z.string().describe(`What the skill does, one plain line, at most ${MAX_DESCRIPTION} characters.`),
+      steps: z.string().describe(`The recipe, at most ${MAX_STEPS} characters (it is shown whole on the Yes card): what ` +
+        'worked, in order, the fastest route, what to avoid. Written so it fits another file, person or wording.'),
+    },
+  }, async a => reply(await tools.skill_save(a)));
+  server.registerTool('skill_read', {
+    description: 'The recipe of a saved skill. Read it before a task the skill covers, and follow it.',
+    inputSchema: { name: z.string() }, annotations: read,
+  }, async a => reply(tools.skill_read(a)));
+  server.registerTool('skill_list', {
+    description: 'The saved skills, name and description, and the names the user said No to.', inputSchema: {}, annotations: read,
+  }, async () => reply(tools.skill_list()));
+  server.registerTool('skill_remove', {
+    description: 'Remove a saved skill by its name. The user is asked first.',
+    inputSchema: { name: z.string() }, annotations: { destructiveHint: true },
+  }, async a => reply(await tools.skill_remove(a)));
   await server.connect(new StdioServerTransport());
 }

@@ -27,8 +27,8 @@ export interface Script {
 export interface ScriptDeps extends ShellDeps { dir: string }
 
 /** Lower-case words joined by single dashes. (And not a name Windows keeps for a device.) */
-const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const DEVICE = /^(con|prn|aux|nul|com\d|lpt\d)$/;
+export const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+export const DEVICE = /^(con|prn|aux|nul|com\d|lpt\d)$/;
 /**
  * Text that deletes, uninstalls, ends, powers off, sends or pays, in PowerShell or sh: such a script asks every time,
  * whatever was said at save. (Format-Table and its kin only lay out text.)

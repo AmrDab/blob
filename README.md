@@ -87,6 +87,11 @@ Blob walks you through it on small cards, one at a time:
   confirm. When the same task has worked 3 times, Blob makes the shortcut, pins it on the blob and asks once: "Keep
   it?" You can also say "save that as a shortcut" after a task; Blob shows you the steps and asks first. **+** shows
   all of them: click one to pin or unpin it, or its small × to remove it.
+- **Skills.** A skill is a short note on how a task was done: the steps that worked, in order. After a task with
+  several steps that could come up again, Blob asks once: "Save "…" as a skill?", with the note shown under it. On
+  Yes it is kept in `~/.blob/skills/` as a plain file you can read and edit, and Blob follows it the next time, also
+  with another file or person. On No, Blob does not offer that one again. "What skills do you have?" lists them;
+  "forget the weekly report skill" removes one (it asks first).
 - **While it works**, a pill at the top of the screen says what Blob is doing and has **Stop**. When Blob needs you
   (a sign-in, a choice), the pill becomes a card that waits for you.
 

@@ -28,6 +28,7 @@ import { keepOwnUiFile } from './own-ui.ts';
 import { Pairing, createRoom, loadRoom, pairFile, qrSvg, qrUrl, saveRoom, type Reply, type RoomInfo } from './pair.ts';
 import { persona } from './persona.ts';
 import { scriptsBrief, scriptsDir } from './scripts.ts';
+import { skillsBrief, skillsDir } from './skills.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
 import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } from './schedule.ts';
@@ -688,7 +689,7 @@ writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer, d
 brain = new Brain({
   mcpConfigPath, servers: mcpServers({ files: filesServer, blob: selfServer, desk: deskServer }), cwd: WORK, emit: onBrain,
   persona: (b, tier) => persona(settings.get(), {
-    memory: memoryBrief(memoryFile()), computer: computerBrief(computerFile()), scripts: scriptsBrief(scriptsDir()), brain: b, tier,
+    memory: memoryBrief(memoryFile()), computer: computerBrief(computerFile()), scripts: scriptsBrief(scriptsDir()), skills: skillsBrief(skillsDir()), brain: b, tier,
   }),
   context: computerNow(os.openApps?.(process.pid, procs)),
 });
