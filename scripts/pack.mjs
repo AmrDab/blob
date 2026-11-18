@@ -31,6 +31,7 @@ await build({
   logLevel: 'warning',
 });
 cpSync(join(root, 'dist'), join(out, 'dist'), { recursive: true });
+cpSync(join(root, 'assets'), join(out, 'assets'), { recursive: true });   // the icons of the entry Blob is opened from (launcher.ts)
 cpSync(join(root, 'LICENSE'), join(out, 'LICENSE'));
 
 writeFileSync(join(out, 'cli.js'), `#!/usr/bin/env node
@@ -62,7 +63,7 @@ writeFileSync(join(out, 'package.json'), JSON.stringify({
   type: 'module',
   bin: { theblob: 'cli.js' },
   dependencies: Object.fromEntries(NATIVE.map(n => [n, app.dependencies[n]])),
-  files: ['cli.js', 'app', 'dist', 'LICENSE', 'README.md'],
+  files: ['cli.js', 'app', 'dist', 'assets', 'LICENSE', 'README.md'],
   engines: { node: '>=24' },
   os: ['win32', 'darwin'],
   repository: { type: 'git', url: 'https://github.com/AmrDab/blob.git' },

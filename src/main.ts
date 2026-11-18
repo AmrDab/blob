@@ -2,7 +2,7 @@
 // the settings (changed by asking Blob, never by a menu), the files and self servers' questions, the desk (open
 // windows worked in the background, Windows only), clawdcursor's pill,
 // the paired phone, the learn-only watcher, reminders and scheduled tasks, starting at sign-in, focus hand-back, the
-// log file and the first-run check.
+// log file, the first-run check and updates.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -36,6 +36,7 @@ import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, t
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
 import { fix, fixNote, macNeeds, pickBrain, runChecks, type Check } from './setup.ts';
+import { install, installed, latest, newer, question as updateQuestion, skip, switchTo, systemUpdate, toOffer } from './update.ts';
 import { Watcher, activityFile, clawdcursorReader } from './watch.ts';
 
 const HOME = blobHome();
@@ -50,16 +51,26 @@ const PAIR = pairFile();
 const RELAY = (process.env.BLOB_RELAY ?? 'https://theblob.pages.dev').trim().replace(/^ws/, 'http').replace(/\/+$/, '');
 const QR_MS = 2 * 60_000;                           // how long an unscanned QR stays up
 const KEEP_MS = 10 * 60_000;                        // how long the "Keep it?" offer stays up
+const UPDATE_MS = 24 * 60 * 60_000;                 // how often Blob looks for a newer version
 const SCHEDULE = scheduleFile();
 const SCHEDULE_MS = 20_000;                         // how often the host looks for a due reminder or task
 const DIST = resolve(import.meta.dirname, '..', 'dist');
 // A fixed port keeps the page's origin, and so the cached Whisper model, the same across starts; any free port if taken.
 const PORT = 47615;
 const START = { w: 320, h: 230 };
+// This Blob's own package.json: its version, and its name (`theblob`: the installed package; else a source checkout).
+const PKG = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')) as { name: string; version: string };
+const UPDATED = process.env.BLOB_UPDATED;           // this Blob was started by the version it updated from
+const UPDATED_PID = Number(process.env.BLOB_UPDATED_PID);   // and that version's process, which is quitting
+delete process.env.BLOB_UPDATED;                    // said once: not handed on to a restart
+delete process.env.BLOB_UPDATED_PID;
 const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.woff2': 'font/woff2' };
 
 // ── one Blob, opened the system's way ────────────────────────────────────────
 // Blob is already open for this home: that one comes forward, and this one leaves.
+// The version that started this one is quitting: wait for it to be gone (15 s at most), or this one would hand over to it.
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+for (let i = 0; UPDATED_PID && i < 60 && alive(UPDATED_PID); i++) await new Promise(r => setTimeout(r, 250));
 try {
   const r = await fetch(`http://127.0.0.1:${PORT}/show`, {
     method: 'POST', headers: { 'x-blob-show': '1' }, body: JSON.stringify({ home: HOME }), signal: AbortSignal.timeout(1500),
@@ -72,11 +83,10 @@ if (os.launcher && !process.env.BLOB_HOME && process.env.BLOB_NO_APP !== '1') {
   const command = startCommand();
   if (os.autostart?.exe) command.exe = os.autostart.exe(command.exe, process.env.PATH ?? '');
   if (inApp && process.env.BLOB_NODE) command.exe = process.env.BLOB_NODE;   // the Node the app's copy came from
-  const version = (JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')) as { version: string }).version;
-  try { await os.launcher.install(systemLauncher(HOME, command, version)); }
+  try { await os.launcher.install(systemLauncher(HOME, command)); }
   catch (e) { console.log(`Blob: the entry to open Blob from was not written (${(e as Error).message})`); }
   // macOS: started some other way (a terminal), Blob opens itself as Blob.app, so the microphone is asked for as Blob
-  if (os.launcher.app && !process.env.BLOB_APP && await os.launcher.app.open(process.env)) {
+  if (os.launcher.app && !process.env.BLOB_APP && await os.launcher.app.open({ ...process.env, ...(UPDATED && { BLOB_UPDATED: UPDATED }) })) {
     console.log(`Blob: opened as Blob.app (its output goes to ${join(LOGS, 'blob-app.log')})`);
     process.exit(0);
   }
@@ -419,9 +429,66 @@ function closeQr(say?: string): void {
   if (say) caption(say);
 }
 
+// ── updates (update.ts) ──────────────────────────────────────────────────────
+const updates = systemUpdate(HOME, PKG);
+let updating = false;
+let offered = '';                                   // the version whose offer is waiting or up
+/** No run, and no card or question open. */
+const idle = () => !brain.busy && !replaying && !pill && !questions.waiting && settings.get().onboarded
+  && !(pairing && !settings.get().phonePaired);
+
+/** Installs a version, then starts it when Blob is free, and this one quits. A failure says so and changes nothing. */
+async function update(version: string): Promise<void> {
+  if (updating) return;
+  updating = true;
+  caption('Updating…');
+  try {
+    const cli = await install(updates, version);
+    while (brain.busy || replaying) await new Promise(r => setTimeout(r, 1000));
+    switchTo(updates, cli);
+    quit();
+  } catch (e) {
+    updating = false;
+    console.log(`Blob: the update to ${version} failed: ${(e as Error).message}`);
+    caption(`The update to ${version} did not work. Nothing changed.`);
+  }
+}
+
+/** The offer, once Blob is idle. An offer, not a question (ask.ts). No: that version is never offered again. */
+function offerUpdate(version: string): void {
+  if (updating) { offered = ''; return; }
+  if (!idle()) { setTimeout(() => offerUpdate(version), 60_000).unref(); return; }
+  void questions.offer(updateQuestion(version), KEEP_MS).then(yes => {
+    offered = '';
+    if (yes) void update(version);
+    else if (yes === false) skip(updates, version);
+  });
+}
+
+/** At start and once a day. Never in a source checkout. */
+async function checkUpdate(): Promise<void> {
+  const version = await toOffer(updates);
+  if (!version || offered) return;
+  offered = version;
+  offerUpdate(version);
+}
+
+/** "Check for updates", "update yourself" (the self server): looks now, and asks Yes. */
+async function selfUpdate(): Promise<{ ok: boolean; text: string }> {
+  if (!installed(updates)) return { ok: true, text: 'This Blob runs from its source folder, so it does not update itself. Tell the user so.' };
+  if (updating) return { ok: true, text: 'Blob is updating already.' };
+  const version = await latest(updates);
+  if (!version) return { ok: false, text: 'Blob could not look for a newer version. Tell the user so' };
+  if (!newer(version, PKG.version)) return { ok: true, text: `Blob ${PKG.version} is the newest version.` };
+  if (!(await questions.ask(updateQuestion(version)))) return { ok: false, text: 'the user said No (or did not answer); nothing changed' };
+  void update(version);
+  return { ok: true, text: `Blob is installing ${version} now and starts again by itself when that is done. Tell the user so.` };
+}
+
 /** What only the host can do for the self server (self-mcp.ts). */
 async function selfAction(body: any): Promise<{ ok: boolean; text: string }> {
   if (body.action === 'save_shortcut') return saveLast();
+  if (body.action === 'update') return selfUpdate();
   if (body.action === 'pair') return showQr();
   if (body.action === 'unpair') {
     if (!pairing || !settings.get().phonePaired) return { ok: true, text: 'No phone is paired.' };
@@ -716,6 +783,14 @@ settings.watch();
 const savedRoom = loadRoom(PAIR);
 if (savedRoom) connectPhone(savedRoom, true);
 if (settings.get().phonePaired !== !!savedRoom) setPaired(!!savedRoom);
+
+// Updated: say so, and point the sign-in entry at this version (Blob.app, the Start menu and the app menu were at start).
+if (UPDATED) {
+  answer(`Updated to ${PKG.version}.`);
+  if (settings.get().startAtLogin) void applyAutostart(true);
+}
+void checkUpdate();
+setInterval(checkUpdate, UPDATE_MS).unref();
 
 // Reminders and scheduled tasks: a look now (for what came due while Blob was closed), then every 20 s.
 checkSchedule();

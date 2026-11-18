@@ -19,7 +19,7 @@ const signinCommand = (claude: string = claudeCommand()) => `${/\s/.test(claude)
 import { activityFile, forgetActivity, topActivity } from './watch.ts';
 
 /** What only the host can do. The host answers with a line for the model. */
-export type HostAction = 'save_shortcut' | 'pair' | 'unpair';
+export type HostAction = 'save_shortcut' | 'pair' | 'unpair' | 'update';
 export type Host = (action: HostAction, body?: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
 
 export interface SelfDeps {
@@ -154,6 +154,9 @@ export function selfTools(d: SelfDeps) {
       if (!(await d.ask('Unpair your phone?'))) return NO();
       return viaHost('unpair');
     },
+
+    /** The host looks for a newer Blob and asks the user before it installs one (update.ts). */
+    update(): Promise<ToolResult> { return viaHost('update'); },
 
     // ── memory (memory.ts) ──
     /** Asked first, with the fact shown: whatever is saved goes into every later request, so a page that tricked the
@@ -294,6 +297,9 @@ export async function serve(): Promise<void> {
   server.registerTool('unpair_phone', {
     description: 'Unpair the phone. The user is asked first.', inputSchema: {},
   }, async () => reply(await tools.unpair_phone()));
+  server.registerTool('update', {
+    description: 'Look for a newer Blob and update to it ("check for updates", "update yourself"). The user is asked first.', inputSchema: {},
+  }, async () => reply(await tools.update()));
   server.registerTool('remember', {
     description: 'Save one short fact in Blob\'s memory file on this computer: something the user asked to be ' +
       'remembered, or a lasting preference. Never a password, code or key. The user is asked first.',

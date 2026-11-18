@@ -49,6 +49,8 @@ export interface Os {
   findClaude(env: NodeJS.ProcessEnv, home: string, exists: (p: string) => boolean): string;
   /** How to start Codex with no shell in between. */
   findCodex(env: NodeJS.ProcessEnv, fs: { exists(p: string): boolean; read(p: string): string }): Command;
+  /** Where the npm that came with a Node is (its npm-cli.js), for the Node at this path (update.ts). */
+  npmCli(node: string): string;
   /** How Claude Code is installed, for the user to copy. */
   claudeInstall: string;
 

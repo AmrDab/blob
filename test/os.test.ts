@@ -46,6 +46,8 @@ describe('the operating system', () => {
     expect([m, l, bsd].map(o => o.cli(['npm', 'i']))).toEqual(Array(3).fill({ command: 'npm', args: ['i'] }));
     const none = { exists: () => false, read: () => '' }, local = join('/home/a', '.local', 'bin', 'claude');
     expect([w, m, l, bsd].map(o => o.findCodex({}, none))).toEqual(Array(4).fill({ command: 'codex', args: [] }));
+    expect(w.npmCli(join('C:', 'node', 'node.exe'))).toBe(join('C:', 'node', 'node_modules', 'npm', 'bin', 'npm-cli.js'));   // beside node.exe
+    expect([m, l].map(o => o.npmCli(join('/usr', 'local', 'bin', 'node')))).toEqual(Array(2).fill(join('/usr', 'local', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')));
     expect(w.findClaude({}, '/home/a', () => true)).toBe('claude');               // never looked for: its installer sets PATH
     expect([m, l, bsd].map(o => o.findClaude({}, '/home/a', p => p === local))).toEqual([local, local, local]);
   });

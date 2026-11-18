@@ -2,7 +2,9 @@
 //   macOS:   ~/Applications/Blob.app (Spotlight, Launchpad, Finder). Its Info.plist names Blob and says why it asks for
 //            the microphone. Its launcher runs the app's own copy of Node (Contents/MacOS/Blob): a program inside the
 //            app, so macOS shows the process as Blob and its web view finds the app's microphone line. Started any
-//            other way, Blob opens itself through the app (main.ts).
+//            other way, Blob opens itself through the app (main.ts). The start command is outside the app, in
+//            ~/.blob/launch.sh, so the app and its signature stay as they are when Blob updates (update.ts) and
+//            macOS keeps the permissions it gave.
 //   Windows: "Blob" in the Start menu.
 //   Linux:   "Blob" in the app menu.
 // Each runs this same start command (autostart.ts). The icons in assets/ were made once from site/favicon.svg.
@@ -23,7 +25,6 @@ export interface LauncherDeps {
   command: StartCommand;
   path: string;                // PATH, for a start with a bare one (Finder, launchd)
   assets: string;
-  version: string;
   read(file: string): string | undefined;
   write(file: string, text: string, mode?: number): void;
   /** A copy that is a new file: a program running from the old one carries on. */
@@ -45,8 +46,8 @@ const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // ── macOS ───────────────────────────────────────────────────────────────────
 
-/** LSUIElement: no Dock icon from the first moment (mac.ts makes Blob an accessory app too). */
-export function macInfoPlist(version: string): string {
+/** LSUIElement: no Dock icon from the first moment (mac.ts makes Blob an accessory app too). No version: an update leaves the app alone. */
+export function macInfoPlist(): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -57,7 +58,6 @@ export function macInfoPlist(version: string): string {
   <key>CFBundleExecutable</key><string>blob-launch</string>
   <key>CFBundleIconFile</key><string>blob</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>${xml(version)}</string>
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>${xml(MIC_REASON)}</string>
 </dict>
@@ -68,14 +68,19 @@ export function macInfoPlist(version: string): string {
 /** Blob.app's own copy of Node: the program the app's process runs. */
 export const macAppNode = (home: string) => join(macAppPath(home), 'Contents', 'MacOS', 'Blob');
 
-/**
- * Contents/MacOS/blob-launch, the app's start. `exec`: the app's copy of Node takes this process's place. When the copy
- * no longer runs (an upgrade removed a library it needs), Node itself does, and that Blob copies it again.
- * BLOB_NODE: the Node it was copied from, for that next copy.
- */
-export function macLauncher(c: StartCommand, path: string, log: string, own: string): string {
-  return `#!/bin/sh
+/** Contents/MacOS/blob-launch, the app's start: it reads the start command from ~/.blob/launch.sh, so it never changes. */
+export const macLauncher = (script: string) => `#!/bin/sh
 # Blob's launcher, written by Blob (launcher.ts).
+. ${sh(script)}
+`;
+
+/**
+ * ~/.blob/launch.sh, written at each start: what blob-launch runs. `exec`: the app's copy of Node takes that process's
+ * place. When the copy no longer runs (an upgrade removed a library it needs), Node itself does, and that Blob copies
+ * it again. BLOB_NODE: the Node it was copied from, for that next copy.
+ */
+export function macStart(c: StartCommand, path: string, log: string, own: string): string {
+  return `# Blob's start command, written by Blob (launcher.ts) at each start.
 cd ${sh(c.cwd)} || exit 1
 export PATH=${sh(path)}
 export BLOB_APP=1 BLOB_NODE=${sh(c.exe)}
@@ -88,8 +93,9 @@ exec "$node" ${c.args.map(sh).join(' ')} >> ${sh(log)} 2>&1
 export async function macInstall(d: LauncherDeps): Promise<void> {
   const app = macAppPath(d.home), contents = join(app, 'Contents'), node = macAppNode(d.home);
   const plist = join(contents, 'Info.plist'), launch = join(contents, 'MacOS', 'blob-launch');
-  const icon = join(contents, 'Resources', 'blob.icns'), libDir = join(contents, 'lib');
-  const info = macInfoPlist(d.version), launcher = macLauncher(d.command, d.path, join(d.blobHome, 'logs', 'blob-app.log'), node);
+  const icon = join(contents, 'Resources', 'blob.icns'), libDir = join(contents, 'lib'), script = join(d.blobHome, 'launch.sh');
+  const info = macInfoPlist(), launcher = macLauncher(script), start = macStart(d.command, d.path, join(d.blobHome, 'logs', 'blob-app.log'), node);
+  if (d.read(script) !== start) d.write(script, start);                  // outside the app: nothing to sign
   // Node is copied once, and again only when the copy no longer runs (not at every Node upgrade): a new copy is a new
   // program to macOS, which then asks again for every permission the user gave Blob.
   const real = d.real(d.command.exe), lib = join(dirname(real), '..', 'lib');
@@ -182,9 +188,9 @@ export async function linuxInstall(d: LauncherDeps): Promise<void> {
 
 // ── the real system ─────────────────────────────────────────────────────────
 
-export function systemLauncher(blobHome: string, command: StartCommand, version: string): LauncherDeps {
+export function systemLauncher(blobHome: string, command: StartCommand): LauncherDeps {
   return {
-    home: homedir(), blobHome, command, path: cleanPath(process.env.PATH ?? ''), assets: ASSETS, version,
+    home: homedir(), blobHome, command, path: cleanPath(process.env.PATH ?? ''), assets: ASSETS,
     read: file => { try { return readFileSync(file, 'utf8'); } catch { return undefined; } },
     write: (file, text, mode) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); if (mode) chmodSync(file, mode); },
     copy: (from, to) => {

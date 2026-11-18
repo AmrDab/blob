@@ -52,6 +52,11 @@ export class Questions {
     return this.add(question, timeoutMs, true);
   }
 
+  /** A question is open (an offer is not one). */
+  get waiting(): boolean {
+    return [...this.open.values()].some(q => !q.offer);
+  }
+
   /** The user's click; false when that question is already closed. */
   answer(id: string, yes: boolean): boolean {
     return this.close(id, yes);
