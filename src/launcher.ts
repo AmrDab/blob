@@ -131,17 +131,36 @@ export const macOpenArgs = (home: string, env: NodeJS.ProcessEnv) =>
 
 export const winShortcutPath = (appData: string) => join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Blob.lnk');
 
-/** The shortcut's own fields; it starts ~/.blob/launch.cmd hidden, as the sign-in entry does. */
-export function winShortcut(script: string, assets: string): { target: string; args: string; icon: string } {
+/**
+ * The shortcut's own fields; it starts ~/.blob/launch.cmd hidden, as the sign-in entry does. `id`: the app id Blob's
+ * process takes too (os/win.ts), which is how the taskbar knows Blob's window is this shortcut's app and not Node's.
+ */
+export function winShortcut(script: string, assets: string): { target: string; args: string; icon: string; id: string } {
   const run = windowsRunValue(script);
   const exe = 'powershell.exe';
-  return { target: exe, args: run.slice(exe.length + 1), icon: join(assets, 'blob.ico') };
+  return { target: exe, args: run.slice(exe.length + 1), icon: join(assets, 'blob.ico'), id: APP_ID };
 }
 
+// WScript.Shell can't write a shortcut's app id (System.AppUserModel.ID): that goes through the file's property store,
+// which PowerShell reaches only from C#.
+const LNK_ID = 'using System;using System.Runtime.InteropServices;'
+  + '[StructLayout(LayoutKind.Sequential)]public struct BlobKey{public Guid fmtid;public uint pid;}'
+  + '[StructLayout(LayoutKind.Sequential)]public struct BlobValue{public ushort vt;public IntPtr text;public IntPtr unused;}'
+  + '[ComImport,Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]public interface IBlobStore{'
+  + 'void GetCount(out uint n);void GetAt(uint i,out BlobKey k);void GetValue(ref BlobKey k,out BlobValue v);void SetValue(ref BlobKey k,ref BlobValue v);void Commit();}'
+  + 'public static class BlobLnk{'
+  + '[DllImport("shell32.dll",CharSet=CharSet.Unicode,PreserveSig=false)]static extern void SHGetPropertyStoreFromParsingName(string path,IntPtr bind,int flags,ref Guid iid,out IBlobStore store);'
+  // GPS_READWRITE; PKEY_AppUserModel_ID; VT_LPWSTR
+  + 'public static void SetId(string lnk,string id){Guid iid=typeof(IBlobStore).GUID;IBlobStore s;SHGetPropertyStoreFromParsingName(lnk,IntPtr.Zero,2,ref iid,out s);'
+  + 'BlobKey k=new BlobKey{fmtid=new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"),pid=5};BlobValue v=new BlobValue{vt=31,text=Marshal.StringToCoTaskMemUni(id)};'
+  + 's.SetValue(ref k,ref v);s.Commit();Marshal.ReleaseComObject(s);}}';
+
 /** WScript.Shell makes .lnk files; the values come in through the environment, so nothing needs quoting. */
-const LNK = '$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:BLOB_LNK);$s.TargetPath=$env:BLOB_LNK_TARGET;'
+const LNK = '$ErrorActionPreference="Stop";'
+  + '$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:BLOB_LNK);$s.TargetPath=$env:BLOB_LNK_TARGET;'
   + '$s.Arguments=$env:BLOB_LNK_ARGS;$s.IconLocation=$env:BLOB_LNK_ICON;$s.WorkingDirectory=$env:BLOB_LNK_DIR;'
-  + '$s.Description="Blob";$s.WindowStyle=7;$s.Save()';
+  + '$s.Description="Blob";$s.WindowStyle=7;$s.Save();'
+  + 'Add-Type -TypeDefinition $env:BLOB_LNK_CS;[BlobLnk]::SetId($env:BLOB_LNK,$env:BLOB_LNK_ID)';
 
 export async function winInstall(d: LauncherDeps, appData: string): Promise<void> {
   const script = join(d.blobHome, 'launch.cmd'), lnk = winShortcutPath(appData);
@@ -152,6 +171,7 @@ export async function winInstall(d: LauncherDeps, appData: string): Promise<void
   d.write(script, text);
   const ok = await d.run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', LNK], {
     BLOB_LNK: lnk, BLOB_LNK_TARGET: s.target, BLOB_LNK_ARGS: s.args, BLOB_LNK_ICON: s.icon, BLOB_LNK_DIR: d.command.cwd,
+    BLOB_LNK_ID: s.id, BLOB_LNK_CS: LNK_ID,
   });
   if (ok) d.write(stamp, want);
 }

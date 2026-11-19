@@ -8,7 +8,7 @@ import { winCursor } from '../clickthrough.ts';
 import { windowsApps, windowsProfile } from '../computer.ts';
 import { Bridge } from '../desk.ts';
 import { winKeeper } from '../focus.ts';
-import { winInstall } from '../launcher.ts';
+import { APP_ID, ASSETS, winInstall } from '../launcher.ts';
 import { winOverlay, winProtect } from '../overlay.ts';
 import { processLister } from '../own-ui.ts';
 import { windowsFront } from '../watch.ts';
@@ -73,6 +73,34 @@ const findCodex: Os['findCodex'] = (env, fs) => {
   return { command: 'codex', args: [] };            // not found: starting it fails, and the first-run check says so
 };
 
+/**
+ * The taskbar takes a window's app from its process, and Blob's is Node: without an app id of its own Blob's button
+ * is Node.js's, with Node's icon, grouped with every other Node app. With the id its Start menu shortcut carries
+ * (launcher.ts) the button is that shortcut's: its name and its icon.
+ */
+function appIdentity(): void {
+  try {
+    const hr = koffi().load('shell32.dll').func('int __stdcall SetCurrentProcessExplicitAppUserModelID(const char16_t *id)')(APP_ID);
+    if (hr) throw new Error(`Windows error ${hr}`);
+  } catch (e) { console.log(`Blob: the taskbar shows Blob as Node.js (${(e as Error).message})`); }
+}
+
+/** Blob's icon on its window, which the window library has no option for: what Alt+Tab shows, and the taskbar where there is no shortcut. */
+const windowIcon: Os['windowIcon'] = w => {
+  try {
+    const user32 = koffi().load('user32.dll');
+    const LoadImageW = user32.func('intptr_t __stdcall LoadImageW(intptr_t inst, const char16_t *name, uint32_t type, int cx, int cy, uint32_t flags)');
+    const SendMessageW = user32.func('intptr_t __stdcall SendMessageW(intptr_t hwnd, uint32_t msg, intptr_t w, intptr_t l)');
+    const GetSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int index)');
+    // the small icon (SM_CXSMICON) and the big one (SM_CXICON), each from the size in blob.ico nearest to it
+    for (const [which, metric] of [[0, 49], [1, 11]]) {
+      const size = GetSystemMetrics(metric);
+      const icon = LoadImageW(0, join(ASSETS, 'blob.ico'), 1, size, size, 0x10);   // IMAGE_ICON, LR_LOADFROMFILE
+      if (icon) SendMessageW(Number(w.getNativeHandle()), 0x80, which, icon);       // WM_SETICON
+    }
+  } catch (e) { console.log(`Blob: its window has no icon (${(e as Error).message})`); }
+};
+
 export const win: Os = {
   id: 'win32',
   name: 'Windows',
@@ -104,6 +132,8 @@ export const win: Os = {
   processes: processLister,
   frontWindow: windowsFront,
   launcher: { install: d => winInstall(d, process.env.APPDATA || join(d.home, 'AppData', 'Roaming')) },   // the Start menu
+  appIdentity,
+  windowIcon,
   autostart: { apply: windowsAutostart },
   desk: { bridge: o => new Bridge(o) },             // UI Automation, through desk-bridge.ps1
   cursor: winCursor,

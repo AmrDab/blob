@@ -88,6 +88,11 @@ export interface Os {
     app?: { open(env: NodeJS.ProcessEnv): Promise<boolean>; later(env: NodeJS.ProcessEnv): void; inApp(): boolean };
   };
 
+  /** Tells the system this process is Blob, not the Node it runs in, before its first window is made: the taskbar's name and icon for it (Windows). */
+  appIdentity?(): void;
+  /** Puts Blob's icon on its window, where the window library can't. */
+  windowIcon?(win: BrowserWindow): void;
+
   /** Starting Blob at sign-in (autostart.ts). `exe`: a path to this Node that lasts, where the one it runs from may not. */
   autostart?: { apply: Apply; exe?(exe: string, path: string): string };
 

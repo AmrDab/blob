@@ -801,6 +801,7 @@ checkSchedule();
 setInterval(checkSchedule, SCHEDULE_MS).unref();
 
 // ── window ───────────────────────────────────────────────────────────────────
+os.appIdentity?.();
 const app = new Application();
 const win = app.createBrowserWindow({
   title: 'Blob',
@@ -810,6 +811,7 @@ const win = app.createBrowserWindow({
   windowsUndecoratedShadow: false, macosHasShadow: false,
   visible: false,
 });
+os.windowIcon?.(win);
 {
   // Bottom-right of the primary display, above where a taskbar or dock usually sits.
   const m = win.getPrimaryMonitor();

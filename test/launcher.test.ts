@@ -3,7 +3,7 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  MIC_REASON, handedOn, linuxDesktopEntry, linuxInstall, linuxLauncherScript, macAppNode, macInfoPlist, macInstall, macLauncher, macOpenArgs, macStart,
+  APP_ID, MIC_REASON, handedOn, linuxDesktopEntry, linuxInstall, linuxLauncherScript, macAppNode, macInfoPlist, macInstall, macLauncher, macOpenArgs, macStart,
   winInstall, winShortcut, winShortcutPath, type LauncherDeps,
 } from '../src/launcher.ts';
 
@@ -127,6 +127,7 @@ describe('the Start menu (Windows)', () => {
     expect(s.target).toBe('powershell.exe');
     expect(s.args).toBe(`-NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'C:\\Users\\a\\.blob\\launch.cmd'"`);
     expect(s.icon).toBe(join('C:\\blob\\assets', 'blob.ico'));
+    expect(s.id).toBe(APP_ID);                                     // the taskbar ties Blob's window to the shortcut by this
   });
 
   it('is made once, its fields passed in the environment, and made again only when they change', async () => {
@@ -136,7 +137,7 @@ describe('the Start menu (Windows)', () => {
     expect(f.ran).toHaveLength(1);
     expect(f.ran[0].cmd).toBe('powershell.exe');
     expect(f.ran[0].args.join(' ')).not.toContain('H');           // no path in the command line itself
-    expect(f.ran[0].env).toMatchObject({ BLOB_LNK: lnk, BLOB_LNK_TARGET: 'powershell.exe', BLOB_LNK_ICON: join('A', 'blob.ico') });
+    expect(f.ran[0].env).toMatchObject({ BLOB_LNK: lnk, BLOB_LNK_TARGET: 'powershell.exe', BLOB_LNK_ICON: join('A', 'blob.ico'), BLOB_LNK_ID: APP_ID });
     f.files.set(lnk, 'made');                                      // the shortcut now exists
     await winInstall(f, appData);
     expect(f.ran).toHaveLength(1);
