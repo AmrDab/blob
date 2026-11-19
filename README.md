@@ -77,7 +77,8 @@ Opening it while it is already open brings the bubble forward.
 
 Blob walks you through it on small cards, one at a time:
 
-1. **Setup.** *Install Claude Code or Codex* and *Sign in* are commands to copy (they need your own login). *Install
+1. **Setup.** Every step is one tap. *Install Claude Code* runs its installer for you; *Sign in* opens your browser at the
+   sign-in page, and Blob carries on once you are through (it comes back by itself if the sign-in ever lapses). *Install
    clawdcursor* and *Give clawdcursor its OK* are one tap each. On a Mac, *Allow Blob to use your Mac* asks for
    Accessibility and Screen Recording, opens the right page of System Settings and notices by itself when you are
    done (Screen Recording may need Blob to be closed and opened again).

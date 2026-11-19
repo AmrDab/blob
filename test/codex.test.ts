@@ -148,13 +148,26 @@ describe('codex JSON events', () => {
 
   it('reports a failed turn as an error, with what Codex said', () => {
     const p = new CodexParser();
-    const msg = 'unexpected status 401 Unauthorized: Your session has expired. Please sign in again., url: http://127.0.0.1:48211/v1/responses';
+    const msg = 'unexpected status 503 Service Unavailable, url: http://127.0.0.1:48211/v1/responses';
     expect(p.feed('not json')).toEqual([]);
     expect(p.feed(`{"type":"error","message":"Reconnecting... 1/5 (${msg})"}`)).toEqual([{ type: 'caption', text: expect.stringMatching(/^Reconnecting\.\.\. 1\/5/) }]);
     expect(p.sawResult).toBe(false);
     expect(p.feed(`{"type":"turn.failed","error":{"message":"${msg}"}}`)).toEqual([{ type: 'answer', text: msg }]);
-    expect(p.sawResult).toBe(true);
-    expect(p.resultError).toBe(true);
+    expect(p).toMatchObject({ sawResult: true, resultError: true, signedOut: false });
+  });
+
+  it('a turn that failed signed out asks for the sign-in, and never shows Codex\'s own words', () => {
+    const msg = 'unexpected status 401 Unauthorized: Your session has expired. Please sign in again., url: http://127.0.0.1:48211/v1/responses';
+    const p = new CodexParser();
+    expect(p.feed(`{"type":"error","message":"Reconnecting... 1/5 (${msg})"}`)).toEqual([]);
+    expect(p.feed(`{"type":"turn.failed","error":{"message":"${msg}"}}`)).toEqual([{ type: 'answer', text: 'Blob needs you to sign in to Codex again.' }]);
+    expect(p).toMatchObject({ resultError: true, signedOut: true });
+    // a 401 it got past (the token was refreshed) is not a sign-out
+    const q = new CodexParser();
+    q.feed(`{"type":"error","message":"Reconnecting... 1/5 (${msg})"}`);
+    q.feed('{"type":"item.completed","item":{"type":"agent_message","text":"Done it."}}');
+    expect(q.feed('{"type":"turn.completed"}')).toEqual([{ type: 'answer', text: 'Done it.' }]);
+    expect(q.signedOut).toBe(false);
   });
 
   it('answers Done. when the turn ends with no message, and shows an error item as a caption', () => {

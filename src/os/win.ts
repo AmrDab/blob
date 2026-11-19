@@ -117,7 +117,11 @@ export const win: Os = {
   spawnGroup: false,
   killTree(pid) { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }); },
   cli: parts => ({ command: 'cmd', args: ['/c', ...parts] }),   // npm's .cmd shims, which only cmd can start
-  findClaude: () => 'claude',                                   // its installer sets PATH
+  // Its installer sets PATH, but not this process's: a Claude Code that Blob just installed is found where it was put.
+  findClaude(_env, home, exists) {
+    const p = join(home, '.local', 'bin', 'claude.exe');
+    try { return exists(p) ? p : 'claude'; } catch { return 'claude'; }
+  },
   findCodex,
   npmCli: node => join(dirname(node), 'node_modules', 'npm', 'bin', 'npm-cli.js'),   // beside node.exe
   claudeInstall: 'irm https://claude.ai/install.ps1 | iex',

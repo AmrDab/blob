@@ -35,7 +35,7 @@ import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } fro
 import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, type BrainName, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
-import { fix, fixNote, macNeeds, pickBrain, runChecks, type Check } from './setup.ts';
+import { fix, fixNote, macNeeds, pickBrain, runChecks, signedOut, type Check } from './setup.ts';
 import { install, installed, latest, newer, question as updateQuestion, skip, switchTo, systemUpdate, toOffer } from './update.ts';
 import { Watcher, activityFile, clawdcursorReader } from './watch.ts';
 
@@ -310,7 +310,10 @@ function onBrain(e: BrainEvent): void {
   if (e.type === 'log') row({ kind: 'call', ...e.entry });
   else if (e.type === 'answer') answer(e.text);
   else if (e.type === 'busy') busy(e.busy);
-  else if (e.type === 'done') finished(e.calls, e.ok);
+  else if (e.type === 'done') {
+    finished(e.calls, e.ok);
+    if (e.signedOut) { signedOut(e.signedOut); void check(); }   // the sign-in card comes up under the answer
+  }
   else if (e.type !== 'session') send(e);
 }
 
@@ -544,7 +547,7 @@ async function check(): Promise<Check[]> {
 async function setupFix(id: string): Promise<void> {
   busy(true);
   let ok = false;
-  try { ok = await fix(id); } finally { busy(false); }
+  try { ok = await fix(id, undefined, undefined, settings.get().brain); } finally { busy(false); }
   const still = (await check()).find(c => c.id === id && !c.ok);
   if (still && id === 'mac') watchMac();
   else if (still && ok) caption(`${still.label}: not done yet.`);
