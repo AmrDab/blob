@@ -48,22 +48,62 @@ const VERSION_FLAGS: Record<string, string[]> = {
   cargo: ['--version'], rustc: ['--version'], ruby: ['--version'], docker: ['--version'], tsc: ['--version'],
   ffmpeg: ['-version'], pwsh: ['--version'],
 };
-/** Agent Reach reads sites and prints what it read (reach.ts): these sites' actions, `read`, and its own status only
- *  look. Its add, remove, login, logout, update, configure, setup and uninstall change something, and ask. */
+/**
+ * Agent Reach reads sites and prints what it read (reach.ts). Only this much of it "only looks": its own status, a
+ * search on one of these sites, and reading a link or an item of one of them. Everything else asks: its add, remove,
+ * login, logout, update, configure, setup and uninstall, a link to any other site (the address itself could carry
+ * something out), a flag that is not listed here, and anything the shell would fill in (a variable, a file pattern).
+ */
 const REACH_SITES = new Set([
-  'web', 'reddit', 'youtube', 'twitter', 'linkedin', 'github', 'bilibili', 'v2ex', 'instagram', 'facebook',
-  'xiaohongshu', 'xueqiu', 'boss',
+  'reddit', 'youtube', 'twitter', 'linkedin', 'github', 'bilibili', 'v2ex', 'instagram', 'facebook', 'xiaohongshu',
+  'xueqiu', 'boss',
 ]);
-const REACH_LOOKS = new Set([
-  'search', 'read', 'subtitle', 'profile', 'posts', 'tweets', 'thread', 'subreddit', 'comments', 'hot', 'jobs',
-  'quote', 'hot_posts', 'hot_stocks',
+/** Actions that take free words; */
+const REACH_SEARCH = new Set(['search', 'jobs']);
+/** and those that take one link or id of that site, or nothing. */
+const REACH_ITEM = new Set([
+  'read', 'subtitle', 'profile', 'posts', 'tweets', 'thread', 'subreddit', 'comments', 'hot', 'quote', 'hot_posts', 'hot_stocks',
 ]);
 const REACH_STATUS = new Set(['channels', 'version', 'doctor']);
+/** The sites a link may lead to, and their subdomains. */
+const REACH_HOSTS = [
+  'reddit.com', 'youtube.com', 'youtu.be', 'x.com', 'twitter.com', 'linkedin.com', 'github.com', 'bilibili.com',
+  'v2ex.com', 'xiaohongshu.com', 'xueqiu.com', 'zhipin.com', 'instagram.com', 'facebook.com',
+];
+/** The flags its looks take, each with what its value may be (null: it has none). */
+const REACH_FLAGS: Record<string, RegExp | null> = {
+  '--limit': /^\d{1,3}$/, '--timeout': /^\d{1,3}$/, '--backend': /^[a-z][a-z-]{0,29}$/, '--lang': /^[A-Za-z][A-Za-z,-]{0,59}$/,
+  '--location': /^[\p{L}\p{N}][\p{L}\p{N} ,.'-]{0,59}$/u, '--city': /^[\p{L}\p{N}][\p{L}\p{N} ,.'-]{0,59}$/u, '--text': null,
+};
+function reachHost(a: string): boolean {
+  if (a.includes('\\')) return false;
+  try {
+    const u = new URL(a);
+    return (u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password
+      && REACH_HOSTS.some(h => u.hostname === h || u.hostname.endsWith('.' + h));
+  } catch { return false; }
+}
 function reachLooks(args: string[]): boolean {
-  // a web address is what it reads; any other network or device path asks, as everywhere
-  if (args.some(a => !/^https?:\/\/[^\\]+$/i.test(a) && REMOTE.test(a))) return false;
-  if (args[0] === 'read') return args.length > 1;
-  return REACH_STATUS.has(args[0]) || (REACH_SITES.has(args[0]) && REACH_LOOKS.has(args[1]));
+  const words: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (/[*~]|^@/.test(a)) return false;                       // what a shell may expand: file names, the home folder
+    if (a.startsWith('-')) {
+      if (!Object.hasOwn(REACH_FLAGS, a)) return false;
+      const value = REACH_FLAGS[a];
+      if (value && !value.test(args[++i] ?? '')) return false;
+    } else if ((a.includes(':') || REMOTE.test(a)) && !reachHost(a)) return false;   // a link is to one of the sites, whole
+    else words.push(a);
+  }
+  const [a, b, c] = words;
+  if (REACH_STATUS.has(a)) return words.length === 1;
+  if (a === 'read') return words.length === 2 && reachHost(b);
+  if (a === 'web') return b === 'search' && words.length > 2;   // the web channel reads any address: only its search looks
+  if (!REACH_SITES.has(a)) return false;
+  if (REACH_SEARCH.has(b)) return words.length > 2;
+  // one item: a link to the site, or a plain id (owner/repo on GitHub), which can only name something on that site
+  return REACH_ITEM.has(b) && words.length <= 3
+    && (c === undefined || reachHost(c) || (a === 'github' ? /^[\w.-]+\/[\w.-]+$/ : /^[\w-]+$/).test(c));
 }
 /** A network or device path (\\server\share, //server, \\?\, a URL) anywhere in an argument: reading one can send the
  *  user's Windows sign-in to that server, so it is never "only looking". */
@@ -111,7 +151,9 @@ export function classify(command: string, platform: string = os.id): Verdict {
     const args = tokens.slice(1).map(t => t.text);
     if (args.length === 1 && VERSION_FLAGS[name]?.includes(args[0])) continue;
     if (name === 'agent-reach') {
-      if (!reachLooks(args)) return 'ask';
+      // nothing is piped into it, and no variable anywhere near it (not even the plain ones allowed above: a
+      // secret in the environment would leave in the address or the search words), nor cmd's %NAME%
+      if (tokens !== parts[0] || /[$%]/.test(command) || !reachLooks(args)) return 'ask';
       continue;
     }
     if (args.some(a => REMOTE.test(a))) return 'ask';
