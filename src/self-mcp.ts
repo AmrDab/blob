@@ -274,7 +274,7 @@ export async function serve(): Promise<void> {
     description: 'What Blob can do, its settings now, and what each one does.', inputSchema: {}, annotations: read,
   }, async () => reply(tools.about()));
   server.registerTool('step_up', {
-    description: 'Hand this request to a stronger model after you stop. Only when a needed step failed and you cannot see another way. Then end your turn with no reply text.',
+    description: 'Hand this request to a stronger model after you stop. Only when your instructions say to, or a needed step failed and you cannot see another way. Then end your turn with no reply text.',
     inputSchema: {},
   }, async () => reply(tools.step_up()));
   server.registerTool('get_settings', {

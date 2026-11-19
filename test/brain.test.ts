@@ -39,6 +39,16 @@ describe('claude command line', () => {
     expect(claudeArgs({ mcpConfigPath: 'm.json', model: 'haiku' })).not.toContain('--max-turns');
   });
 
+  it('allows no screen tools when told so (Haiku on auto), and all of them otherwise', () => {
+    const allowed = (a: string[]) => a[a.indexOf('--allowedTools') + 1];
+    expect(allowed(claudeArgs({ mcpConfigPath: 'n.json', model: 'haiku', maxTurns: 12, screen: false }))).toBe('mcp__files__*,mcp__blob__*,Read,Glob,Grep');
+    expect(claudeArgs({ mcpConfigPath: 'n.json', model: 'haiku', screen: false })).toContain('--strict-mcp-config');   // only the servers in that file exist
+    for (const model of ['haiku', 'sonnet', 'opus', 'default'] as const) {
+      expect(allowed(claudeArgs({ mcpConfigPath: 'm.json', model, resume: 'abc' })), model).toBe('mcp__clawdcursor__*,mcp__files__*,mcp__desk__*,mcp__blob__*,Read,Glob,Grep');
+      expect(allowed(claudeArgs({ mcpConfigPath: 'm.json', model, screen: true })), model).toMatch(/clawdcursor.*desk/);
+    }
+  });
+
   it('sends a fresh brief on every start, a resume too, where Claude Code knows how', () => {
     const a = claudeArgs({ mcpConfigPath: 'm.json', model: 'sonnet', resume: 'abc', snapshotOff: true });
     expect(a[a.indexOf('--system-prompt-snapshot') + 1]).toBe('off');
@@ -86,6 +96,8 @@ describe('claude command line', () => {
     expect(Object.keys(JSON.parse(mcpConfig(own, {}, 'linux')).mcpServers)).toEqual(['clawdcursor', 'files', 'blob']);
     expect(Object.keys(mcpServers(own, {}, 'darwin'))).toEqual(['clawdcursor', 'files', 'blob']);
     expect(Object.keys(mcpServers({ files: own.files, blob: own.blob }, {}, 'win32'))).toEqual(['clawdcursor', 'files', 'blob']);   // none given: none added
+    // the file for a tier without the screen: neither screen server is in it, so neither is started
+    for (const platform of ['win32', 'darwin', 'linux']) expect(Object.keys(JSON.parse(mcpConfig(own, {}, platform, false)).mcpServers), platform).toEqual(['files', 'blob']);
   });
 
   it('writes one stream-json user message line', () => {

@@ -98,7 +98,7 @@ if (os.launcher && !process.env.BLOB_HOME && process.env.BLOB_NO_APP !== '1') {
 
 mkdirSync(WORK, { recursive: true });
 const tmp = mkdtempSync(join(tmpdir(), 'blob-'));
-const mcpConfigPath = join(tmp, 'mcp.json');
+const mcpConfigPath = join(tmp, 'mcp.json'), noScreenConfigPath = join(tmp, 'mcp-no-screen.json');
 const token = randomBytes(24).toString('hex');      // the page's
 const askToken = randomBytes(24).toString('hex');   // the files server's: it can only ask a question
 const pillToken = randomBytes(24).toString('hex');  // the pill relay's: it can only show clawdcursor's pill
@@ -757,8 +757,9 @@ process.env.BLOB_OWN_UI_FILE = join(tmp, 'own-ui-pids');
 const procs = os.processes?.();                     // made once: also names the open apps (computer.ts)
 const stopOwnUi = keepOwnUiFile(process.env.BLOB_OWN_UI_FILE, procs);
 writeFileSync(mcpConfigPath, mcpConfig({ files: filesServer, blob: selfServer, desk: deskServer }), { mode: 0o600 });
+writeFileSync(noScreenConfigPath, mcpConfig({ files: filesServer, blob: selfServer }, process.env, os.id, false), { mode: 0o600 });
 brain = new Brain({
-  mcpConfigPath, servers: mcpServers({ files: filesServer, blob: selfServer, desk: deskServer }), cwd: WORK, emit: onBrain,
+  mcpConfigPath, noScreenConfigPath, servers: mcpServers({ files: filesServer, blob: selfServer, desk: deskServer }), cwd: WORK, emit: onBrain,
   persona: (b, tier) => persona(settings.get(), {
     memory: memoryBrief(memoryFile()), computer: computerBrief(computerFile()), scripts: scriptsBrief(scriptsDir()), skills: skillsBrief(skillsDir()), brain: b, tier,
   }),

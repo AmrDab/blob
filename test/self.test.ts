@@ -433,6 +433,17 @@ describe('the brief', () => {
     expect(persona({ ...DEFAULTS, model: 'opus' }, { now })).not.toMatch(/step_up|Auto:/);
     expect(persona({ ...DEFAULTS, model: 'opus' }, { now, tier: 'opus' })).toMatch(/model Opus;/);   // a pinned model has no ladder
     expect(persona(DEFAULTS, { now, brain: 'codex', tier: 'haiku' })).not.toMatch(/step_up|Auto/);
+    // Haiku on auto has no app or screen tools: its brief names none, and sends such a task up at once
+    for (const platform of ['win32', 'darwin', 'linux']) {
+      const h = persona(DEFAULTS, { now, tier: 'haiku', platform });
+      expect(h, platform).toMatch(/6\. An app, a window or anything on the screen: you have no tools for it\. Call the blob tool step_up at once\./);
+      expect(h, platform).not.toMatch(/desk tool|open_app|accessibility tree|screen access isn't working/);
+      for (const p of [persona(DEFAULTS, { now, tier: 'sonnet', platform }), persona({ ...DEFAULTS, model: 'haiku' }, { now, tier: 'haiku', platform }), persona(DEFAULTS, { now, brain: 'codex', tier: 'haiku', platform })]) {
+        expect(p, platform).toMatch(/accessibility tree/);
+        expect(p, platform).not.toMatch(/you have no tools for it/);
+      }
+      expect(h.length, platform).toBeLessThan(8000);
+    }
     expect(auto()).toMatch(/"use Haiku" pins one model; "pick the model yourself" is model=auto/);
   });
 
