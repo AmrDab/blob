@@ -342,11 +342,14 @@ export function macKeyWatch(sink: KeySink, self: number = process.pid, later = s
     add(mainLoop(), src, common);
     console.log('Blob: listening for "hey Blob"');
   };
-  if (!allowed()) {
-    ask();                                                              // the system's prompt, once; it answers false until then
-    console.log('Blob: "hey Blob" waits for Input Monitoring (System Settings > Privacy & Security > Input Monitoring > Blob)');
-  }
-  start();
+  // Asked a moment after start, once the app has launched (a prompt before that may not show).
+  later(() => {
+    if (!allowed()) {
+      ask();                                                            // the system's prompt, once; it answers false until then
+      console.log('Blob: "hey Blob" waits for Input Monitoring (System Settings > Privacy & Security > Input Monitoring > Blob)');
+    }
+    start();
+  }, 3000).unref?.();
   return {
     stop() {
       stopped = true;
