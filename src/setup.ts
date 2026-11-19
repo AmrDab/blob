@@ -29,7 +29,9 @@ export const CONSENT_TEXT =
 const MAC_TEXT =
   'Blob needs two permissions: Accessibility and Screen Recording. Tap Allow, then switch Blob on in the list that ' +
   'opens (it can be listed as the app you started Blob from, or as "node" when Blob started by itself at sign-in). I look again every 2 seconds, so there is nothing to ' +
-  'press here. Screen Recording may only count after you quit Blob and open it again.';
+  'press here. Screen Recording may only count after you quit Blob and open it again. Blob already switched on and ' +
+  'macOS still asks? That switch is for an older copy of Blob: select Blob in the list, remove it with the minus ' +
+  'button, then tap Allow again.';
 
 /** `claude auth status --json` → signed in? (It may exit non-zero when signed out; only the JSON counts.) */
 export function parseAuthStatus(stdout: string): boolean {

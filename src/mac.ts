@@ -8,6 +8,7 @@
 // Every step is on its own: one that fails says so in the log and the rest still run. Only macOS has it (os.appSetup).
 import { createRequire } from 'node:module';
 import type { Application, MenuOptions } from '@webviewjs/webview';
+import type { KeySink } from './wake.ts';
 
 /** The few Objective-C runtime calls used here. Objects, classes and selectors are opaque pointers. */
 export interface ObjC {
@@ -278,4 +279,102 @@ export function macSetup(app: Pick<Application, 'setMenu'>, quit: () => void, de
     if (deps.reopen) step('opening Blob again does not bring it forward', () => onReopen(oc, deps.reopen!));
     step('Blob keeps its Dock icon and stays on one Space', () => afterLaunch(oc));
   }, ms));
+}
+
+/**
+ * Typed keys, from anywhere, for "hey Blob" (wake.ts): a listen-only event tap, so a key is never held up or changed
+ * on its way, and Blob only reads it. macOS asks the user once for Input Monitoring; until that is on, Blob looks
+ * again every few seconds. Password fields send nothing (secure input). Keys typed into Blob itself are left out,
+ * and so is any key with Cmd or Ctrl. Throws where CoreGraphics can't be loaded.
+ */
+export function macKeyWatch(sink: KeySink, self: number = process.pid, later = setTimeout): { stop(): void } {
+  const koffi = createRequire(import.meta.url)('koffi');
+  const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics');
+  const cf = koffi.load('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation');
+  const Tap = koffi.pointer(koffi.proto('void *BlobKeyTap(void *proxy, uint32_t type, void *event, void *refcon)'));
+  const create = cg.func('void *CGEventTapCreate(uint32_t tap, uint32_t place, uint32_t options, uint64_t mask, BlobKeyTap *cb, void *refcon)');
+  const enable = cg.func('void CGEventTapEnable(void *port, bool on)');
+  const field = cg.func('int64_t CGEventGetIntegerValueField(void *event, uint32_t field)');
+  const flags = cg.func('uint64_t CGEventGetFlags(void *event)');
+  const unicode = cg.func('void CGEventKeyboardGetUnicodeString(void *event, unsigned long max, void *len, void *buf)');
+  const allowed = cg.func('bool CGPreflightListenEventAccess()');
+  const ask = cg.func('bool CGRequestListenEventAccess()');
+  const source = cf.func('void *CFMachPortCreateRunLoopSource(void *alloc, void *port, long order)');
+  const mainLoop = cf.func('void *CFRunLoopGetMain()');
+  const add = cf.func('void CFRunLoopAddSource(void *loop, void *source, void *mode)');
+  const removeSource = cf.func('void CFRunLoopRemoveSource(void *loop, void *source, void *mode)');
+  const invalidate = cf.func('void CFMachPortInvalidate(void *port)');
+  const common = koffi.decode(cf.symbol('kCFRunLoopCommonModes'), 'void *');
+
+  const KEY_DOWN = 10, MOUSE_DOWN = [1, 3, 25];                          // left, right, other
+  const OFF_TIMEOUT = 0xfffffffe, OFF_INPUT = 0xffffffff;
+  const KEYCODE = 9, TARGET_PID = 40;                                    // kCGKeyboardEventKeycode, kCGEventTargetUnixProcessID
+  const CMD = 0x100000, CTRL = 0x40000;
+  const BACKSPACE = 51, MOVES = new Set([36, 48, 53, 76, 115, 116, 117, 119, 121, 123, 124, 125, 126]);   // Return, Tab, Esc, Enter, Home…arrows
+  const mask = [KEY_DOWN, ...MOUSE_DOWN].reduce((m, t) => m | (1n << BigInt(t)), 0n);
+  const len = Buffer.alloc(8), buf = Buffer.alloc(8);
+  let port: unknown = null, src: unknown = null, stopped = false;
+
+  const cb = koffi.register((_proxy: unknown, type: number, event: unknown) => {
+    try {
+      if (type === OFF_TIMEOUT || type === OFF_INPUT) { if (port) enable(port, true); return event; }
+      if (type !== KEY_DOWN) { sink.reset(); return event; }            // a click moves the cursor
+      if (Number(field(event, TARGET_PID)) === self) return event;      // typed into Blob itself
+      if (Number(BigInt(flags(event)) & BigInt(CMD | CTRL))) { sink.reset(); return event; }
+      const code = Number(field(event, KEYCODE));
+      if (code === BACKSPACE) { sink.back(); return event; }
+      if (MOVES.has(code)) { sink.reset(); return event; }
+      unicode(event, 4, len, buf);
+      const n = Number(len.readBigUInt64LE(0));
+      if (n > 0) sink.char(buf.toString('utf16le', 0, Math.min(n, 4) * 2));
+    } catch { /* one key less: never let an error stop the tap */ }
+    return event;
+  }, Tap);
+  kept.push(cb);
+
+  const start = (): void => {
+    if (stopped) return;
+    // Without Input Monitoring a tap is still made, but gets no keys: so it waits for the OK (which macOS may only
+    // report to a Blob started after it was given).
+    port = allowed() ? create(1, 0, 1, mask, cb, null) : null;          // the session's events, at the head, listen only
+    if (!port) { later(start, 5000).unref?.(); return; }
+    src = source(null, port, 0);
+    add(mainLoop(), src, common);
+    console.log('Blob: listening for "hey Blob"');
+  };
+  if (!allowed()) {
+    ask();                                                              // the system's prompt, once; it answers false until then
+    console.log('Blob: "hey Blob" waits for Input Monitoring (System Settings > Privacy & Security > Input Monitoring > Blob)');
+  }
+  start();
+  return {
+    stop() {
+      stopped = true;
+      if (src) removeSource(mainLoop(), src, common);
+      if (port) { enable(port, false); invalidate(port); }
+      port = src = null;
+    },
+  };
+}
+
+/** Blob comes in front, with the keyboard on the window titled `title` (for "hey Blob"). */
+export function macComeForward(title: string): void {
+  const objc = loadObjC();
+  const koffi = createRequire(import.meta.url)('koffi');
+  const lib = koffi.load('/usr/lib/libobjc.A.dylib');
+  const selector = lib.func('void *sel_registerName(const char *name)');
+  const text = lib.func('const char *objc_msgSend(void *obj, void *sel)');
+  const front = lib.func('void objc_msgSend(void *obj, void *sel, void *sender)');
+  const push = lib.func('void *objc_autoreleasePoolPush()');
+  const pop = lib.func('void objc_autoreleasePoolPop(void *pool)');
+  const pool = push();
+  try {
+    const nsapp = objc.send(objc.cls('NSApplication'), 'sharedApplication');
+    objc.set(nsapp, 'activateIgnoringOtherApps:', 1);
+    const wins = objc.send(nsapp, 'windows');
+    for (let i = 0, n = wins ? objc.num(wins, 'count') : 0; i < n; i++) {
+      const w = objc.at(wins, 'objectAtIndex:', i), t = objc.send(w, 'title');
+      if (t && String(text(t, selector('UTF8String')) ?? '') === title) { front(w, selector('makeKeyAndOrderFront:'), null); return; }
+    }
+  } finally { pop(pool); }
 }

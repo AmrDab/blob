@@ -36,6 +36,7 @@ import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, t
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
 import { fix, fixNote, macNeeds, pickBrain, runChecks, type Check } from './setup.ts';
+import { firstName, greeting, wakeMatcher } from './wake.ts';
 import { install, installed, latest, newer, question as updateQuestion, skip, switchTo, systemUpdate, toOffer } from './update.ts';
 import { Watcher, activityFile, clawdcursorReader } from './watch.ts';
 
@@ -918,6 +919,19 @@ if (process.env.BLOB_CAPTURE === '1') console.log('Blob: BLOB_CAPTURE=1, the bub
 else if (!os.hideFromCapture(win)) console.log('Blob: the bubble shows in screen captures on this system');
 win.show();
 focus = os.focusKeeper?.(win.getNativeHandle()) ?? focus;
+
+// "Hey Blob" typed in any app (wake.ts): Blob comes forward with the Type box open, greeting the user by name. The
+// watcher keeps only the last few characters, in memory; where the system has none (or no OK yet), nothing happens.
+const NAME = (() => { try { return firstName(os.userName?.() ?? ''); } catch { return ''; } })();
+function wake(): void {
+  if (exiting) return;
+  console.log('Blob: "hey Blob" typed, so the Type box opened');
+  try { win.show(); os.comeForward?.('Blob'); } catch { /* the window is still being made */ }
+  send({ type: 'wake', text: greeting(NAME) });
+}
+let keys: { stop(): void } | undefined;
+try { keys = os.keyWatch?.(wakeMatcher(() => setImmediate(wake))); }
+catch (e) { console.log(`Blob: "hey Blob" is not available (${(e as Error).message})`); }
 void check();
 
 // ── exit ─────────────────────────────────────────────────────────────────────
@@ -932,6 +946,7 @@ function quit(): void {
   pairing?.close();
   settings.unwatch();
   focus.stop();
+  keys?.stop();
   through?.stop();
   rmSync(tmp, { recursive: true, force: true });
   try { app.exit(); } catch { /* already closed */ }

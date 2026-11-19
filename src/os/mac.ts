@@ -8,7 +8,7 @@ import { macCursor } from '../clickthrough.ts';
 import { macProfile, namedApps } from '../computer.ts';
 import { macKeeper } from '../focus.ts';
 import { macAppNode, macInstall, macOpen, macOpenLater } from '../launcher.ts';
-import { loadRunningApps, macSetup } from '../mac.ts';
+import { loadRunningApps, macComeForward, macKeyWatch, macSetup } from '../mac.ts';
 import { macOverlay, protect } from '../overlay.ts';
 import { posix, run } from './posix.ts';
 import type { Os } from './types.ts';
@@ -54,6 +54,9 @@ export const mac: Os = {
   focusKeeper: () => macKeeper(),                  // whole apps, not windows: Blob is this process
   hideFromCapture: protect,
   overlay: win => macOverlay(win),
+  keyWatch: sink => macKeyWatch(sink),             // a listen-only event tap: macOS asks for Input Monitoring once
+  comeForward: title => macComeForward(title),
+  userName: () => execFileSync('id', ['-F'], { encoding: 'utf8', timeout: 2000 }).trim(),
   reminderSound() { spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore' }).on('error', () => {}); },
   permissionPanes: {
     accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',

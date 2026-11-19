@@ -74,6 +74,8 @@ function App() {
   const micOfLauncher = useRef(false);                        // the host says so: the microphone belongs to the app Blob was started from
   const canRestart = useRef(false);                           // ...and Blob can start itself again as its own app
   const [typeOpen, setTypeOpen] = useState(false);
+  const [typeHint, setTypeHint] = useState('');               // "hey Blob": the greeting, in the open box
+  const typeInput = useRef<HTMLInputElement>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [browsing, setBrowsing] = useState(false);            // the + view: every saved shortcut, to pin or remove
   const [model, setModel] = useState<Model>('auto');          // the settings' model: a click on the chip changes it
@@ -119,6 +121,10 @@ function App() {
         setFirst({ onboarded: e.onboarded, cards: [...(e.onboarded ? [] : e.firstRun), ...(e.offerPair ? [PAIR_CARD] : [])] });
       }
       if (e.type === 'qr') setQr(e.svg);
+      if (e.type === 'wake') {                      // "hey Blob" typed in another app: the Type box, open and empty, with the keyboard
+        typed.current = ''; setText(''); setTypeHint(e.text); setTypeOpen(true);
+        setTimeout(() => typeInput.current?.focus(), 50);
+      }
       if (e.type === 'stage') setRoomy(e.clickThrough);
       if (e.type === 'over') {                      // the cursor went off Blob (the window lets the mouse through now), or came back
         dispatchEvent(new CustomEvent('blob-over', { detail: e.on }));
@@ -197,7 +203,7 @@ function App() {
   // The Type box goes away by itself: when another window is clicked, or soon after the pointer leaves an empty box.
   const typeLeave = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
-    if (!typeOpen) return;
+    if (!typeOpen) { setTypeHint(''); return; }
     const blur = () => setTypeOpen(false);
     addEventListener('blur', blur);
     return () => { removeEventListener('blur', blur); clearTimeout(typeLeave.current); };
@@ -525,7 +531,7 @@ function App() {
           <div className="type-row">
             <Slot observe>
               <div className="card type" data-card="type">
-                <input autoFocus value={text} placeholder="Ask Blob…" onChange={e => setText(e.target.value)}
+                <input ref={typeInput} autoFocus value={text} placeholder={typeHint || 'Ask Blob…'} aria-label="Ask Blob" onChange={e => setText(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') send(); }} />
               </div>
             </Slot>
