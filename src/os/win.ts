@@ -93,6 +93,7 @@ export const win: Os = {
   findCodex,
   npmCli: node => join(dirname(node), 'node_modules', 'npm', 'bin', 'npm-cli.js'),   // beside node.exe
   claudeInstall: 'irm https://claude.ai/install.ps1 | iex',
+  uvInstall: 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"',
   trashName: 'Recycle Bin',
   settingsScheme: 'ms-settings:',
   trash: async path => trash(path),

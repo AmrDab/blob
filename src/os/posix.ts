@@ -35,5 +35,6 @@ export const posix = {
   findCodex: () => ({ command: 'codex', args: [] }),
   npmCli: node => join(dirname(dirname(node)), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),   // <prefix>/bin/node
   claudeInstall: 'curl -fsSL https://claude.ai/install.sh | bash',
+  uvInstall: 'curl -LsSf https://astral.sh/uv/install.sh | sh',
   trashName: 'Trash',
 } satisfies Partial<Os>;

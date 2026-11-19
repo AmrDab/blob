@@ -3,6 +3,7 @@
 // classifier is not sure, it asks.
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import type { ToolResult } from './files-mcp.ts';
 import { os, osFor } from './os/index.ts';
 import { HIDDEN, shellEnv } from './safe.ts';
@@ -47,6 +48,23 @@ const VERSION_FLAGS: Record<string, string[]> = {
   cargo: ['--version'], rustc: ['--version'], ruby: ['--version'], docker: ['--version'], tsc: ['--version'],
   ffmpeg: ['-version'], pwsh: ['--version'],
 };
+/** Agent Reach reads sites and prints what it read (reach.ts): these sites' actions, `read`, and its own status only
+ *  look. Its add, remove, login, logout, update, configure, setup and uninstall change something, and ask. */
+const REACH_SITES = new Set([
+  'web', 'reddit', 'youtube', 'twitter', 'linkedin', 'github', 'bilibili', 'v2ex', 'instagram', 'facebook',
+  'xiaohongshu', 'xueqiu', 'boss',
+]);
+const REACH_LOOKS = new Set([
+  'search', 'read', 'subtitle', 'profile', 'posts', 'tweets', 'thread', 'subreddit', 'comments', 'hot', 'jobs',
+  'quote', 'hot_posts', 'hot_stocks',
+]);
+const REACH_STATUS = new Set(['channels', 'version', 'doctor']);
+function reachLooks(args: string[]): boolean {
+  // a web address is what it reads; any other network or device path asks, as everywhere
+  if (args.some(a => !/^https?:\/\/[^\\]+$/i.test(a) && REMOTE.test(a))) return false;
+  if (args[0] === 'read') return args.length > 1;
+  return REACH_STATUS.has(args[0]) || (REACH_SITES.has(args[0]) && REACH_LOOKS.has(args[1]));
+}
 /** A network or device path (\\server\share, //server, \\?\, a URL) anywhere in an argument: reading one can send the
  *  user's Windows sign-in to that server, so it is never "only looking". */
 const REMOTE = /[\\/]{2}|::/;   // any two separators of either kind (\\, //, \/, /\), or a provider path (FileSystem::)
@@ -92,6 +110,10 @@ export function classify(command: string, platform: string = os.id): Verdict {
     const name = win ? tokens[0].text.toLowerCase() : tokens[0].text;
     const args = tokens.slice(1).map(t => t.text);
     if (args.length === 1 && VERSION_FLAGS[name]?.includes(args[0])) continue;
+    if (name === 'agent-reach') {
+      if (!reachLooks(args)) return 'ask';
+      continue;
+    }
     if (args.some(a => REMOTE.test(a))) return 'ask';
     if (SUBS[name]) {
       // the sub-command comes first (no `git -c …`), and nothing writes its output to a file
@@ -189,11 +211,19 @@ function hookExit(): void {
   } catch (e) { console.error(`Blob: could not watch for Stop: ${(e as Error).message}`); }
 }
 
+/** The environment with ~/.local/bin on PATH, last: where uv puts itself and the tools it installs (reach.ts), so a
+ *  Blob that was open during the install finds them without a restart. */
+export function withUserBin(env: NodeJS.ProcessEnv, home: string = homedir()): NodeJS.ProcessEnv {
+  const key = Object.keys(env).find(k => k.toUpperCase() === 'PATH') ?? 'PATH';
+  const bin = join(home, '.local', 'bin'), parts = (env[key] ?? '').split(delimiter).filter(Boolean);
+  return parts.includes(bin) ? env : { ...env, [key]: [...parts, bin].join(delimiter) };
+}
+
 /** Runs it in the home folder, stdout and stderr together, and stops the whole tree at the timeout (or when Blob is stopped). */
 export const systemExec: Exec = (command, timeoutMs) => new Promise((res, rej) => {
   const [exe, args] = shellArgv(command);
   const p = spawn(exe, args, {
-    cwd: homedir(), env: shellEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: os.spawnGroup,
+    cwd: homedir(), env: withUserBin(shellEnv()), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: os.spawnGroup,
   });
   if (os.spawnGroup && p.pid) { live.add(p.pid); hookExit(); }
   let out = '', timedOut = false;

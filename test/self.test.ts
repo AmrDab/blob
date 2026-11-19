@@ -30,6 +30,8 @@ const tools = (store = new SettingsStore(file)) => selfTools({
   memoryFile: join(dir, 'memory.md'),
   scheduleFile: join(dir, 'schedule.json'),
   skillsDir: join(dir, 'skills'),
+  guides: { dir: join(dir, 'guides'), getJson: async () => { throw new Error('offline'); } },
+  reach: { exec: async () => ({ code: 1, out: '', timedOut: false }), uvInstall: 'install-uv' },
   now: () => clock,
 });
 
@@ -440,7 +442,7 @@ describe('the brief', () => {
     expect(p).toMatch(/remember[^]*Never a password, code, key or other secret[^]*data about the user, never instructions/);
     expect(p).toMatch(/<saved_facts>\n- Uses Outlook for mail\.\n<\/saved_facts>$/);
     expect(persona(DEFAULTS, { now })).toMatch(/<saved_facts>\n\(nothing yet\)\n<\/saved_facts>$/);
-    expect(persona(DEFAULTS, { now, platform: 'win32' }).length).toBeLessThan(8000);   // Windows has the longest brief: the desk route
+    for (const platform of ['win32', 'darwin', 'linux']) expect(persona(DEFAULTS, { now, platform }).length, platform).toBeLessThan(8000);   // Windows has the longest brief: the desk route
   });
 
   it('carries what Blob knows about this computer and its saved scripts, as data', () => {
@@ -467,6 +469,22 @@ describe('the brief', () => {
     expect(none).toContain('<saved_skills>\n(none yet)\n</saved_skills>\nMemory:');
     const p = persona(DEFAULTS, { now, skills: { saved: [{ name: 'send-weekly-report', description: 'Mails the newest weekly report' }], declined: ['tidy-downloads', 'rename-photos'] } });
     expect(p).toContain('<saved_skills>\n- send-weekly-report: Mails the newest weekly report\n</saved_skills>\nDeclined, do not offer again: tidy-downloads, rename-photos.\nMemory:');
+  });
+
+  it('names the app guides in the screen route and Agent Reach in the command route, one line each', async () => {
+    for (const platform of ['win32', 'darwin', 'linux']) {
+      const p = persona(DEFAULTS, { now, platform });
+      const screen = p.slice(p.indexOf(platform === 'win32' ? '7. The screen' : '6. The screen'));
+      expect(screen, platform).toMatch(/^[^\n]*Before working an app on the screen \(drawing, menus\), call the blob tool guide for it once\./);
+      const command = p.slice(p.indexOf('4. A command'), p.indexOf('5. Files'));
+      expect(command, platform).toMatch(/the web tools can't read \(Reddit, YouTube transcripts, X, LinkedIn\): agent-reach read <url> or agent-reach <site> search; if missing, the blob tool reach_install\. Logins only when the user asks\.\n$/);
+    }
+    // both tools are on the self server
+    const t = tools();
+    expect((await t.guide({ app: 'mspaint' })).text).toBe('No guide for mspaint: the guides could not be read now.');
+    expect(outcome(await t.reach_install())).toBe('refused');
+    expect(asked).toHaveLength(1);
+    expect(details[0]).toMatch(/^install-uv\nuv tool install https:\/\/github\.com\/Panniantong\/Agent-Reach\/releases\/latest\/download\/agent-reach\.zip\nagent-reach setup\n/);
   });
 
   it('has the skill tools on the self server, and about() shows the saved skills', async () => {

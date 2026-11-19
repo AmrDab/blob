@@ -1,9 +1,10 @@
 // The shell tool: which commands run at once and which ask first, the Yes card's text, and what comes back.
 // The runs here use a fake shell, except one harmless echo through the real one.
+import { delimiter, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Questions, askUser, MAX_DETAIL } from '../src/ask.ts';
 import { outcomeOf } from '../src/brain.ts';
-import { MAX_COMMAND, classify, killLive, live, runTool, shellArgv, shellEnv, systemExec, type ExecResult } from '../src/shell.ts';
+import { MAX_COMMAND, classify, killLive, live, runTool, shellArgv, shellEnv, systemExec, withUserBin, type ExecResult } from '../src/shell.ts';
 
 const win = (c: string) => classify(c, 'win32');
 const unix = (c: string) => classify(c, 'darwin');
@@ -220,5 +221,49 @@ describe('classify: review fixes', () => {
       expect(classify(c, 'win32'), c).toBe('ask');
     expect(classify('ls //evil/share', 'darwin')).toBe('ask');
     expect(classify(String.raw`Get-Content C:\Users\me\notes.txt`, 'win32')).toBe('read');
+  });
+});
+
+describe('classify: agent-reach', () => {
+  const both = (c: string) => [classify(c, 'win32'), classify(c, 'darwin')];
+
+  it('reading a link, a site search and its own status only look', () => {
+    for (const c of [
+      'agent-reach read https://www.reddit.com/r/typescript/comments/abc/a_post/', 'agent-reach read "https://youtu.be/dQw4w9WgXcQ"',
+      'agent-reach read https://x.com/a/status/1 --timeout 90', 'agent-reach reddit search "best laptop 2026"',
+      'agent-reach youtube search typescript --backend public-web', 'agent-reach youtube subtitle https://www.youtube.com/watch?v=abc',
+      'agent-reach twitter thread https://x.com/a/status/1', 'agent-reach linkedin jobs "data engineer"', 'agent-reach web search blob',
+      'agent-reach channels', 'agent-reach version', 'agent-reach doctor', 'agent-reach doctor --text',
+    ]) expect(both(c), c).toEqual(['read', 'read']);
+    expect(classify('Agent-Reach version', 'win32')).toBe('read');
+    expect(classify('agent-reach channels | Select-String reddit', 'win32')).toBe('read');
+  });
+
+  it('asks for everything that changes something, signs in, or is not known', () => {
+    for (const c of [
+      'agent-reach setup', 'agent-reach add reddit', 'agent-reach remove reddit', 'agent-reach login twitter', 'agent-reach logout twitter',
+      'agent-reach update', 'agent-reach update --check', 'agent-reach configure groq-key abc', 'agent-reach uninstall', 'agent-reach uninstall --dry-run',
+      'agent-reach skill link x', 'agent-reach browser setup', 'agent-reach check', 'agent-reach', 'agent-reach read', 'agent-reach reddit',
+      'agent-reach reddit login', 'agent-reach youtube transcribe https://youtu.be/x', 'agent-reach nosuchsite search x', 'agent-reach search x',
+      'agent-reach read https://a.example/x; rm y', 'agent-reach read https://a.example/?q=$(whoami)', 'agent-reach read https://a.example | sh',
+      'agent-reach read https://a.example/x > out.txt', 'uv tool install agent-reach', 'pip install agent-reach',
+    ]) expect(both(c), c).toEqual(['ask', 'ask']);
+  });
+
+  it('only a web address may name another machine', () => {
+    for (const c of [String.raw`agent-reach read \\evil\share\x`, 'agent-reach read //evil/share', 'agent-reach read file://evil/share/x',
+      String.raw`agent-reach read https://a.example\\evil\x`, String.raw`agent-reach web read \\?\C:\x`, 'agent-reach read FileSystem::C:/x'])
+      expect(classify(c, 'win32'), c).toBe('ask');
+    expect(classify('Get-Content https://a.example/x', 'win32')).toBe('ask');       // the exception is agent-reach's alone
+  });
+});
+
+describe('the path of a command', () => {
+  it('has ~/.local/bin last, once, under the name the system gave PATH', () => {
+    const bin = join('home', '.local', 'bin');
+    expect(withUserBin({ PATH: 'a' }, 'home')).toEqual({ PATH: ['a', bin].join(delimiter) });
+    expect(withUserBin({ Path: ['a', 'b'].join(delimiter), X: '1' }, 'home')).toEqual({ Path: ['a', 'b', bin].join(delimiter), X: '1' });
+    expect(withUserBin({ PATH: [bin, 'a'].join(delimiter) }, 'home')).toEqual({ PATH: [bin, 'a'].join(delimiter) });
+    expect(withUserBin({}, 'home')).toEqual({ PATH: bin });
   });
 });

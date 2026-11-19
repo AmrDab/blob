@@ -53,6 +53,8 @@ export interface Os {
   npmCli(node: string): string;
   /** How Claude Code is installed, for the user to copy. */
   claudeInstall: string;
+  /** The command that installs uv (its own installer, no admin rights), in this system's shell (reach.ts). */
+  uvInstall: string;
 
   /** Where a trashed file goes, by the name the system shows. */
   trashName: string;
