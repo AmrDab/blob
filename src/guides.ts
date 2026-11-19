@@ -1,7 +1,8 @@
-// Blob's app guides (on the self server): community notes on how an app is worked — tips, workflows, where things
-// are, shortcuts — read from clawdcursor.com when the model is about to work that app on the screen, and kept in
+// Blob's app guides (on the self server): community notes on how an app or a site is worked — tips, workflows, where
+// things are, shortcuts — read from clawdcursor.com when the model is about to work it on the screen, and kept in
 // ~/.blob/guides for a week. They are someone else's text: only strings of the known shape are taken, each cut short,
-// and they are handed over as data.
+// and they are handed over as data. Both formats are read: v2 (a `kind`, shortcuts per system, the sites a guide is
+// for, the keys that are hard to undo) and the older one.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ToolResult } from './files-mcp.ts';
@@ -16,11 +17,14 @@ export const MAX_STRING = 300;      // of one tip, workflow, place or shortcut
 const MAX_KEY = 60, MAX_GUIDES = 50, MAX_BYTES = 300_000;
 /** A guide's file name: it goes into a URL and a path. */
 const NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+const RISKY = ' (consequential: ask the user first)';
 
 export interface GuideDeps {
   dir: string;
   /** GET, as JSON; throws when it can't. */
   getJson(url: string): Promise<unknown>;
+  /** This system (os.id): which shortcut of several is taken, and which guides are for it. */
+  platform: string;
   now?: () => number;
 }
 
@@ -38,6 +42,7 @@ const JUNK = new RegExp(`${HIDDEN.source}|[\\u0080-\\u009f]`, 'g');
 /** One line of plain text, cut short; '' for anything that is not a string. */
 const clean = (v: unknown, max: number = MAX_STRING): string =>
   (typeof v === 'string' ? v.replace(JUNK, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim() : '');
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** index.json or one guide: the copy kept here while it is under a week old, else a new one, else the old copy. */
 async function load(d: GuideDeps, name: string): Promise<unknown> {
@@ -59,7 +64,7 @@ async function load(d: GuideDeps, name: string): Promise<unknown> {
 /** The guides the index lists as verified. */
 function listed(index: unknown): string[] {
   const g = (index as { guides?: unknown } | null)?.guides;
-  if (!g || typeof g !== 'object' || Array.isArray(g)) return [];
+  if (!isObject(g)) return [];
   return Object.entries(g)
     .filter(([k, v]) => NAME.test(k) && k !== 'index' && (v as { trust?: unknown } | null)?.trust === 'verified')
     .map(([k]) => k).slice(0, MAX_GUIDES);
@@ -69,41 +74,53 @@ interface Guide {
   app: string;
   /** What it answers to, lower case: its file name, the app's name, its process names. */
   names: string[];
+  /** The sites it is for ("reddit.com"), lower case. */
+  hosts: string[];
   tips: string[];
   workflows: string[];
   layout: string[];
   shortcuts: string[];
 }
 
-/** A workflow is a sentence, or steps ({type, key | field, note}). */
+/** A workflow is a sentence, or a name and steps ({type, key | field | name, note}): the steps on one line, waits left out. */
 function workflow(v: unknown): string {
   if (typeof v === 'string') return clean(v);
-  const steps = (v as { steps?: unknown } | null)?.steps;
-  if (!Array.isArray(steps)) return '';
-  return clean(steps.map(s => {
-    const o = (s && typeof s === 'object' ? s : {}) as Record<string, unknown>;
-    const key = clean(o.key, MAX_KEY), field = clean(o.field, MAX_KEY), note = clean(o.note, 100);
-    const what = key ? `press ${key}` : field ? `type the ${field}` : clean(o.type, MAX_KEY);
+  if (!isObject(v) || !Array.isArray(v.steps)) return '';
+  const steps = v.steps.map(s => {
+    const o = isObject(s) ? s : {};
+    const type = clean(o.type, MAX_KEY), key = clean(o.key, MAX_KEY), field = clean(o.field, MAX_KEY), note = clean(o.note, 150);
+    if (type === 'wait') return '';
+    if (type === 'verify') return `check ${note || clean(o.name, MAX_KEY).replaceAll('_', ' ')}`;
+    const what = key ? `press ${key}` : field ? `type the ${field}` : type;
     return what && note ? `${what} (${note})` : what;
-  }).filter(Boolean).join(', '));
+  }).filter(Boolean).join(', ');
+  const name = clean(v.name, MAX_KEY);
+  return clean(name && steps ? `${name}: ${steps}` : steps);
 }
 
-/** Only what has the known shape; anything else in the file is left out. */
-function parse(file: string, raw: unknown): Guide | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const g = raw as Record<string, unknown>;
+/** Only what has the known shape, and only a guide for this system; anything else in the file is left out. */
+function parse(file: string, raw: unknown, platform: string): Guide | undefined {
+  if (!isObject(raw)) return undefined;
+  const g = raw;
   const list = (v: unknown) => (Array.isArray(v) ? v.map(x => clean(x)).filter(Boolean) : []);
-  const pairs = (v: unknown, text: (x: unknown) => string = clean) => (v && typeof v === 'object' && !Array.isArray(v)
-    ? Object.entries(v).map(([k, x]) => [clean(k, MAX_KEY), text(x)]).filter(([k, x]) => k && x).map(([k, x]) => `- ${k}: ${x}`)
+  const systems = list(g.os);
+  if (systems.length && !systems.includes(platform)) return undefined;
+  const risky = new Set(list(g.consequential));
+  const pairs = (v: unknown, text: (x: unknown) => string = clean) => (isObject(v)
+    ? Object.entries(v).map(([k, x]) => [clean(k, MAX_KEY), text(x)]).filter(([k, x]) => k && x)
+      .map(([k, x]) => `- ${k}: ${x}${risky.has(k) ? RISKY : ''}`)
     : []);
+  // a shortcut is its keys, or the keys per system: this system's ('' says it has none), else `default`
+  const chord = (x: unknown) => clean(isObject(x) ? (Object.hasOwn(x, platform) ? x[platform] : x.default) : x);
   const app = clean(g.app, MAX_KEY), name = clean(g.name, MAX_KEY);
   return {
     app: name || app || file,
     names: [file, app, name, ...list(g.processNames)].filter(Boolean).map(n => n.toLowerCase()),
+    hosts: list(g.domainHints).map(h => h.toLowerCase()),
     tips: list(g.tips).map(t => `- ${t}`),
     workflows: pairs(g.workflows, workflow),
     layout: pairs(g.layout),
-    shortcuts: pairs(g.shortcuts),
+    shortcuts: pairs(g.shortcuts, chord),
   };
 }
 
@@ -124,23 +141,32 @@ function render(g: Guide): string {
   add('Tips:', g.tips);
   add('Workflows:', g.workflows);
   add('Layout:', g.layout);
-  add('Shortcuts:', g.shortcuts);
+  add(g.shortcuts.some(s => /\bmod\b/.test(s)) ? 'Shortcuts (mod is Ctrl, or Cmd on a Mac):' : 'Shortcuts:', g.shortcuts);
   return out.join('\n');
+}
+
+/** What was asked for, lower case: an app's or a process's name, or the site of a web address. */
+function query(v: unknown): string {
+  const q = clean(v).toLowerCase();
+  let site = q.split('/')[0];
+  if (/^[a-z][a-z0-9+.-]*:\/\//.test(q)) try { site = new URL(q).hostname; } catch { /* not an address */ }
+  return site.replace(/\.(exe|app)$/, '').slice(0, MAX_KEY).trim();
 }
 
 export function guideTools(d: GuideDeps) {
   return {
-    /** `app`: a process name ("mspaint") or the app's name ("Paint"), in any case. */
+    /** `app`: a process name ("mspaint"), the app's name ("Paint"), or a site or its address ("reddit.com"), in any case. */
     async guide(a: { app?: unknown }): Promise<ToolResult> {
-      const q = clean(a.app, MAX_KEY).toLowerCase().replace(/\.(exe|app)$/, '');
-      if (!q) return { text: '[failed · NO_APP · hint: pass the app: its process name ("mspaint") or its name ("Paint")]', isError: true };
+      const q = query(a.app);
+      if (!q) return { text: '[failed · NO_APP · hint: pass the app: its process name ("mspaint"), its name ("Paint") or its site ("reddit.com")]', isError: true };
       const all = listed(await load(d, 'index'));
-      const read = async (n: string) => parse(n, await load(d, n));
+      const read = async (n: string) => parse(n, await load(d, n), d.platform);
       let g = all.includes(q) ? await read(q) : undefined;
       if (!g) {
         // the names are in the guides themselves: all of them are read (each is kept for a week)
         const rest = (await Promise.all(all.filter(n => n !== q).map(read))).filter(x => !!x);
-        g = rest.find(x => x.names.includes(q)) ?? rest.find(x => x.names.some(n => n.split(/[^a-z0-9]+/).includes(q)));
+        g = rest.find(x => x.names.includes(q) || x.hosts.includes(q))
+          ?? rest.find(x => x.hosts.some(h => q.endsWith('.' + h)) || x.names.some(n => n.split(/[^a-z0-9]+/).includes(q)));
       }
       if (g) return { text: render(g), isError: false };
       return { text: all.length ? `No guide for ${q}; there are guides for: ${all.join(', ')}.` : `No guide for ${q}: the guides could not be read now.`, isError: false };

@@ -30,7 +30,7 @@ const tools = (store = new SettingsStore(file)) => selfTools({
   memoryFile: join(dir, 'memory.md'),
   scheduleFile: join(dir, 'schedule.json'),
   skillsDir: join(dir, 'skills'),
-  guides: { dir: join(dir, 'guides'), getJson: async () => { throw new Error('offline'); } },
+  guides: { dir: join(dir, 'guides'), getJson: async () => { throw new Error('offline'); }, platform: 'win32' },
   reach: { exec: async () => ({ code: 1, out: '', timedOut: false }), uvInstall: 'install-uv' },
   now: () => clock,
 });
@@ -484,7 +484,7 @@ describe('the brief', () => {
     expect((await t.guide({ app: 'mspaint' })).text).toBe('No guide for mspaint: the guides could not be read now.');
     expect(outcome(await t.reach_install())).toBe('refused');
     expect(asked).toHaveLength(1);
-    expect(details[0]).toMatch(/^install-uv\nuv tool install https:\/\/github\.com\/Panniantong\/Agent-Reach\/releases\/latest\/download\/agent-reach\.zip\nagent-reach setup\n/);
+    expect(details[0]).toMatch(/^install-uv\nuv tool install https:\/\/github\.com\/Panniantong\/Agent-Reach\/releases\/latest\/download\/agent-reach\.zip\nagent-reach setup$/);
   });
 
   it('has the skill tools on the self server, and about() shows the saved skills', async () => {
