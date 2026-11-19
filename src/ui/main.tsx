@@ -40,7 +40,7 @@ const Bare = (p: { observe?: boolean; children?: ReactNode }) => <>{p.children}<
 
 type Phase = 'idle' | 'ask' | 'downloading' | 'recording' | 'transcribing';
 type ShortcutInfo = { id: string; name: string; icon: string; pinned: boolean };
-type Check = { id: string; ok: boolean; label: string; fix: string; alt?: string; tap?: string; text?: string };
+type Check = { id: string; ok: boolean; label: string; fix: string; alt?: string; tap?: string; tap2?: string; text?: string };
 type FirstRun = { key: string; title: string; text: string };
 const PAIR_CARD: FirstRun = { key: 'pair', title: 'Pair your phone?', text: 'Talk to Blob from your phone. You scan a code once.' };
 
@@ -459,6 +459,7 @@ function App() {
                 {need.tap ? (
                   <div className="row">
                     <button className="btn strong" disabled={busy} onClick={() => { if (settled()) void post('/setup/fix', { id: need.id }); }}>{busy ? 'Working…' : need.tap}</button>
+                    {need.tap2 && !busy && <button className="btn strong" onClick={() => { if (settled()) void post('/setup/fix', { id: need.id, second: true }); }}>{need.tap2}</button>}
                   </div>
                 ) : <>
                   {[need.fix, ...(need.alt ? [need.alt] : [])].map(cmd => (

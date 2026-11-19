@@ -256,7 +256,7 @@ export function callLabel(server: string, tool: string, args: Record<string, unk
  * key", an expired token, a 401). The run is what tells: `claude auth status` can go on saying signed in.
  */
 export function needsSignIn(text: string): boolean {
-  return /not logged in|\/login|invalid api key|token (has |is )?expired|authentication_error|401 unauthorized|sign in again/i.test(text);
+  return /not logged in|\/login|invalid api key|token (has |is )?expired|authentication_(error|failed)|401 unauthorized|sign in again/i.test(text);
 }
 
 /** What Blob says in place of them: the sign-in card comes up with it (main.ts). */
