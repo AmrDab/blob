@@ -56,6 +56,8 @@ describe('Blob.app (macOS)', () => {
     expect(s).toContain("export PATH='/opt/homebrew/bin:/usr/bin'");
     expect(s).toContain("export BLOB_APP=1 BLOB_NODE='/opt/homebrew/bin/node'\n");
     expect(s).toContain("node='/H/Applications/Blob.app/Contents/MacOS/Blob'\n\"$node\" -e 0 2>/dev/null || node=\"$BLOB_NODE\"\n");
+    // a first start has no logs folder yet: without it the redirect fails and the app ends with nothing said
+    expect(s).toContain("mkdir -p '/H/.blob/logs'\nexec ");
     expect(s).toContain("exec \"$node\" '--import' 'file:///Users/a/blob/node_modules/tsx/loader.mjs' '/Users/a/it'\\''s/src/main.ts' >> '/H/.blob/logs/blob-app.log' 2>&1");
   });
 

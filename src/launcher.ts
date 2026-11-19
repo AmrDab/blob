@@ -86,6 +86,7 @@ export PATH=${sh(path)}
 export BLOB_APP=1 BLOB_NODE=${sh(c.exe)}
 node=${sh(own)}
 "$node" -e 0 2>/dev/null || node="$BLOB_NODE"
+mkdir -p ${sh(dirname(log))}
 exec "$node" ${c.args.map(sh).join(' ')} >> ${sh(log)} 2>&1
 `;
 }
