@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { osFor } from '../src/os/index.ts';
 import * as setup from '../src/setup.ts';
-import { fix, macNeeds, parseAuthStatus, parseMacStatus, pickBrain, runChecks, type Runner } from '../src/setup.ts';
+import { fix, macNeeds, parseAuthStatus, parseMacStatus, pickBrain, runChecks, signedOut, type Runner } from '../src/setup.ts';
 
 describe('first-run check', () => {
   it('reads `claude auth status --json`', () => {
@@ -28,7 +28,7 @@ describe('first-run check', () => {
 describe('one-tap setup, with a fake runner', () => {
   let home = '';
   let ran: string[] = [];
-  let pc = { claude: true, signedIn: true, codex: false, codexSignedIn: false, clawdcursor: false, mac: 'Accessibility: Not granted\nScreen Recording: Not granted' };
+  let pc = { claude: true, signedIn: true, codex: false, codexSignedIn: false, browser: true, clawdcursor: false, mac: 'Accessibility: Not granted\nScreen Recording: Not granted' };
   const codex = { command: 'codex', args: [] };      // not looked up on this computer
   const run: Runner = async (command, args) => {
     const line = [command, ...args].join(' ').replace(/^cmd \/c /, '');
@@ -37,6 +37,9 @@ describe('one-tap setup, with a fake runner', () => {
     if (line === 'claude auth status --json') return { ok: true, out: JSON.stringify({ loggedIn: pc.signedIn }) };
     if (line === 'codex --version') return { ok: pc.codex, out: '' };
     if (line === 'codex login status') return { ok: pc.codexSignedIn, out: '' };   // exit 0 = signed in
+    if (/install\.(ps1|sh)/.test(line)) { pc.claude = true; return { ok: true, out: '' }; }
+    if (line === 'claude auth login --claudeai') { pc.signedIn = pc.browser; return { ok: pc.browser, out: '' }; }   // ends when the user is through in the browser
+    if (line === 'codex login') { pc.codexSignedIn = pc.browser; return { ok: pc.browser, out: '' }; }
     if (line === 'npm i -g clawdcursor') { pc.clawdcursor = true; return { ok: true, out: '' }; }
     if (!line.startsWith('clawdcursor ') || !pc.clawdcursor) return { ok: false, out: '' };
     if (line === 'clawdcursor consent --accept') {      // clawdcursor writes its own consent file
@@ -50,9 +53,9 @@ describe('one-tap setup, with a fake runner', () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'blob-setup-'));
     ran = [];
-    pc = { claude: true, signedIn: true, codex: false, codexSignedIn: false, clawdcursor: false, mac: 'Accessibility: Not granted\nScreen Recording: Not granted' };
+    pc = { claude: true, signedIn: true, codex: false, codexSignedIn: false, browser: true, clawdcursor: false, mac: 'Accessibility: Not granted\nScreen Recording: Not granted' };
   });
-  afterEach(() => rmSync(home, { recursive: true, force: true }));
+  afterEach(() => { rmSync(home, { recursive: true, force: true }); signedOut('claude', false); });
 
   it('installs clawdcursor, then gets its OK, each with one command, and checks again after', async () => {
     expect(await failing('win32')).toEqual(['clawdcursor']);          // its OK is not asked for before it is there
@@ -64,18 +67,64 @@ describe('one-tap setup, with a fake runner', () => {
     expect(await failing('win32')).toEqual([]);
   });
 
-  it('keeps the brain as commands to copy, both of them: no tap, and nothing is run for them', async () => {
+  it('installs Claude Code with one tap: its own installer, in the system\'s shell, and the sign-in comes after', async () => {
     pc.claude = false;
     const checks = await runChecks('win32', run, home, codex, 'claude');
-    expect(checks[0]).toMatchObject({ id: 'brain', ok: false, label: 'Install Claude Code or Codex', fix: 'irm https://claude.ai/install.ps1 | iex', alt: 'npm i -g @openai/codex', ready: [] });
-    expect(checks[0].tap).toBeUndefined();
+    expect(checks[0]).toMatchObject({ id: 'brain', ok: false, label: 'Install Claude Code', tap: 'Install', ready: [] });
+    expect(checks[0].text).not.toMatch(/terminal|copy/i);
     expect(checks.some(c => c.id === 'signin')).toBe(false);          // sign-in comes after the install
-    expect(await fix('brain', run, 'win32')).toBe(false);
-    pc.claude = true; pc.signedIn = false;
-    const signin = (await runChecks('darwin', run, home, codex, 'claude')).find(c => c.id === 'signin');
-    expect(signin).toMatchObject({ ok: false, label: 'Sign in to Claude Code', fix: 'claude auth login' });
-    expect(signin?.alt).toBeUndefined();                              // Codex is not installed: only Claude Code's sign-in
-    expect(ran.join('\n')).not.toMatch(/install\.(ps1|sh)|auth login|npm i -g @openai|codex login$/);
+    expect(ran.join('\n')).not.toMatch(/install\.(ps1|sh)|auth login|codex login$/);   // looking runs nothing
+    expect(await fix('brain', run, 'win32')).toBe(true);
+    expect(ran.at(-1)).toMatch(/^powershell\.exe -NoProfile -NonInteractive -Command .*irm https:\/\/claude\.ai\/install\.ps1 \| iex$/);
+    expect((await runChecks('win32', run, home, codex, 'claude')).slice(0, 2)).toMatchObject([{ id: 'brain', ok: true }, { id: 'signin', ok: true }]);
+    await fix('brain', run, 'darwin');
+    expect(ran.at(-1)).toBe('/bin/sh -lc curl -fsSL https://claude.ai/install.sh | bash');
+    expect(await fix('brain', async () => ({ ok: false, out: '' }), 'linux')).toBe(false);
+  });
+
+  it('signs in with one tap: Blob runs the sign-in itself and waits for the browser, up to 5 minutes', async () => {
+    pc.signedIn = false;
+    const signin = async () => (await runChecks('darwin', run, home, codex, 'claude')).find(c => c.id === 'signin');
+    expect(await signin()).toMatchObject({ ok: false, label: 'Sign in to Claude Code', tap: 'Sign in',
+      text: 'Sign in with your Claude account in the browser window that opens. Blob carries on by itself.' });
+    expect((await signin())?.alt).toBeUndefined();                    // Codex is not installed: only Claude Code's sign-in
+    const waits: (number | undefined)[] = [];
+    const timed: Runner = (c, a, ms) => { waits.push(ms); return run(c, a, ms); };
+    expect(await fix('signin', timed, 'darwin', 'claude', codex, 'claude')).toBe(true);
+    expect(ran.at(-1)).toBe('claude auth login --claudeai');
+    expect(waits.at(-1)).toBe(300_000);
+    expect(await signin()).toMatchObject({ ok: true });
+    // the browser was closed, or the 5 minutes ran out: the card stays
+    pc.signedIn = false; pc.browser = false;
+    expect(await fix('signin', run, 'darwin', 'claude', codex, 'claude')).toBe(false);
+    expect(await signin()).toMatchObject({ ok: false });
+  });
+
+  it('signs in to the brain the user picked when it is installed, else to the one that is', async () => {
+    pc = { ...pc, signedIn: false, codex: true };
+    expect((await runChecks('win32', run, home, codex, 'claude')).find(c => c.id === 'signin')?.text).toBe('Sign in with your account in the browser window that opens. Blob carries on by itself.');
+    expect(await fix('signin', run, 'win32', 'codex', codex, 'claude')).toBe(true);
+    expect(ran.at(-1)).toBe('codex login');
+    pc = { ...pc, codex: false, codexSignedIn: false };
+    expect(await fix('signin', run, 'win32', 'codex', codex, 'claude')).toBe(true);
+    expect(ran.at(-1)).toBe('claude auth login --claudeai');
+    pc.claude = false;
+    expect(await fix('signin', run, 'win32', 'claude', codex, 'claude')).toBe(false);   // nothing to sign in to
+  });
+
+  it('believes a run that ended signed out over `auth status`, until a sign-in from the card works', async () => {
+    const checks = async () => (await runChecks('win32', run, home, codex, 'claude')).filter(c => c.id === 'brain' || c.id === 'signin');
+    expect(await checks()).toMatchObject([{ ready: ['claude'] }, { ok: true }]);          // auth status: loggedIn true
+    signedOut('claude');                                                                  // ...but the run said "Not logged in"
+    expect(await checks()).toMatchObject([{ ok: true, ready: [] }, { ok: false, tap: 'Sign in' }]);
+    pc.browser = false;
+    expect(await fix('signin', run, 'win32', 'claude', codex, 'claude')).toBe(false);     // a sign-in that did not finish changes nothing
+    expect(await checks()).toMatchObject([{ ready: [] }, { ok: false }]);
+    pc = { ...pc, codex: true, codexSignedIn: true };
+    expect(await checks()).toMatchObject([{ ready: ['codex'] }, { ok: true }]);           // the other brain is ready: Blob uses it
+    pc = { ...pc, codex: false, browser: true };
+    expect(await fix('signin', run, 'win32', 'claude', codex, 'claude')).toBe(true);
+    expect(await checks()).toMatchObject([{ ready: ['claude'] }, { ok: true }]);
   });
 
   it('needs one brain, either one: finds which are installed and signed in', async () => {

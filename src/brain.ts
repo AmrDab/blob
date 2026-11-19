@@ -34,7 +34,8 @@ export type Update =
   | { type: 'log'; entry: LogEntry }
   | { type: 'session'; id: string };
 
-export type BrainEvent = Update | { type: 'busy'; busy: boolean } | { type: 'done'; calls: Call[]; ok: boolean };
+/** `signedOut`: the run ended because this brain is signed out (needsSignIn). */
+export type BrainEvent = Update | { type: 'busy'; busy: boolean } | { type: 'done'; calls: Call[]; ok: boolean; signedOut?: BrainName };
 
 /** Claude Code's read-only file tools; changes go through Blob's files server, which asks before trash/overwrite and before a command that changes something. */
 export const BUILTIN_TOOLS = ['Read', 'Glob', 'Grep'];
@@ -250,6 +251,17 @@ export function callLabel(server: string, tool: string, args: Record<string, unk
   return { tool };
 }
 
+/**
+ * Whether a failed run's last words say the brain is signed out ("Not logged in · Please run /login", "Invalid API
+ * key", an expired token, a 401). The run is what tells: `claude auth status` can go on saying signed in.
+ */
+export function needsSignIn(text: string): boolean {
+  return /not logged in|\/login|invalid api key|token (has |is )?expired|authentication_error|401 unauthorized|sign in again/i.test(text);
+}
+
+/** What Blob says in place of them: the sign-in card comes up with it (main.ts). */
+export const signInAgain = (brain: BrainName) => `Blob needs you to sign in to ${BRAIN_NAME[brain]} again.`;
+
 /** Turns stream-json events into caption and log updates. One parser per run. */
 export class StreamParser {
   private pending = new Map<string, { server: string; tool: string; args: Record<string, unknown> }>();
@@ -259,6 +271,8 @@ export class StreamParser {
   resultError = false;
   /** Why the run ended: 'max_turns' when it used up its step budget, else Claude Code's own word. */
   stop?: string;
+  /** The run ended signed out: the answer is signInAgain, never Claude Code's own "Please run /login". */
+  signedOut = false;
   private said?: Update;
 
   /** `hold`: on a tier that can step up, what the model says waits for its next step, so a stuck model's last words never show. */
@@ -276,6 +290,7 @@ export class StreamParser {
       return out;
     }
     if (e?.type === 'assistant' && Array.isArray(e.message?.content)) {
+      if (e.error === 'authentication_failed') { this.signedOut = true; return out; }   // its text is the /login message, not the model's words
       for (const b of e.message.content) {
         if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
           const u: Update = { type: 'caption', text: oneLine(b.text) };
@@ -310,8 +325,9 @@ export class StreamParser {
       this.resultError = e.is_error === true;
       this.stop = e.subtype === 'error_max_turns' || e.terminal_reason === 'max_turns' ? 'max_turns' : (e.terminal_reason ?? e.subtype);
       if (typeof e.session_id === 'string') out.push({ type: 'session', id: e.session_id });
+      this.signedOut = this.resultError && (this.signedOut || e.api_error_status === 401 || needsSignIn(String(e.result ?? '')));
       // Out of steps, or it asked for a stronger model and said nothing: when no model takes over, that is not "Done."
-      const text = this.stop === 'max_turns' ? 'I couldn\'t finish that: it took too many steps.'
+      const text = this.signedOut ? signInAgain('claude') : this.stop === 'max_turns' ? 'I couldn\'t finish that: it took too many steps.'
         : typeof e.result === 'string' && e.result.trim() ? e.result
         : e.is_error ? `Claude Code stopped (${e.subtype ?? 'error'}).` : this.calls.some(askedUp) ? 'I couldn\'t finish that.' : 'Done.';
       out.push({ type: 'answer', text: oneLine(text, 400) });
@@ -325,6 +341,7 @@ export class CodexParser {
   readonly calls: Call[] = [];
   sawResult = false;
   resultError = false;
+  signedOut = false;                                 // as StreamParser's
   private last = '';                                 // the latest message: the answer when the turn ends
 
   feed(line: string): Update[] {
@@ -334,6 +351,7 @@ export class CodexParser {
     if (e?.type === 'thread.started') return typeof e.thread_id === 'string' ? [{ type: 'session', id: e.thread_id }] : [];
     if (e?.type === 'error' || (e?.type === 'item.completed' && item?.type === 'error')) {
       const text = e.type === 'error' ? e.message : item.message;
+      if (typeof text === 'string' && needsSignIn(text)) { this.signedOut = true; return []; }
       return typeof text === 'string' && text.trim() ? [{ type: 'caption', text: oneLine(text) }] : [];
     }
     if (e?.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim()) {
@@ -354,7 +372,9 @@ export class CodexParser {
     if (e?.type === 'turn.completed' || e?.type === 'turn.failed') {
       this.sawResult = true;
       this.resultError = e.type === 'turn.failed';
-      const text = this.resultError ? (typeof e.error?.message === 'string' && e.error.message.trim() ? e.error.message : 'Codex stopped.') : this.last || 'Done.';
+      let text = this.resultError ? (typeof e.error?.message === 'string' && e.error.message.trim() ? e.error.message : 'Codex stopped.') : this.last || 'Done.';
+      this.signedOut = this.resultError && (this.signedOut || needsSignIn(text));   // an error it got past is not one
+      if (this.signedOut) text = signInAgain('codex');
       return [{ type: 'answer', text: oneLine(text, 400) }];
     }
     return [];
@@ -497,9 +517,9 @@ export class Brain {
           return;
         } catch (e) { why = `Could not start ${name}: ${(e as Error).message}`; }   // the request ends here, with that as its answer
       }
-      if (!parser.sawResult || entry.next) this.o.emit({ type: 'answer', text: entry.halted ? 'Stopped.' : oneLine(stderr.trim().split('\n').pop() || why, 400) });
+      if (!parser.sawResult || entry.next) this.o.emit({ type: 'answer', text: entry.halted ? 'Stopped.' : parser.signedOut ? signInAgain(brain) : oneLine(stderr.trim().split('\n').pop() || why, 400) });
       this.o.emit({ type: 'busy', busy: false });
-      this.o.emit({ type: 'done', calls: [...entry.before, ...parser.calls], ok: parser.sawResult && !parser.resultError });
+      this.o.emit({ type: 'done', calls: [...entry.before, ...parser.calls], ok: parser.sawResult && !parser.resultError, ...(parser.signedOut && { signedOut: brain }) });
     };
     p.on('error', err => done(`Could not start ${name}: ${err.message}`));
     p.on('close', code => done(`${name} exited (${code}).`));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { delimiter, isAbsolute, join } from 'node:path';
-import { PILL_HOST, StreamParser, callLabel, claudeArgs, claudeCommand, cleanEnv, clawdcursorCommand, knowsSnapshotFlag, mcpConfig, mcpServers, outcomeOf, splitToolName, userMessage, withContext } from '../src/brain.ts';
+import { PILL_HOST, StreamParser, callLabel, claudeArgs, claudeCommand, cleanEnv, clawdcursorCommand, knowsSnapshotFlag, mcpConfig, mcpServers, needsSignIn, outcomeOf, splitToolName, userMessage, withContext } from '../src/brain.ts';
 
 describe('claude command line', () => {
   it('runs stream-json print mode with clawdcursor, the files (and shell), desk and self servers and the read-only built-ins', () => {
@@ -276,6 +276,34 @@ describe('stream-json parsing', () => {
   });
 });
 
+// What Claude Code 2.1.322 prints when its saved login no longer works (while `claude auth status` says loggedIn: true).
+describe('a run that ends signed out', () => {
+  const said = { type: 'assistant', error: 'authentication_failed', api_error_status: 401, message: { model: '<synthetic>', content: [{ type: 'text', text: 'Not logged in · Please run /login' }] } };
+  const result = { type: 'result', subtype: 'success', is_error: true, api_error_status: 401, terminal_reason: 'api_error', result: 'Not logged in · Please run /login', session_id: 's' };
+  const again = { type: 'answer', text: 'Blob needs you to sign in to Claude Code again.' };
+
+  it('never shows Claude Code\'s "Please run /login": not as a caption, not as the answer', () => {
+    const p = new StreamParser();
+    expect(p.feed(JSON.stringify(said))).toEqual([]);
+    expect(p.feed(JSON.stringify(result))).toEqual([{ type: 'session', id: 's' }, again]);
+    expect(p).toMatchObject({ signedOut: true, sawResult: true, resultError: true });
+  });
+
+  it('knows it by the 401 alone, or by the words alone, on a failed result only', () => {
+    const end = (r: object) => { const p = new StreamParser(); const out = p.feed(JSON.stringify({ type: 'result', ...r })); return [p.signedOut, out.at(-1)]; };
+    expect(end({ is_error: true, api_error_status: 401, result: 'Something new' })).toEqual([true, again]);
+    for (const words of ['Not logged in · Please run /login', 'Invalid API key · Fix external API key', 'OAuth token has expired',
+      'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}']) {
+      expect(needsSignIn(words)).toBe(true);
+      expect(end({ is_error: true, result: words })).toEqual([true, again]);
+    }
+    // an answer that only talks about signing in is an answer, and another error is still that error
+    expect(end({ is_error: false, result: 'Type /login in Claude Code to sign in.' })).toEqual([false, { type: 'answer', text: 'Type /login in Claude Code to sign in.' }]);
+    expect(end({ is_error: true, api_error_status: 529, result: 'API Error: Overloaded' })).toEqual([false, { type: 'answer', text: 'API Error: Overloaded' }]);
+    expect(needsSignIn('Credit balance is too low')).toBe(false);
+  });
+});
+
 describe('where Claude Code is', () => {
   it('macOS: uses the one on PATH, else the folder its installer uses (which is not on PATH), else the older one', () => {
     const home = join('/Users', 'a'), bin = join('/opt', 'bin');
@@ -287,6 +315,6 @@ describe('where Claude Code is', () => {
     expect(claudeCommand('darwin', env, home, has(old))).toBe(old);
     expect(claudeCommand('darwin', {}, home, has())).toBe('claude');           // not installed: starting it fails
     expect(claudeCommand('darwin', env, home, () => { throw new Error('EPERM'); })).toBe('claude');
-    expect(claudeCommand('win32', env, home, has(native))).toBe('claude');     // Windows: its installer sets PATH
+    expect(claudeCommand('win32', env, home, has(native))).toBe('claude');     // Windows: by name, unless its installer's claude.exe is there
   });
 });

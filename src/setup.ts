@@ -1,6 +1,6 @@
-// The first-run check: what Blob needs before it can work. What Blob can fix itself is one tap (install clawdcursor,
-// give it its OK, ask macOS for its permissions); the install and sign-in of Claude Code or Codex need the user's
-// own login, so they stay commands to copy. The microphone is checked by the page, the first time Speak is used.
+// The first-run check: what Blob needs before it can work. Each fix is one tap, never a command to copy: Blob runs
+// the installers and the sign-in itself, hidden, and the user only signs in, in the browser window the sign-in
+// opens. The microphone is checked by the page, the first time Speak is used.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -11,15 +11,16 @@ import { BRAINS, type BrainName } from './settings.ts';
 
 /**
  * `tap`: the button that fixes it in one tap (fix()). Without one, `fix` is a command to copy, and `alt` a second
- * one (the other brain's). `text`: what the card says. `ready` (on the 'brain' check): the brains installed and signed in.
+ * one (the other brain's); with one they are what the tap runs, for the log. `text`: what the card says. `ready` (on the 'brain' check): the brains installed and signed in.
  */
 export interface Check { id: string; ok: boolean; label: string; fix: string; alt?: string; tap?: string; text?: string; ready?: BrainName[] }
 
 /** Runs a command and gives its output (`err`: what it wrote to stderr, kept apart from `out`). Tests pass a fake one. */
 export type Runner = (command: string, args: string[], timeoutMs?: number) => Promise<{ ok: boolean; out: string; err?: string }>;
 
+// stdin is closed at once: nothing Blob starts here has anyone to type to it (a sign-in then waits for the browser only).
 const shell: Runner = (command, args, timeoutMs = 20_000) => new Promise(res =>
-  execFile(command, args, { env: cleanEnv(), windowsHide: true, timeout: timeoutMs }, (err, stdout, stderr) => res({ ok: !err, out: String(stdout), err: String(stderr) })));
+  execFile(command, args, { env: cleanEnv(), windowsHide: true, timeout: timeoutMs }, (err, stdout, stderr) => res({ ok: !err, out: String(stdout), err: String(stderr) })).stdin?.end());
 
 /** What clawdcursor's own consent screen says, in short. Agree runs `clawdcursor consent --accept`. */
 export const CONSENT_TEXT =
@@ -64,6 +65,15 @@ export async function macNeeds(panes: NonNullable<Os['permissionPanes']>, run: R
   return { ok: true };
 }
 
+/**
+ * The brains a run found signed out (brain.ts: needsSignIn). `claude auth status` can still say signed in then, so
+ * the run's word stands until a sign-in from the card works. Kept only while Blob runs: the next run tells again.
+ */
+const lost = new Set<BrainName>();
+export function signedOut(brain: BrainName, out = true): void {
+  if (out) lost.add(brain); else lost.delete(brain);
+}
+
 /** The brain to use: the one the user picked when it is ready, else the one that is. */
 export function pickBrain(wanted: BrainName, ready: readonly BrainName[]): BrainName {
   return ready.includes(wanted) || !ready.length ? wanted : ready[0];
@@ -77,8 +87,8 @@ export async function brains(platform: string = os.id, run: Runner = shell, code
   const cx = (args: string[]) => run(codex.command, [...codex.args, ...args]);
   const has = { claude: (await run(claude, ['--version'])).ok, codex: (await cx(['--version'])).ok };
   const signedIn = {
-    claude: has.claude && parseAuthStatus((await run(claude, ['auth', 'status', '--json'])).out),
-    codex: has.codex && (await cx(['login', 'status'])).ok,
+    claude: has.claude && !lost.has('claude') && parseAuthStatus((await run(claude, ['auth', 'status', '--json'])).out),
+    codex: has.codex && !lost.has('codex') && (await cx(['login', 'status'])).ok,
   };
   return { has, ready: BRAINS.filter(b => signedIn[b]) };
 }
@@ -86,20 +96,22 @@ export async function brains(platform: string = os.id, run: Runner = shell, code
 export async function runChecks(platform: string = os.id, run: Runner = shell, home: string = homedir(), codex: ServerCommand = codexCommand(platform), claude: string = claudeCommand(platform)): Promise<Check[]> {
   const checks: Check[] = [];
   const { has, ready } = await brains(platform, run, codex, claude);
-  // Blob needs one of the two. With none installed both installs are offered; with one installed, its sign-in.
+  // Blob needs one of the two. With none installed Blob installs Claude Code; with one installed, its sign-in.
   checks.push({
-    id: 'brain', ok: has.claude || has.codex, label: 'Install Claude Code or Codex', ready,
+    id: 'brain', ok: has.claude || has.codex, label: 'Install Claude Code', ready,
     fix: osFor(platform).claudeInstall,
     alt: 'npm i -g @openai/codex',
-    text: 'Blob thinks with your own Claude Code or Codex. Copy one of these, run it in a terminal, then come back.',
+    tap: 'Install',
+    text: 'Blob thinks with your own Claude Code (or Codex, when you have it). Installing Claude Code takes about a minute; then you sign in.',
   });
   if (has.claude || has.codex) {
     const both = has.claude && has.codex;
-    const cl = /\s/.test(claude) ? `"${claude}"` : claude;   // its full path when it is not on PATH, so the copied command works
+    const cl = /\s/.test(claude) ? `"${claude}"` : claude;   // its full path when it is not on PATH
     checks.push({
       id: 'signin', ok: ready.length > 0, label: both ? 'Sign in to Claude Code or Codex' : has.claude ? 'Sign in to Claude Code' : 'Sign in to Codex',
       fix: has.claude ? `${cl} auth login` : 'codex login', ...(both && { alt: 'codex login' }),
-      text: `Copy ${both ? 'one of these' : 'this'}, run it in a terminal and sign in, then come back.`,
+      tap: 'Sign in',
+      text: `Sign in with your ${both ? '' : has.claude ? 'Claude ' : 'ChatGPT '}account in the browser window that opens. Blob carries on by itself.`,
     });
   }
   const installed = (await run(...clawd(['--version']))).ok;
@@ -127,9 +139,26 @@ export let fixNote = '';
  *   clawdcursor: `npm i -g clawdcursor`
  *   consent:     `clawdcursor consent --accept` (clawdcursor writes its own consent file; Blob never does)
  *   mac:         `clawdcursor grant` (macOS asks for Accessibility and Screen Recording)
+ *   brain:       Claude Code's own installer (os.claudeInstall), in the system's shell
+ *   signin:      `claude auth login --claudeai` or `codex login`, for the brain the user picked (`want`) when it is
+ *                installed, else the other. The CLI opens the browser at the sign-in page and ends once the user is
+ *                through (Blob ends it after 5 minutes). Its exit is the answer: `auth status` is not asked.
  */
-export async function fix(id: string, run: Runner = shell, platform: string = os.id): Promise<boolean> {
+export async function fix(id: string, run: Runner = shell, platform: string = os.id, want: BrainName = 'claude',
+  codex: ServerCommand = codexCommand(platform), claude: string = claudeCommand(platform)): Promise<boolean> {
   fixNote = '';
+  if (id === 'brain') {
+    const sys = osFor(platform);
+    return (await run(...sys.shell.argv(sys.claudeInstall, {}), 300_000)).ok;
+  }
+  if (id === 'signin') {
+    const { has } = await brains(platform, run, codex, claude);
+    const b = has[want] ? want : BRAINS.find(x => has[x]);
+    if (!b) return false;
+    const ok = (await (b === 'codex' ? run(codex.command, [...codex.args, 'login'], 300_000) : run(claude, ['auth', 'login', '--claudeai'], 300_000))).ok;
+    if (ok) lost.delete(b);                          // it signed in and saved it: the next run is the proof
+    return ok;
+  }
   if (id === 'clawdcursor') {
     const sys = osFor(platform), npm = sys.cli(['npm', 'i', '-g', 'clawdcursor']);   // npm is a .cmd shim on Windows, which only cmd can start
     const r = await run(npm.command, npm.args, 300_000);

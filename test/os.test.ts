@@ -48,7 +48,10 @@ describe('the operating system', () => {
     expect([w, m, l, bsd].map(o => o.findCodex({}, none))).toEqual(Array(4).fill({ command: 'codex', args: [] }));
     expect(w.npmCli(join('C:', 'node', 'node.exe'))).toBe(join('C:', 'node', 'node_modules', 'npm', 'bin', 'npm-cli.js'));   // beside node.exe
     expect([m, l].map(o => o.npmCli(join('/usr', 'local', 'bin', 'node')))).toEqual(Array(2).fill(join('/usr', 'local', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')));
-    expect(w.findClaude({}, '/home/a', () => true)).toBe('claude');               // never looked for: its installer sets PATH
+    // Windows: where its installer put it (Blob's own PATH is older than an install Blob just ran), else by name
+    expect(w.findClaude({}, join('C:', 'Users', 'a'), () => true)).toBe(join('C:', 'Users', 'a', '.local', 'bin', 'claude.exe'));
+    expect(w.findClaude({}, '/home/a', () => false)).toBe('claude');
+    expect(w.findClaude({}, '/home/a', () => { throw new Error('EPERM'); })).toBe('claude');
     expect([m, l, bsd].map(o => o.findClaude({}, '/home/a', p => p === local))).toEqual([local, local, local]);
   });
 
