@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { osFor } from '../src/os/index.ts';
 import * as setup from '../src/setup.ts';
-import { fix, macNeeds, parseAuthStatus, parseMacStatus, pickBrain, runChecks, signedOut, type Runner } from '../src/setup.ts';
+import { PROBE_ARGS, fix, macNeeds, parseAuthStatus, parseMacStatus, pickBrain, probe, runChecks, signedOut, type Runner } from '../src/setup.ts';
 
 describe('first-run check', () => {
   it('reads `claude auth status --json`', () => {
@@ -41,6 +41,7 @@ describe('one-tap setup, with a fake runner', () => {
     if (line === 'claude auth login --claudeai') { pc.signedIn = pc.browser; return { ok: pc.browser, out: '' }; }   // ends when the user is through in the browser
     if (line === 'codex login') { pc.codexSignedIn = pc.browser; return { ok: pc.browser, out: '' }; }
     if (line === 'npm i -g clawdcursor') { pc.clawdcursor = true; return { ok: true, out: '' }; }
+    if (line === 'npm i -g @openai/codex') { pc.codex = true; return { ok: true, out: '' }; }
     if (!line.startsWith('clawdcursor ') || !pc.clawdcursor) return { ok: false, out: '' };
     if (line === 'clawdcursor consent --accept') {      // clawdcursor writes its own consent file
       mkdirSync(join(home, '.clawdcursor'), { recursive: true });
@@ -55,7 +56,7 @@ describe('one-tap setup, with a fake runner', () => {
     ran = [];
     pc = { claude: true, signedIn: true, codex: false, codexSignedIn: false, browser: true, clawdcursor: false, mac: 'Accessibility: Not granted\nScreen Recording: Not granted' };
   });
-  afterEach(() => { rmSync(home, { recursive: true, force: true }); signedOut('claude', false); });
+  afterEach(() => { rmSync(home, { recursive: true, force: true }); signedOut('claude'); signedOut('claude', false); });   // no probe passed, nobody signed out
 
   it('installs clawdcursor, then gets its OK, each with one command, and checks again after', async () => {
     expect(await failing('win32')).toEqual(['clawdcursor']);          // its OK is not asked for before it is there
@@ -67,19 +68,86 @@ describe('one-tap setup, with a fake runner', () => {
     expect(await failing('win32')).toEqual([]);
   });
 
-  it('installs Claude Code with one tap: its own installer, in the system\'s shell, and the sign-in comes after', async () => {
-    pc.claude = false;
+  it('asks which AI the user has, and one tap on Claude installs Claude Code and goes straight on to its sign-in', async () => {
+    pc = { ...pc, claude: false, signedIn: false };
     const checks = await runChecks('win32', run, home, codex, 'claude');
-    expect(checks[0]).toMatchObject({ id: 'brain', ok: false, label: 'Install Claude Code', tap: 'Install', ready: [] });
+    expect(checks[0]).toMatchObject({ id: 'brain', ok: false, label: 'Which AI do you have?', tap: 'Claude', tap2: 'ChatGPT', ready: [] });
     expect(checks[0].text).not.toMatch(/terminal|copy/i);
-    expect(checks.some(c => c.id === 'signin')).toBe(false);          // sign-in comes after the install
+    expect(checks[0].text).toMatch(/uses your subscription, once/);  // the test request is said before the tap
+    expect(checks.some(c => c.id === 'signin')).toBe(false);          // sign-in comes with the install
     expect(ran.join('\n')).not.toMatch(/install\.(ps1|sh)|auth login|codex login$/);   // looking runs nothing
-    expect(await fix('brain', run, 'win32')).toBe(true);
-    expect(ran.at(-1)).toMatch(/^powershell\.exe -NoProfile -NonInteractive -Command .*irm https:\/\/claude\.ai\/install\.ps1 \| iex$/);
-    expect((await runChecks('win32', run, home, codex, 'claude')).slice(0, 2)).toMatchObject([{ id: 'brain', ok: true }, { id: 'signin', ok: true }]);
-    await fix('brain', run, 'darwin');
-    expect(ran.at(-1)).toBe('/bin/sh -lc curl -fsSL https://claude.ai/install.sh | bash');
-    expect(await fix('brain', async () => ({ ok: false, out: '' }), 'linux')).toBe(false);
+    ran = [];
+    expect(await fix('brain', run, 'win32', 'claude', codex, 'claude')).toBe(true);
+    const did = ran.filter(l => /install|login$|--claudeai/.test(l));
+    expect(did[0]).toMatch(/^powershell\.exe -NoProfile -NonInteractive -Command .*irm https:\/\/claude\.ai\/install\.ps1 \| iex$/);
+    expect(did.slice(1)).toEqual(['claude auth login --claudeai']);   // no second tap
+    expect((await runChecks('win32', run, home, codex, 'claude')).slice(0, 2)).toMatchObject([{ id: 'brain', ok: true, ready: ['claude'] }, { id: 'signin', ok: true }]);
+    pc.claude = false; ran = [];
+    await fix('brain', run, 'darwin', 'claude', codex, 'claude');
+    expect(ran).toContain('/bin/sh -lc curl -fsSL https://claude.ai/install.sh | bash');
+    // an install that failed starts no sign-in
+    const tried: string[] = [];
+    expect(await fix('brain', async (c, a) => { tried.push([c, ...a].join(' ')); return { ok: false, out: '' }; }, 'linux', 'claude', codex, 'claude')).toBe(false);
+    expect(tried.join('\n')).not.toMatch(/login/);
+  });
+
+  it('one tap on ChatGPT installs Codex with npm and goes straight on to its sign-in', async () => {
+    pc = { ...pc, claude: false, signedIn: false };
+    expect(await fix('brain', run, 'win32', 'codex', codex, 'claude')).toBe(true);
+    expect(ran.filter(l => /install|npm|login$|--claudeai/.test(l))).toEqual(['npm i -g @openai/codex', 'codex login']);
+    expect((await runChecks('win32', run, home, codex, 'claude')).slice(0, 2)).toMatchObject([{ id: 'brain', ok: true, ready: ['codex'] }, { id: 'signin', ok: true }]);
+    // the sign-in was not finished: the install stands, and the Sign in card is what is left
+    pc = { ...pc, codex: false, codexSignedIn: false, browser: false };
+    expect(await fix('brain', run, 'darwin', 'codex', codex, 'claude')).toBe(false);
+    expect((await runChecks('darwin', run, home, codex, 'claude')).slice(0, 2)).toMatchObject([{ id: 'brain', ok: true }, { id: 'signin', ok: false, label: 'Sign in to Codex' }]);
+    // there already (asked for later, with "use Codex"): only the sign-in runs
+    pc.browser = true; ran = [];
+    expect(await fix('brain', run, 'darwin', 'codex', codex, 'claude')).toBe(true);
+    expect(ran).not.toContain('npm i -g @openai/codex');
+    expect(ran.at(-1)).toBe('codex login');
+    // macOS: npm may not write to its global folder
+    expect(await fix('brain', async () => ({ ok: false, out: '', err: 'npm error code EACCES' }), 'darwin', 'codex', codex, 'claude')).toBe(false);
+    expect(setup.fixNote).toMatch(/sudo/);
+  });
+
+  it('tries the sign-in out with one real request, once, and believes it over `auth status`', async () => {
+    const probes: { line: string; ms?: number; cwd?: string }[] = [];
+    let says = { ok: true, out: '{"type":"result","is_error":false,"result":"ok"}', err: '' };
+    const real: Runner = async (c, a, ms, cwd) => {
+      if (a[0] !== '-p') return run(c, a, ms);
+      probes.push({ line: [c, ...a].join(' '), ms, cwd });
+      return says;
+    };
+    expect(PROBE_ARGS).toEqual(['-p', 'Reply with the one word: ok', '--model', 'haiku', '--max-turns', '1', '--output-format', 'json',
+      '--strict-mcp-config', '--setting-sources', 'project', '--disable-slash-commands', '--no-chrome', '--tools', '']);
+    // nothing to try: Claude Code is not signed in, or Codex is the brain in use
+    expect(await probe('claude', [], '/work', real, 'claude')).toBe(false);
+    expect(await probe('codex', ['claude', 'codex'], '/work', real, 'claude')).toBe(false);
+    expect(probes).toEqual([]);
+    // a failure that says nothing about the sign-in (no network, a limit) decides nothing, and is asked again
+    says = { ok: false, out: '{"is_error":true,"result":"API Error: 529 overloaded"}', err: '' };
+    expect(await probe('claude', ['claude'], '/work', real, 'claude')).toBe(false);
+    expect(probes).toHaveLength(1);
+    expect(probes[0]).toMatchObject({ ms: 60_000, cwd: '/work' });   // in Blob's work folder
+    // signed out, each way Claude Code says it: the sign-in card comes up though `auth status` says signed in
+    for (const out of ['{"is_error":true,"api_error_status":401,"result":"Failed to authenticate"}', '{"is_error":true,"result":"Not logged in · Please run /login"}', 'authentication_failed']) {
+      says = { ok: false, out, err: '' };
+      expect(await probe('claude', ['claude'], '/work', real, 'claude')).toBe(true);
+      expect((await runChecks('win32', real, home, codex, 'claude')).slice(0, 2)).toMatchObject([{ ready: [] }, { id: 'signin', ok: false, tap: 'Sign in' }]);
+      expect(await fix('signin', real, 'win32', 'claude', codex, 'claude')).toBe(true);
+    }
+    expect(probes).toHaveLength(4);
+    // it passes: no second request, whoever asks
+    says = { ok: true, out: '{"type":"result","is_error":false,"result":"ok"}', err: '' };
+    expect(await probe('claude', ['claude'], '/work', real, 'claude')).toBe(false);
+    expect(await probe('claude', ['claude'], '/work', real, 'claude')).toBe(false);
+    expect(probes).toHaveLength(5);
+    expect((await runChecks('win32', real, home, codex, 'claude'))[0]).toMatchObject({ ready: ['claude'] });
+    // until a run ends signed out: the next sign-in is tried out again
+    signedOut('claude');
+    expect(await fix('signin', real, 'win32', 'claude', codex, 'claude')).toBe(true);
+    expect(await probe('claude', ['claude'], '/work', real, 'claude')).toBe(false);
+    expect(probes).toHaveLength(6);
   });
 
   it('signs in with one tap: Blob runs the sign-in itself and waits for the browser, up to 5 minutes', async () => {

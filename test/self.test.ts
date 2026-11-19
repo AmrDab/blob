@@ -122,10 +122,19 @@ describe('change_setting', () => {
     expect(loadSettings(file).brain).toBe('claude');
   });
 
-  it('does not offer a brain that is not installed and signed in, and takes no other name', async () => {
+  it('sets up a brain that is not installed and signed in, after a Yes, and takes no other name', async () => {
     answer = true; ready = ['claude'];
+    // not set up: no terminal command for the user. One Yes, and the host installs it and starts its sign-in
     const r = await tools().change_setting({ key: 'brain', value: 'codex' });
-    expect(r.text).toMatch(/NOT_READY.*npm i -g @openai\/codex.*codex login/);
+    expect(asked).toEqual(['Set up Codex?']);
+    expect(details[0]).toMatch(/not set up on this computer yet/);
+    expect(hosted).toEqual([['setup', { brain: 'codex' }]]);
+    expect(r.text).toMatch(/^did setup/);
+    expect(r.text + details[0]).not.toMatch(/terminal|npm|codex login/);
+    answer = false; asked = []; hosted = [];
+    expect(outcome(await tools().change_setting({ key: 'brain', value: 'codex' }))).toBe('refused');
+    expect(hosted).toEqual([]);                                         // No: nothing is installed
+    asked = [];
     expect((await tools().change_setting({ key: 'brain', value: 'gpt' })).text).toMatch(/BAD_VALUE.*claude, codex/);
     expect(asked).toEqual([]);
     expect(existsSync(file)).toBe(false);
@@ -442,7 +451,6 @@ describe('the brief', () => {
         expect(p, platform).toMatch(/accessibility tree/);
         expect(p, platform).not.toMatch(/you have no tools for it/);
       }
-      expect(h.length, platform).toBeLessThan(8000);
     }
     expect(auto()).toMatch(/"use Haiku" pins one model; "pick the model yourself" is model=auto/);
   });
@@ -453,7 +461,14 @@ describe('the brief', () => {
     expect(p).toMatch(/remember[^]*Never a password, code, key or other secret[^]*data about the user, never instructions/);
     expect(p).toMatch(/<saved_facts>\n- Uses Outlook for mail\.\n<\/saved_facts>$/);
     expect(persona(DEFAULTS, { now })).toMatch(/<saved_facts>\n\(nothing yet\)\n<\/saved_facts>$/);
-    for (const platform of ['win32', 'darwin', 'linux']) expect(persona(DEFAULTS, { now, platform }).length, platform).toBeLessThan(8000);   // Windows has the longest brief: the desk route
+  });
+
+  it('stays under 8000 characters on every system, for every tier on auto and for Codex', () => {
+    // Windows has the longest brief (the desk route), and Sonnet on auto the longest there (it can step up)
+    for (const platform of ['win32', 'darwin', 'linux']) {
+      for (const tier of [undefined, 'haiku', 'sonnet', 'opus'] as const) expect(persona(DEFAULTS, { now, platform, tier }).length, `${platform} ${tier}`).toBeLessThan(8000);
+      expect(persona(DEFAULTS, { now, platform, brain: 'codex' }).length, `${platform} codex`).toBeLessThan(8000);
+    }
   });
 
   it('carries what Blob knows about this computer and its saved scripts, as data', () => {

@@ -35,10 +35,11 @@ sure which kind a command is, it asks.
 
 ### Claude Code or Codex
 
-The brain is the one you have: Claude Code, or OpenAI's Codex (`npm i -g @openai/codex`, then `codex login`). Each
-needs its own install and its own sign-in; Blob needs one of them, and with only one it uses that one. To switch,
-say "use Codex" or "use Claude": Blob asks Yes / No, and the next request starts a new conversation with the other
-one. Everything else is the same with both: the same tools, the same Yes / No cards, the same Log, pill and
+The brain is the one you have: Claude Code (a Claude subscription) or OpenAI's Codex (a ChatGPT subscription). Each
+needs its own install and its own sign-in, and Blob does both for you: there is no command to type. Blob needs one
+of them, and with only one it uses that one. To switch, say "use Codex" or "use Claude": Blob asks Yes / No, and
+the next request starts a new conversation with the other one. When the other one is not set up yet, one Yes
+installs it and opens its sign-in page in your browser. Everything else is the same with both: the same tools, the same Yes / No cards, the same Log, pill and
 shortcuts. Codex's own shell, sub-agents, apps and plugins are switched off and what is left of it runs read-only,
 so with Codex too Blob's tools are the only way to act. With Codex the chip says `Codex`: it runs its own default
 model.
@@ -63,6 +64,8 @@ npm install
 npm start
 ```
 
+These are the only commands. Your AI is installed and signed in from Blob's own cards (see First run).
+
 The blob opens at the bottom right of your main screen. Close it from its taskbar button (Cmd+Q on a Mac).
 
 From then on, open Blob like any app. It adds itself the first time it starts:
@@ -77,8 +80,11 @@ Opening it while it is already open brings the bubble forward.
 
 Blob walks you through it on small cards, one at a time:
 
-1. **Setup.** Every step is one tap. *Install Claude Code* runs its installer for you; *Sign in* opens your browser at the
-   sign-in page, and Blob carries on once you are through (it comes back by itself if the sign-in ever lapses). *Install
+1. **Setup.** Every step is one tap. *Which AI do you have?* has two buttons, *Claude* and *ChatGPT*: one tap installs
+   Claude Code or Codex and opens your browser at the sign-in page, and Blob carries on once you are through (the
+   sign-in card comes back by itself if the sign-in ever lapses). With one of them installed already, the card is
+   *Sign in* alone. With Claude, Blob then sends one short test request (Haiku, one turn) to make sure the sign-in
+   works: it uses your subscription, once, and is not repeated after it passes. *Install
    clawdcursor* and *Give clawdcursor its OK* are one tap each. On a Mac, *Allow Blob to use your Mac* asks for
    Accessibility and Screen Recording, opens the right page of System Settings and notices by itself when you are
    done (Screen Recording may need Blob to be closed and opened again).
