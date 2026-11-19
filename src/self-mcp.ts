@@ -15,15 +15,11 @@ import { MAX_TEXT, addEntry, describe, loadSchedule, nextDue, parseWhen, removeE
 import { systemExec } from './shell.ts';
 import { MAX_DESCRIPTION, MAX_STEPS, skillTools, skillsBrief, skillsDir } from './skills.ts';
 import { BRAINS, BRAIN_NAME, CHANGEABLE, DEFAULTS, MODELS, SettingsStore, WHAT, parseValue, type BrainName, type Key, type Settings } from './settings.ts';
-import { claudeCommand } from './brain.ts';
 import { brains } from './setup.ts';
-
-/** Claude Code's sign-in, by its full path when its folder is not on PATH (macOS installs it in ~/.local/bin). */
-const signinCommand = (claude: string = claudeCommand()) => `${/\s/.test(claude) ? `"${claude}"` : claude} auth login`;
 import { activityFile, forgetActivity, topActivity } from './watch.ts';
 
 /** What only the host can do. The host answers with a line for the model. */
-export type HostAction = 'save_shortcut' | 'pair' | 'unpair' | 'update';
+export type HostAction = 'save_shortcut' | 'pair' | 'unpair' | 'update' | 'setup';
 export type Host = (action: HostAction, body?: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
 
 export interface SelfDeps {
@@ -116,10 +112,11 @@ export function selfTools(d: SelfDeps) {
       const value = parseValue(key, a.value);
       if (value === undefined) return failed('BAD_VALUE', key === 'model' ? `model is one of ${MODELS.join(', ')}` : key === 'brain' ? `brain is one of ${BRAINS.join(', ')}` : `${key} is true or false`);
       if (d.settings.get()[key] === value) return ok(`${key} is already ${String(value)}. Nothing to change.`);
+      // Not installed or not signed in: no terminal for the user. One Yes, and the host sets it up as the setup card does.
       if (key === 'brain' && !(await d.brainReady(value as BrainName))) {
-        return failed('NOT_READY', value === 'codex'
-          ? 'Codex is not installed or not signed in on this computer. Tell the user to run, in a terminal: npm i -g @openai/codex, then: codex login'
-          : `Claude Code is not installed or not signed in on this computer. Tell the user to install it, then run in a terminal: ${signinCommand()}`);
+        const name = BRAIN_NAME[value as BrainName];
+        if (!(await d.ask(`Set up ${name}?`, `${name} is not set up on this computer yet. Blob installs it if needed, then your browser opens for you to sign in.`))) return NO();
+        return viaHost('setup', { brain: value });
       }
       if (!(await d.ask(question(key as typeof CHANGEABLE[number], value)))) return NO();
       try { d.settings.set(key, value); } catch (e) { return failed('CANT_SAVE', (e as Error).message); }

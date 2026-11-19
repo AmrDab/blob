@@ -32,10 +32,10 @@ import { skillsBrief, skillsDir } from './skills.ts';
 import { answerLine, parseCommand, type PillAnswer, type PillState } from './pill.ts';
 import { mcpCaller, replay } from './replay.ts';
 import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } from './schedule.ts';
-import { ASK, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, type BrainName, type Model } from './settings.ts';
+import { ASK, BRAINS, BRAIN_NAME, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, type BrainName, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
-import { fix, fixNote, macNeeds, pickBrain, runChecks, signedOut, type Check } from './setup.ts';
+import { fix, fixNote, macNeeds, pickBrain, probe, runChecks, signedOut, type Check } from './setup.ts';
 import { install, installed, latest, newer, question as updateQuestion, skip, switchTo, systemUpdate, toOffer } from './update.ts';
 import { Watcher, activityFile, clawdcursorReader } from './watch.ts';
 
@@ -496,6 +496,12 @@ async function selfUpdate(): Promise<{ ok: boolean; text: string }> {
 async function selfAction(body: any): Promise<{ ok: boolean; text: string }> {
   if (body.action === 'save_shortcut') return saveLast();
   if (body.action === 'update') return selfUpdate();
+  if (body.action === 'setup') {                    // "use Codex" when it is not set up: the user said Yes on the card
+    const b = BRAINS.find(x => x === body.brain);
+    if (!b) return { ok: false, text: 'Blob does not know that' };
+    void setupFix('brain', b);
+    return { ok: true, text: `Blob is setting ${BRAIN_NAME[b]} up now: their browser opens for the sign-in, and Blob switches to ${BRAIN_NAME[b]} once they are through. Tell the user so.` };
+  }
   if (body.action === 'pair') return showQr();
   if (body.action === 'unpair') {
     if (!pairing || !settings.get().phonePaired) return { ok: true, text: 'No phone is paired.' };
@@ -532,23 +538,27 @@ async function runShortcut(s: Shortcut): Promise<void> {
   }
 }
 
-async function check(): Promise<Check[]> {
+/** `tryOut`: also send Claude Code one test request, unless one passed already (setup.ts: probe). Never at a start once the first run is done. */
+async function check(tryOut = !settings.get().onboarded): Promise<Check[]> {
   try {
     const checks = await runChecks();
     const was = brainNow();
     ready = checks.find(c => c.id === 'brain')?.ready ?? [];
     if (brainNow() !== was) sendSettings();           // only the other brain is ready: the chip shows it
     send({ type: 'setup', checks });
+    // The cards are up already; a sign-in that only looked fine brings the sign-in card a moment later.
+    if (tryOut && await probe(settings.get().brain, ready, WORK)) return check(false);
     return checks;
   } catch { return []; }                            // checks are best effort
 }
 
-/** One tap on a setup card: Blob runs the fix (the orb turns while it does) and checks again. */
-async function setupFix(id: string): Promise<void> {
+/** One tap on a setup card: Blob runs the fix (the orb turns while it does) and checks again. `want`: the brain chosen on the 'brain' card. */
+async function setupFix(id: string, want: BrainName = settings.get().brain): Promise<void> {
   busy(true);
   let ok = false;
-  try { ok = await fix(id, undefined, undefined, settings.get().brain); } finally { busy(false); }
-  const still = (await check()).find(c => c.id === id && !c.ok);
+  try { ok = await fix(id, undefined, undefined, want); } finally { busy(false); }
+  if (ok && id === 'brain') settings.set('brain', want);   // installed and signed in: that is the one Blob thinks with
+  const still = (await check(!settings.get().onboarded || id === 'brain' || id === 'signin')).find(c => c.id === id && !c.ok);
   if (still && id === 'mac') watchMac();
   else if (still && ok) caption(`${still.label}: not done yet.`);
   else if (still && fixNote) caption(fixNote);       // Blob knows why (macOS: npm can't write its global folder)
@@ -556,6 +566,7 @@ async function setupFix(id: string): Promise<void> {
     caption(`That didn't work. Tap ${still.tap ?? 'it'} to try again.`);
     console.log(`Blob: setup step "${still.id}" failed; in a terminal, run: ${still.fix}`);
   }
+  else if (!ok && id === 'brain' && ready.length) caption(`${BRAIN_NAME[want]} is not set up yet. Ask again to try once more.`);   // asked for ("use Codex"): no card is up to say so
 }
 
 // macOS: while a permission is missing, look every 2 s by itself, with the pane for the missing one open.
@@ -620,8 +631,8 @@ async function post(path: string, body: any): Promise<void> {
       return;
     }
     case '/shortcut/delete': store(shortcuts.filter(s => s.id !== body.id)); return;
-    case '/setup/check': focus.restore(); await check(); return;
-    case '/setup/fix': focus.restore(); await setupFix(str(body.id)); return;
+    case '/setup/check': focus.restore(); await check(true); return;
+    case '/setup/fix': focus.restore(); await setupFix(str(body.id), body.id === 'brain' ? (body.second === true ? 'codex' : 'claude') : undefined); return;
     case '/firstrun': {                             // a first-run card: the user's own tap, no question
       focus.restore();
       const key = FIRST_RUN.find(k => k === body.key);

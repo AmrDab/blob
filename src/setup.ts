@@ -5,22 +5,23 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { claudeCommand, cleanEnv, clawdcursorCommand, codexCommand, type ServerCommand } from './brain.ts';
+import { claudeCommand, cleanEnv, clawdcursorCommand, codexCommand, needsSignIn, type ServerCommand } from './brain.ts';
 import { os, osFor, type Os } from './os/index.ts';
 import { BRAINS, type BrainName } from './settings.ts';
 
 /**
  * `tap`: the button that fixes it in one tap (fix()). Without one, `fix` is a command to copy, and `alt` a second
- * one (the other brain's); with one they are what the tap runs, for the log. `text`: what the card says. `ready` (on the 'brain' check): the brains installed and signed in.
+ * one (the other brain's); with one they are what the tap runs, for the log. `tap2`: a second button, for a card
+ * that is a choice of two (it runs `alt`). `text`: what the card says. `ready` (on the 'brain' check): the brains installed and signed in.
  */
-export interface Check { id: string; ok: boolean; label: string; fix: string; alt?: string; tap?: string; text?: string; ready?: BrainName[] }
+export interface Check { id: string; ok: boolean; label: string; fix: string; alt?: string; tap?: string; tap2?: string; text?: string; ready?: BrainName[] }
 
 /** Runs a command and gives its output (`err`: what it wrote to stderr, kept apart from `out`). Tests pass a fake one. */
-export type Runner = (command: string, args: string[], timeoutMs?: number) => Promise<{ ok: boolean; out: string; err?: string }>;
+export type Runner = (command: string, args: string[], timeoutMs?: number, cwd?: string) => Promise<{ ok: boolean; out: string; err?: string }>;
 
 // stdin is closed at once: nothing Blob starts here has anyone to type to it (a sign-in then waits for the browser only).
-const shell: Runner = (command, args, timeoutMs = 20_000) => new Promise(res =>
-  execFile(command, args, { env: cleanEnv(), windowsHide: true, timeout: timeoutMs }, (err, stdout, stderr) => res({ ok: !err, out: String(stdout), err: String(stderr) })).stdin?.end());
+const shell: Runner = (command, args, timeoutMs = 20_000, cwd) => new Promise(res =>
+  execFile(command, args, { env: cleanEnv(), windowsHide: true, timeout: timeoutMs, cwd }, (err, stdout, stderr) => res({ ok: !err, out: String(stdout), err: String(stderr) })).stdin?.end());
 
 /** What clawdcursor's own consent screen says, in short. Agree runs `clawdcursor consent --accept`. */
 export const CONSENT_TEXT =
@@ -69,7 +70,34 @@ export async function macNeeds(panes: NonNullable<Os['permissionPanes']>, run: R
  */
 const lost = new Set<BrainName>();
 export function signedOut(brain: BrainName, out = true): void {
-  if (out) lost.add(brain); else lost.delete(brain);
+  if (out) { lost.add(brain); probed = false; } else lost.delete(brain);   // the next sign-in is tried out again
+}
+
+/** Whether the test request passed: Blob sends it once, then goes by `auth status` and by what the runs say. */
+let probed = false;
+
+/** The test request: Haiku, one turn, no tools, and none of the user's own MCP servers, plugins or hooks (brain.ts: claudeArgs). */
+export const PROBE_ARGS = ['-p', 'Reply with the one word: ok', '--model', 'haiku', '--max-turns', '1', '--output-format', 'json',
+  '--strict-mcp-config', '--setting-sources', 'project', '--disable-slash-commands', '--no-chrome', '--tools', ''];
+
+/**
+ * One real request to Claude Code, the cheapest there is, because `claude auth status` can say signed in while every
+ * run ends "Not logged in". It uses the user's subscription, so Blob sends it once: before the first-run questions
+ * are answered, and after a tap on a setup card. `cwd`: Blob's empty work folder, as for a run. True when it found
+ * Claude Code signed out: the caller checks again, and the sign-in card comes up. Any other failure (no network, a
+ * limit) decides nothing, and the next check asks again.
+ */
+export async function probe(want: BrainName, ready: readonly BrainName[], cwd: string, run: Runner = shell, claude: string = claudeCommand()): Promise<boolean> {
+  if (probed || !ready.includes('claude') || pickBrain(want, ready) !== 'claude') return false;
+  probed = true;                                     // one at a time: a second check meanwhile does not send another
+  const r = await run(claude, PROBE_ARGS, 60_000, cwd);
+  let e: { is_error?: unknown; result?: unknown; api_error_status?: unknown } | undefined;
+  try { e = JSON.parse(r.out); } catch { /* it ended before its result: what it wrote tells */ }
+  if (r.ok && e?.is_error !== true) return false;
+  probed = false;
+  const out = e?.api_error_status === 401 || needsSignIn(typeof e?.result === 'string' ? e.result : r.out + (r.err ?? ''));
+  if (out) lost.add('claude');
+  return out;
 }
 
 /** The brain to use: the one the user picked when it is ready, else the one that is. */
@@ -94,13 +122,16 @@ export async function brains(platform: string = os.id, run: Runner = shell, code
 export async function runChecks(platform: string = os.id, run: Runner = shell, home: string = homedir(), codex: ServerCommand = codexCommand(platform), claude: string = claudeCommand(platform)): Promise<Check[]> {
   const checks: Check[] = [];
   const { has, ready } = await brains(platform, run, codex, claude);
-  // Blob needs one of the two. With none installed Blob installs Claude Code; with one installed, its sign-in.
+  // Blob needs one of the two. With none installed the card asks which subscription the user has, and that tap
+  // installs its program (Claude Code or Codex) and starts its sign-in; with one installed, its sign-in.
   checks.push({
-    id: 'brain', ok: has.claude || has.codex, label: 'Install Claude Code', ready,
+    id: 'brain', ok: has.claude || has.codex, label: 'Which AI do you have?', ready,
     fix: osFor(platform).claudeInstall,
     alt: 'npm i -g @openai/codex',
-    tap: 'Install',
-    text: 'Blob thinks with your own Claude Code (or Codex, when you have it). Installing Claude Code takes about a minute; then you sign in.',
+    tap: 'Claude', tap2: 'ChatGPT',
+    text: 'Blob thinks with your own Claude or ChatGPT subscription. Tap the one you have: Blob installs what it needs ' +
+      '(about a minute), then your browser opens for you to sign in. With Claude, Blob then sends one short test ' +
+      'message to make sure the sign-in works. It uses your subscription, once.',
   });
   if (has.claude || has.codex) {
     const both = has.claude && has.codex;
@@ -132,42 +163,50 @@ export async function runChecks(platform: string = os.id, run: Runner = shell, h
 /** Why the last fix() failed, in words for the user, when Blob knows ('' when it does not). */
 export let fixNote = '';
 
+/** `npm i -g` of one package. npm is a .cmd shim on Windows, which only cmd can start (os.cli). */
+async function npmInstall(pkg: string, run: Runner, sys: Os): Promise<boolean> {
+  const npm = sys.cli(['npm', 'i', '-g', pkg]);
+  const r = await run(npm.command, npm.args, 300_000);
+  // Node from the nodejs.org installer keeps its global folder owned by root: a plain install cannot write there.
+  if (!r.ok && sys.shell.dialect === 'posix' && /EACCES/.test(r.err ?? '')) {
+    fixNote = 'Your Node needs your password to install this. Use Node from Homebrew or nvm, or run the install with sudo in Terminal, then try again.';
+    console.log(`Blob: npm has no write access to its global folder (EACCES). In a terminal, run: sudo npm i -g ${pkg} (or use Node from Homebrew or nvm).`);
+  }
+  return r.ok;
+}
+
 /**
  * The one-tap fix of a check. True when the command worked; the caller checks again either way.
  *   clawdcursor: `npm i -g clawdcursor`
  *   consent:     `clawdcursor consent --accept` (clawdcursor writes its own consent file; Blob never does)
  *   mac:         `clawdcursor grant` (macOS asks for Accessibility and Screen Recording)
- *   brain:       Claude Code's own installer (os.claudeInstall), in the system's shell
+ *   brain:       sets up the brain the user chose (`want`): Claude Code's own installer (os.claudeInstall) in the
+ *                system's shell, or `npm i -g @openai/codex`, unless it is there already; then its sign-in, with no
+ *                second tap. Without `codex` and `claude` each is looked up again once it is installed.
  *   signin:      `claude auth login --claudeai` or `codex login`, for the brain the user picked (`want`) when it is
  *                installed, else the other. The CLI opens the browser at the sign-in page and ends once the user is
  *                through (Blob ends it after 5 minutes). Its exit is the answer: `auth status` is not asked.
  */
 export async function fix(id: string, run: Runner = shell, platform: string = os.id, want: BrainName = 'claude',
-  codex: ServerCommand = codexCommand(platform), claude: string = claudeCommand(platform)): Promise<boolean> {
+  codex?: ServerCommand, claude?: string): Promise<boolean> {
   fixNote = '';
+  const sys = osFor(platform);
   if (id === 'brain') {
-    const sys = osFor(platform);
-    return (await run(...sys.shell.argv(sys.claudeInstall, {}), 300_000)).ok;
+    const { has } = await brains(platform, run, codex, claude);
+    if (!has[want] && !(want === 'codex' ? await npmInstall('@openai/codex', run, sys) : (await run(...sys.shell.argv(sys.claudeInstall, {}), 300_000)).ok)) return false;
+    return fix('signin', run, platform, want, codex, claude);
   }
   if (id === 'signin') {
-    const { has } = await brains(platform, run, codex, claude);
+    const cx = codex ?? codexCommand(platform), cl = claude ?? claudeCommand(platform);
+    const { has } = await brains(platform, run, cx, cl);
     const b = has[want] ? want : BRAINS.find(x => has[x]);
     if (!b) return false;
-    const ok = (await (b === 'codex' ? run(codex.command, [...codex.args, 'login'], 300_000) : run(claude, ['auth', 'login', '--claudeai'], 300_000))).ok;
+    const ok = (await (b === 'codex' ? run(cx.command, [...cx.args, 'login'], 300_000) : run(cl, ['auth', 'login', '--claudeai'], 300_000))).ok;
     if (ok) lost.delete(b);                          // it signed in and saved it: the next run is the proof
     return ok;
   }
-  if (id === 'clawdcursor') {
-    const sys = osFor(platform), npm = sys.cli(['npm', 'i', '-g', 'clawdcursor']);   // npm is a .cmd shim on Windows, which only cmd can start
-    const r = await run(npm.command, npm.args, 300_000);
-    // Node from the nodejs.org installer keeps its global folder owned by root: a plain install cannot write there.
-    if (!r.ok && sys.shell.dialect === 'posix' && /EACCES/.test(r.err ?? '')) {
-      fixNote = 'Your Node needs your password to install this. Use Node from Homebrew or nvm, or run the install with sudo in Terminal, then tap Install.';
-      console.log('Blob: npm has no write access to its global folder (EACCES). In a terminal, run: sudo npm i -g clawdcursor (or use Node from Homebrew or nvm).');
-    }
-    return r.ok;
-  }
+  if (id === 'clawdcursor') return npmInstall('clawdcursor', run, sys);
   if (id === 'consent') return (await run(...clawd(['consent', '--accept']))).ok;
-  if (id === 'mac' && osFor(platform).permissionPanes) return (await run(...clawd(['grant']), 40_000)).ok;
+  if (id === 'mac' && sys.permissionPanes) return (await run(...clawd(['grant']), 40_000)).ok;
   return false;
 }
