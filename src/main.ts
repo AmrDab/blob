@@ -5,7 +5,7 @@
 // log file, the first-run check and updates.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
@@ -77,6 +77,10 @@ try {
   });
   if (r.ok && (await r.json() as { shown?: boolean }).shown) { console.log('Blob: already open, so that one came forward'); process.exit(0); }
 } catch { /* none is open */ }
+// A source checkout (the start entry runs this file directly): build dist/ first, so the servers and the page match the
+// source. The npm package has no build.mjs. A failed build leaves the last dist/ in place.
+const BUILD = resolve(import.meta.dirname, '..', 'build.mjs');
+if (existsSync(BUILD)) spawnSync(process.execPath, [BUILD], { cwd: resolve(import.meta.dirname, '..'), stdio: 'inherit', windowsHide: true });
 // The entry the user opens Blob from (launcher.ts), for the user's own Blob: not a test's or a second one's (BLOB_HOME).
 const inApp = !!os.launcher?.app?.inApp();
 if (os.launcher && !process.env.BLOB_HOME && process.env.BLOB_NO_APP !== '1') {
