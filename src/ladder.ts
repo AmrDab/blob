@@ -1,5 +1,5 @@
-// The model ladder for the "auto" setting: a request starts on Haiku; Sonnet, then Opus, take over when the model
-// before got stuck. Blob steps up only after a run has ended by itself, never by cutting one off.
+// The model ladder for the "auto" setting: a request starts on Haiku, or on Sonnet when it is about an app or the
+// screen; Sonnet, then Opus, take over when the model before got stuck. Blob steps up only after a run has ended by itself, never by cutting one off.
 import type { BrainName, Model } from './settings.ts';
 import type { Call } from './brain.ts';
 
@@ -9,7 +9,20 @@ export const MAX_TURNS: Partial<Record<Tier, number>> = { haiku: 12, sonnet: 30 
 const NEXT: Partial<Record<Tier, Tier>> = { haiku: 'sonnet', sonnet: 'opus' };
 const FAILS = 3;                                    // this many failed steps is "stuck"
 
-export const firstTier = (m: Model): Tier => (m === 'auto' ? 'haiku' : m);
+// What a request sounds like when it needs an app or the screen: something done in a window, a thing that is on the
+// screen, or an app by name. Wide on purpose: a wrong Sonnet start costs a little, a wrong Haiku start fails the task.
+const DOES = /\b(open|launch|close|quit|click|double-click|right-click|press|tap|type|scroll|drag|draw|paint|sketch|screen ?shots?|maximi[sz]e|minimi[sz]e|resize|switch to|go to|navigate|browse|log ?(in|out)|sign (in|up|out)|fill|submit|upload|download|install|uninstall|play|pause|send|post|reply|compose|e-?mail|book|order|buy|pay|print|paste|zoom|turn (on|off)|enable|disable|looking at)\b/i;
+const ON_SCREEN = /\b(screen|windows?|tabs?|apps?|applications?|programs?|browser|desktop|taskbar|dock|cursor|mouse|pointer|buttons?|menu|dialog|pop-?up|forms?|checkbox|dropdown|toolbar|icons?|settings?|preferences|control panel|web ?(site|page)s?|page|site|canvas|spreadsheet|slides?|presentation|inbox|playlist|cart|checkout|wallpaper|dark mode|volume|brightness)\b/i;
+// only names that are not everyday words; "Word", "Notes" or "Mail" count after "in", "on", "with" or "using"
+const APP = /\b(chrome|firefox|safari|notepad|excel|powerpoint|outlook|onenote|calculator|spotify|slack|discord|whatsapp|telegram|gmail|youtube|photoshop|figma|vs ?code|file explorer|finder|task manager)\b|\b(in|on|with|using) (my |the )?(word|paint|notes|mail|calendar|teams|zoom|edge|maps|photos|messages|terminal)\b/i;
+/** Whether the request, as the user worded it, drives an app or the screen. */
+export const onScreen = (text: string): boolean => DOES.test(text) || ON_SCREEN.test(text) || APP.test(text);
+
+/** On auto, Haiku gets no app or screen tools, for now: chat, files, commands and web reads only. */
+export const screenless = (m: Model, tier?: Tier): boolean => m === 'auto' && tier === 'haiku';
+
+/** `text`: the request, when it is known (a start before the user has spoken has none). */
+export const firstTier = (m: Model, text?: string): Tier => (m !== 'auto' ? m : text !== undefined && onScreen(text) ? 'sonnet' : 'haiku');
 
 /**
  * The user said No, pressed Stop or took the screen back: a stronger model must not carry on. `text` is the call's

@@ -1,7 +1,7 @@
 // Blob's brief: the text added to the brain's instructions at each start (Claude Code: --append-system-prompt;
 // Codex: developer_instructions). What Blob can do, the order to try it in, and its settings and memory as they are
 // now. Plain facts: Blob has no character to play.
-import type { Tier } from './ladder.ts';
+import { screenless, type Tier } from './ladder.ts';
 import { os, osFor } from './os/index.ts';
 import { BRAIN_NAME, type BrainName, type Settings } from './settings.ts';
 
@@ -24,8 +24,9 @@ export function persona(s: Settings, o: {
   brain?: BrainName; tier?: Tier; now?: Date; platform?: string;
 } = {}): string {
   const now = o.now ?? new Date(), platform = o.platform ?? os.id, brain = o.brain ?? s.brain;
-  const sys = osFor(platform), desk = !!sys.desk;
+  const sys = osFor(platform);
   const auto = brain !== 'codex' && s.model === 'auto';
+  const screen = !(auto && screenless(s.model, o.tier)), desk = screen && !!sys.desk;   // a tier with no app or screen tools is told so
   const model = brain === 'codex' ? "Codex's default model" : auto && o.tier ? `Auto: ${MODEL_NAME[o.tier]} now` : MODEL_NAME[s.model];
   const next = !auto ? '' : o.tier === 'haiku' ? 'Sonnet' : o.tier === 'sonnet' ? 'Opus' : '';   // who takes over from a tier that can step up
   return [
@@ -40,8 +41,8 @@ export function persona(s: Settings, o: {
       '1. Know it: a question about the world that needs nothing from this computer is answered without touching ' +
       `anything. Anything about this computer is looked up (2-${desk ? 6 : 5}), never guessed.\n` +
       `2. Open: a web page or a link (${sys.settingsScheme ? `${sys.settingsScheme}, ` : ''}mailto:), a file or a folder, in one call with the files tool ` +
-      `open. An app by name, in one call with ${desk ? "the desk tool open (it gives back the app's window)" : 'clawdcursor system open_app'}. ` +
-      'Never by clicking through menus.\n' +
+      'open. ' + (screen ? `An app by name, in one call with ${desk ? "the desk tool open (it gives back the app's window)" : 'clawdcursor system open_app'}. ` +
+      'Never by clicking through menus.' : '') + '\n' +
       '3. A saved script: when one of the saved scripts below does it, the files tool script_run with its name, ' +
       'in one call. One that only looks, or that the user already allowed as it is now, runs at once.\n' +
       `4. A command: the files tool run (${sys.shell.name}, starts in the home folder), ` +
@@ -55,7 +56,8 @@ export function persona(s: Settings, o: {
         ? '5. Files: the files tool run with a command that only looks, to read; the files tools list_dir, make_folder, move and trash to change.\n'
         : '5. Files: Read, Glob and Grep to look; the files tools list_dir, make_folder, move and trash to change.\n') +
       // with a desk (Windows): an open window is worked in the background first (desk.ts), and the screen moves down to 7
-      (desk
+      (!screen ? '6. An app, a window or anything on the screen: you have no tools for it. Call the blob tool step_up at once.'
+        : (desk
         ? '6. In the background: the desk tools work an open window without taking the screen, the pointer or the ' +
           'keyboard. read with no arguments lists the windows; read with app (or window) shows that window\'s ' +
           'controls, each with an id and what it can do (press, set, toggle, select, expand, collapse); act does one ' +
@@ -72,7 +74,7 @@ export function persona(s: Settings, o: {
       'or the text, never a screenshot, when that shows what is needed. Check each step\'s outcome line before ' +
       'the next. Before working an app on the screen (drawing, menus), call the blob tool guide for it once. ' +
       'If the screen tools are missing or not connected (not a step that failed), say in one sentence ' +
-      'that Blob\'s screen access isn\'t working right now.',
+      'that Blob\'s screen access isn\'t working right now.'),
     ...(next ? [`Only when a needed step failed and you cannot see another way, call the blob tool step_up, then end your turn with no reply text: ${next} continues with everything you did in view. Never mention models or this hand-off to the user.`] : []),
     'Reminders and schedules: schedule_add with kind "remind" (the text is shown at that time) or "task" (the ' +
       'text is run as a request at that time; the user is asked Yes first). Turn the user\'s words into when: ' +

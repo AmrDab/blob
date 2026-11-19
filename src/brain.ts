@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { MAX_TURNS, askedUp, continueText, firstTier, stepUp, userDecided, type Tier } from './ladder.ts';
+import { MAX_TURNS, askedUp, continueText, firstTier, screenless, stepUp, userDecided, type Tier } from './ladder.ts';
 import { os, osFor } from './os/index.ts';
 import { BRAIN_NAME, type BrainName, type Model } from './settings.ts';
 
@@ -72,15 +72,19 @@ export function mcpServers(own: { files: ServerCommand; blob: ServerCommand; des
   return { clawdcursor: clawdcursorCommand(env, platform), files: own.files, ...(osFor(platform).desk && own.desk && { desk: own.desk }), blob: own.blob };
 }
 
-/** Claude Code's --mcp-config file. */
-export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = os.id): string {
-  const servers = Object.entries(mcpServers(own, env, platform)).map(([name, s]) => [name, { type: 'stdio', ...s }]);
+/** The servers that work an app or the screen. */
+const SCREEN_SERVERS = ['clawdcursor', 'desk'];
+
+/** Claude Code's --mcp-config file. `screen` false: without the screen servers, which are then never started (ladder.ts: screenless). */
+export function mcpConfig(own: { files: ServerCommand; blob: ServerCommand; desk?: ServerCommand }, env: NodeJS.ProcessEnv = process.env, platform: string = os.id, screen = true): string {
+  const servers = Object.entries(mcpServers(own, env, platform)).filter(([name]) => screen || !SCREEN_SERVERS.includes(name)).map(([name, s]) => [name, { type: 'stdio', ...s }]);
   return JSON.stringify({ mcpServers: Object.fromEntries(servers) }, null, 2);
 }
 
 /** `persona`: what Blob knows about itself (persona.ts), as the settings are when the child starts. */
 /** `snapshotOff`: only for a Claude Code that knows --system-prompt-snapshot (snapshotFlag); an older one stops at it. */
-export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: string; persona?: string; maxTurns?: number; snapshotOff?: boolean }): string[] {
+/** `screen` false: the screen servers' tools are not allowed either; `mcpConfigPath` is then the file without them. */
+export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: string; persona?: string; maxTurns?: number; snapshotOff?: boolean; screen?: boolean }): string[] {
   return [
     '-p',
     '--input-format', 'stream-json',
@@ -89,7 +93,7 @@ export function claudeArgs(o: { mcpConfigPath: string; model: Tier; resume?: str
     '--strict-mcp-config',                  // no other MCP server (not the user's own, not a plugin's)
     '--setting-sources', 'project',         // the cwd is an empty folder: none of the user's hooks or plugins (CLAUDE.md: cleanEnv)
     '--tools', BUILTIN_TOOLS.join(','),     // read-only built-ins only: no Bash, no Edit/Write (the shell is files `run`, which asks)
-    '--allowedTools', ['mcp__clawdcursor__*', 'mcp__files__*', 'mcp__desk__*', 'mcp__blob__*', ...BUILTIN_TOOLS].join(','),
+    '--allowedTools', [...['clawdcursor', 'files', 'desk', 'blob'].filter(s => o.screen !== false || !SCREEN_SERVERS.includes(s)).map(s => `mcp__${s}__*`), ...BUILTIN_TOOLS].join(','),
     '--disable-slash-commands',
     '--no-chrome',
     '--append-system-prompt', o.persona ? `${SYSTEM_PROMPT}\n${o.persona}` : SYSTEM_PROMPT,
@@ -390,6 +394,8 @@ export class Brain {
 
   constructor(private o: {
     mcpConfigPath: string; servers: Record<string, ServerCommand>; cwd: string; emit: (e: BrainEvent) => void;
+    /** The --mcp-config without the screen servers, for a tier that must not have them (ladder.ts: screenless). */
+    noScreenConfigPath?: string;
     persona?: (brain: BrainName, tier: Tier) => string;
     /** Read at each request and sent in front of it (withContext). */
     context?: () => string;
@@ -412,7 +418,9 @@ export class Brain {
 
   run(text: string, model: Model, brain: BrainName = 'claude'): boolean {
     if (this.busy) return false;
-    if (!this.same(model, brain)) { this.cancel(); this.child = this.start(model, brain); }
+    // auto: a request about an app or the screen starts on Sonnet, so a child prewarmed on Haiku is started again
+    const tier = firstTier(model, brain === 'codex' ? undefined : text);
+    if (!this.same(model, brain) || this.child!.tier !== tier) { this.cancel(); this.child = this.start(model, brain, tier); }
     const c = this.child!;
     c.sent = true;
     this.o.emit({ type: 'busy', busy: true });
@@ -441,9 +449,10 @@ export class Brain {
     if (moved) this.session = undefined;
     const resume = this.session?.id, persona = this.o.persona?.(brain, tier), codex = brain === 'codex', name = BRAIN_NAME[brain];
     const cmd = codex ? codexCommand() : { command: claudeCommand(), args: [] };
+    const screen = !screenless(model, tier) || !this.o.noScreenConfigPath;
     if (!codex) readClaudeFlags(cmd.command);
     const args = codex ? codexArgs({ servers: this.o.servers, resume, persona })      // Codex runs its own default model
-      : claudeArgs({ mcpConfigPath: this.o.mcpConfigPath, model: tier, resume, persona, maxTurns: model === 'auto' ? MAX_TURNS[tier] : undefined, snapshotOff: snapshotFlag });
+      : claudeArgs({ mcpConfigPath: screen ? this.o.mcpConfigPath : this.o.noScreenConfigPath!, model: tier, resume, persona, maxTurns: model === 'auto' ? MAX_TURNS[tier] : undefined, snapshotOff: snapshotFlag, screen });
     const p = spawn(cmd.command, [...cmd.args, ...args], {
       cwd: this.o.cwd, env: cleanEnv(), windowsHide: true, detached: os.spawnGroup,
     });

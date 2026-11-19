@@ -1,7 +1,7 @@
 // When Blob hands a request to the next model, and when it never does.
 import { describe, expect, it } from 'vitest';
 import type { Call } from '../src/brain.ts';
-import { continueText, firstTier, stepUp, userDecided } from '../src/ladder.ts';
+import { continueText, firstTier, onScreen, screenless, stepUp, userDecided } from '../src/ladder.ts';
 
 // `line` stands for the whole result here: the parser marks a call as the user's decision from that (brain.ts).
 const call = (server: string, tool: string, line: string, outcome = line.match(/^\[(\w+)/)?.[1] ?? 'ok'): Call =>
@@ -119,6 +119,42 @@ describe('the ladder', () => {
     expect(firstTier('auto')).toBe('haiku');
     expect(firstTier('opus')).toBe('opus');
     expect(firstTier('default')).toBe('default');
+  });
+
+  it('starts auto on Sonnet when the request drives an app or the screen', () => {
+    for (const t of [
+      'open Notepad and type hello', 'Click the Save button', 'draw a house in Paint', 'take a screenshot', 'what is on my screen?',
+      'close this window', 'fill out the form on this page', 'go to example.com and sign in', 'turn on dark mode', 'open Bluetooth settings',
+      'play some jazz on Spotify', 'send an email to Sam', 'make a table in Excel', 'write a letter in Word', 'book a table for two tonight',
+      'what am I looking at', 'switch to the other tab', 'install the update',
+    ]) {
+      expect(onScreen(t), t).toBe(true);
+      expect(firstTier('auto', t), t).toBe('sonnet');
+    }
+  });
+
+  it('keeps chat, files, commands and web reads on Haiku', () => {
+    for (const t of [
+      'what is the capital of France?', 'how much battery is left', 'move the PDFs in Downloads to Documents', 'list the files on drive D',
+      'remind me at 5 to stretch', 'what does this word mean: sonder', 'how much disk space is free', 'what is my IP address',
+      'find the newest file in Downloads', 'summarize the news about the election', 'remember that I like short answers',
+    ]) {
+      expect(onScreen(t), t).toBe(false);
+      expect(firstTier('auto', t), t).toBe('haiku');
+    }
+  });
+
+  it('leaves a pinned model, and a start with no request yet, as they were', () => {
+    expect(firstTier('haiku', 'open Notepad')).toBe('haiku');
+    expect(firstTier('default', 'click Save')).toBe('default');
+    expect(firstTier('auto', undefined)).toBe('haiku');
+  });
+
+  it('takes the screen away from Haiku on auto only', () => {
+    expect(screenless('auto', 'haiku')).toBe(true);
+    expect(screenless('auto', 'sonnet')).toBe(false);
+    expect(screenless('auto', 'opus')).toBe(false);
+    expect(screenless('haiku', 'haiku')).toBe(false);   // the user pinned Haiku: it keeps every tool
   });
 
   it('tells the next model why, and not to redo what worked', () => {
