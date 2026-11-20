@@ -19,7 +19,7 @@ import { brains } from './setup.ts';
 import { activityFile, forgetActivity, topActivity } from './watch.ts';
 
 /** What only the host can do. The host answers with a line for the model. */
-export type HostAction = 'save_shortcut' | 'pair' | 'unpair' | 'update' | 'setup';
+export type HostAction = 'save_shortcut' | 'pair' | 'unpair' | 'update' | 'setup' | 'report';
 export type Host = (action: HostAction, body?: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
 
 export interface SelfDeps {
@@ -162,6 +162,13 @@ export function selfTools(d: SelfDeps) {
 
     /** The host looks for a newer Blob and asks the user before it installs one (update.ts). */
     update(): Promise<ToolResult> { return viaHost('update'); },
+
+    /** After a mistake: the host asks the user whether to send a report of this request (report.ts). Once per request. */
+    send_report(a: { what?: unknown }): Promise<ToolResult> {
+      const what = typeof a.what === 'string' ? a.what.trim().slice(0, 400) : '';
+      if (!what) return Promise.resolve(failed('INVALID_ARGS', 'say in `what`, in one or two sentences, what went wrong'));
+      return viaHost('report', { what });
+    },
 
     // ── memory (memory.ts) ──
     /** Asked first, with the fact shown: whatever is saved goes into every later request, so a page that tricked the
@@ -309,6 +316,12 @@ export async function serve(): Promise<void> {
   server.registerTool('update', {
     description: 'Look for a newer Blob and update to it ("check for updates", "update yourself"). The user is asked first.', inputSchema: {},
   }, async () => reply(await tools.update()));
+  server.registerTool('send_report', {
+    description: 'You got something wrong, or the user says you did: after saying sorry in your answer, call this once. ' +
+      "It asks the user whether to send a report of this request (its words, your tool calls and answers) to Blob's " +
+      'developers; nothing is sent unless they say Yes and submit it. `what`: what went wrong, in one or two sentences.',
+    inputSchema: { what: z.string() },
+  }, async a => reply(await tools.send_report(a)));
   server.registerTool('remember', {
     description: 'Save one short fact in Blob\'s memory file on this computer: something the user asked to be ' +
       'remembered, or a lasting preference. Never a password, code or key. The user is asked first.',

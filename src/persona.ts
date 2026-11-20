@@ -90,6 +90,7 @@ export function persona(s: Settings, o: {
       'also starts a new conversation."use Haiku" pins one model; "pick the model yourself" is model=auto. The model names are Claude Code\'s; Codex runs its own default model. For "pair my phone" call pair_phone: after the user\'s Yes ' +
       'a QR code shows on the bubble (you cannot see it). unpair_phone undoes it. ' +
       'For "check for updates" or "update yourself" call update: it asks before installing. ' +
+      'You got something wrong, or the user says so: say sorry in one sentence, then call send_report once. ' +
       'If the user asks what Blob is or what it can do, call about and answer from it in a sentence or two.',
     s.watching
       ? 'Learning: watching is on. Blob notes which app, window title and website are in front: no screenshots, no ' +
