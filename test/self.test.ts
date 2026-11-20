@@ -254,6 +254,15 @@ describe('the other self tools', () => {
     expect(persona(DEFAULTS)).toMatch(/"check for updates" or "update yourself" call update/);
   });
 
+  it('after a mistake, hands a report of the request to the host, which asks the user in its own words', async () => {
+    expect(outcome(await tools().send_report({ what: '  I typed eggs instead of milk.  ' }))).toBe('confirmed');
+    expect(hosted).toEqual([['report', { what: 'I typed eggs instead of milk.' }]]);
+    expect(asked).toEqual([]);
+    expect(outcome(await tools().send_report({}))).toBe('failed');
+    expect(hosted).toHaveLength(1);
+    expect(persona(DEFAULTS)).toMatch(/got something wrong, or the user says so: say sorry in one sentence, then call send_report once/);
+  });
+
   it('pair_phone asks first: no QR without a Yes, and none at all without a relay', async () => {
     expect(outcome(await tools().pair_phone())).toBe('refused');   // the user said No
     expect(asked).toEqual(['Pair a phone with Blob?']);
