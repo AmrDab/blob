@@ -95,6 +95,9 @@ export async function macInstall(d: LauncherDeps): Promise<void> {
   const app = macAppPath(d.home), contents = join(app, 'Contents'), node = macAppNode(d.home);
   const plist = join(contents, 'Info.plist'), launch = join(contents, 'MacOS', 'blob-launch');
   const icon = join(contents, 'Resources', 'blob.icns'), libDir = join(contents, 'lib'), script = join(d.blobHome, 'launch.sh');
+  // The app's signature is written into blob-launch, so the copy in the app never equals the one shipped: what was put
+  // in last is kept beside it, outside the app, to compare with.
+  const put = join(d.blobHome, 'blob-launch.installed');
   const info = macInfoPlist(), launcher = macLauncher(d.assets), start = macStart(d.command, d.path, join(d.blobHome, 'logs', 'blob-app.log'), node);
   if (d.read(script) !== start) d.write(script, start);                  // outside the app: nothing to sign
   // Node is copied once, and again only when the copy no longer runs (not at every Node upgrade): a new copy is a new
@@ -104,9 +107,10 @@ export async function macInstall(d: LauncherDeps): Promise<void> {
   // with Homebrew's libnode, which Node finds next to itself through @loader_path/../lib
   const libs = nodeNew ? d.list(lib).filter(f => /^libnode\..*dylib$/.test(f)).map(f => join(lib, f)) : [];
   // Rewritten only when it changed: a new signature is a new app to macOS, which would ask for the microphone again.
-  if (!nodeNew && d.read(plist) === info && d.same(launcher, launch) && d.exists(icon)) return;
+  if (!nodeNew && d.read(plist) === info && d.same(launcher, put) && d.exists(launch) && d.exists(icon)) return;
   d.write(plist, info);
   d.copy(launcher, launch);                                            // with its mode: it is a program
+  d.copy(launcher, put);
   d.copy(join(d.assets, 'blob.icns'), icon);
   if (nodeNew) {
     for (const f of d.list(libDir)) d.remove(join(libDir, f));          // an older libnode

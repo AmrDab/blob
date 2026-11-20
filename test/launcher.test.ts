@@ -78,6 +78,15 @@ describe('Blob.app (macOS)', () => {
     expect(f.ran).toHaveLength(3);
   });
 
+  it("is not put in again when signing changed the app's copy of its program (the signature is written into it)", async () => {
+    const f = fake(), launch = join(app, 'Contents', 'MacOS', 'blob-launch');
+    await macInstall(f);
+    f.files.set(launch, 'the program, with the app signature in it');
+    await macInstall(f);
+    expect(f.ran).toHaveLength(3);
+    expect(f.files.get(launch)).toBe('the program, with the app signature in it');
+  });
+
   it('an update changes only ~/.blob/launch.sh: the app is not written or signed again, so macOS keeps its permissions', async () => {
     const f = fake(), inApp = () => [...f.files].filter(([k]) => k.startsWith(app)).sort().join();
     await macInstall(f);
