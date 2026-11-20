@@ -111,13 +111,22 @@ describe('opened again while open', () => {
   it("is set at each look after the launch (AppKit sets its own handler at launch), not before", () => {
     const f = fake();
     const timers: Array<() => void> = [];
-    macSetup({ setMenu: vi.fn() }, () => {}, { arch: 'arm64', load: () => f.objc, later: fn => timers.push(fn), reopen: () => {} });
+    macSetup({ setMenu: vi.fn() }, () => {}, { arch: 'arm64', load: () => f.objc, later: fn => timers.push(fn), reopen: () => {}, signals: { on: () => {} } });
     expect(f.events).toHaveLength(0);
     timers.forEach(t => t());
     expect(f.events).toHaveLength(timers.length);
     const g = fake();
     macSetup({ setMenu: vi.fn() }, () => {}, { arch: 'arm64', load: () => g.objc, later: fn => fn() });
     expect(g.events).toHaveLength(0);            // nothing to run: not taken
+  });
+
+  it("Blob.app's program passes a reopen on as SIGUSR2: reopen runs just after, not from inside the signal", async () => {
+    const f = fake(), reopen = vi.fn(), on: Record<string, () => void> = {};
+    macSetup({ setMenu: vi.fn() }, () => {}, { arch: 'arm64', load: () => f.objc, later: () => {}, reopen, signals: { on: (sig, fn) => { on[sig] = fn; } } });
+    on.SIGUSR2();
+    expect(reopen).not.toHaveBeenCalled();
+    await new Promise(r => setImmediate(r));
+    expect(reopen).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -21,6 +21,7 @@ function fake(): LauncherDeps & { files: Map<string, string>; modes: Map<string,
     read: f => files.get(f),
     write: (f, t, mode) => { files.set(f, t); if (mode) modes.set(f, mode); },
     copy: (from, to) => files.set(to, `copy of ${from}`),
+    same: (a, b) => files.get(b) === `copy of ${a}`,
     remove: f => files.delete(f),
     exists: f => files.has(f),
     real: f => (f === COMMAND.exe ? CELLAR : f),
@@ -43,11 +44,8 @@ describe('Blob.app (macOS)', () => {
     expect(MIC_REASON).not.toMatch(/clawdcursor|node|terminal/i);
   });
 
-  it('its launcher only reads the start command from ~/.blob/launch.sh, so it is the same for every version', () => {
-    const s = macLauncher("/Users/a/it's/.blob/launch.sh");
-    expect(s.startsWith('#!/bin/sh\n')).toBe(true);
-    expect(s).toContain("\n. '/Users/a/it'\\''s/.blob/launch.sh'\n");
-    expect(s).not.toMatch(/node|main\.ts/);
+  it('its program is the one built once and shipped in assets/, the same for every user and version', () => {
+    expect(macLauncher('A')).toBe(join('A', 'mac', 'blob-launch'));
   });
 
   it("the start command runs the app's copy of Node with this same start, quoted for sh, and Node itself when the copy can't run", () => {
@@ -66,9 +64,8 @@ describe('Blob.app (macOS)', () => {
     expect(node).toBe(join(app, 'Contents', 'MacOS', 'Blob'));
     await macInstall(f);
     expect(f.files.get(join(app, 'Contents', 'Info.plist'))).toBe(macInfoPlist());
-    expect(f.files.get(join(app, 'Contents', 'MacOS', 'blob-launch'))).toBe(macLauncher(join('H', '.blob', 'launch.sh')));
+    expect(f.files.get(join(app, 'Contents', 'MacOS', 'blob-launch'))).toBe(`copy of ${join('A', 'mac', 'blob-launch')}`);
     expect(f.files.get(join('H', '.blob', 'launch.sh'))).toContain('export BLOB_APP=1');
-    expect(f.modes.get(join(app, 'Contents', 'MacOS', 'blob-launch'))).toBe(0o755);
     expect(f.files.get(join(app, 'Contents', 'Resources', 'blob.icns'))).toBe(`copy of ${join('A', 'blob.icns')}`);
     expect(f.files.get(node)).toBe(`copy of ${CELLAR}`);                     // the real file, not the link
     expect(f.files.get(lib)).toBe(`copy of ${join(CELLAR_LIB, 'libnode.141.dylib')}`);
@@ -79,6 +76,15 @@ describe('Blob.app (macOS)', () => {
     ]);
     await macInstall(f);
     expect(f.ran).toHaveLength(3);
+  });
+
+  it("is not put in again when signing changed the app's copy of its program (the signature is written into it)", async () => {
+    const f = fake(), launch = join(app, 'Contents', 'MacOS', 'blob-launch');
+    await macInstall(f);
+    f.files.set(launch, 'the program, with the app signature in it');
+    await macInstall(f);
+    expect(f.ran).toHaveLength(3);
+    expect(f.files.get(launch)).toBe('the program, with the app signature in it');
   });
 
   it('an update changes only ~/.blob/launch.sh: the app is not written or signed again, so macOS keeps its permissions', async () => {
@@ -176,5 +182,26 @@ describe('the app menu (Linux)', () => {
     f.modes.clear();
     await linuxInstall(f);
     expect(f.modes.size).toBe(0);
+  });
+});
+
+describe('blob-launch, the app\'s program (macOS)', () => {
+  it('is shipped built, for Apple silicon and Intel, and is a program', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const { ASSETS } = await import('../src/launcher.ts');
+    const file = join(ASSETS, 'mac', 'blob-launch'), bytes = readFileSync(file);
+    expect(bytes.readUInt32BE(0)).toBe(0xcafebabe);                          // a universal Mach-O
+    // its mode as git keeps it (a checkout on Windows has no execute bit to look at)
+    expect(execFileSync('git', ['ls-files', '-s', file], { encoding: 'utf8' })).toMatch(/^100755 /);
+  });
+
+  it('starts Blob as its child, passes on reopen and quit, and shows nothing', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(join(import.meta.dirname, '..', 'macos', 'blob-launch.swift'), 'utf8');
+    expect(src).toContain('posix_spawn(');                                   // a child: its permissions are the app's
+    expect(src).not.toMatch(/execv|responsibility_spawnattrs_setdisclaim/);
+    expect(src).toContain('passOn(SIGUSR2)');
+    expect(src).toContain('passOn(SIGTERM)');
   });
 });

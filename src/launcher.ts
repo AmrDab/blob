@@ -1,10 +1,11 @@
 // How the user opens Blob: an entry the system shows, which Blob writes itself at every start (only what changed).
 //   macOS:   ~/Applications/Blob.app (Spotlight, Launchpad, Finder). Its Info.plist names Blob and says why it asks for
-//            the microphone. Its launcher runs the app's own copy of Node (Contents/MacOS/Blob): a program inside the
-//            app, so macOS shows the process as Blob and its web view finds the app's microphone line. Started any
-//            other way, Blob opens itself through the app (main.ts). The start command is outside the app, in
-//            ~/.blob/launch.sh, so the app and its signature stay as they are when Blob updates (update.ts) and
-//            macOS keeps the permissions it gave.
+//            the microphone. Its program, blob-launch (macos/blob-launch.swift, the same for every user), starts the
+//            app's own copy of Node (Contents/MacOS/Blob) as its child and stays its parent: macOS charges Node's
+//            permissions to Blob.app, the one identity the user switched on. Node inside the app: macOS shows the
+//            process as Blob and its web view finds the app's microphone line. Started any other way, Blob opens
+//            itself through the app (main.ts). The start command is outside the app, in ~/.blob/launch.sh, so the app
+//            and its signature stay as they are when Blob updates (update.ts) and macOS keeps the permissions it gave.
 //   Windows: "Blob" in the Start menu.
 //   Linux:   "Blob" in the app menu.
 // Each runs this same start command (autostart.ts). The icons in assets/ were made once from site/favicon.svg.
@@ -29,6 +30,8 @@ export interface LauncherDeps {
   write(file: string, text: string, mode?: number): void;
   /** A copy that is a new file: a program running from the old one carries on. */
   copy(from: string, to: string): void;
+  /** The two files have the same bytes (false when either is missing). */
+  same(a: string, b: string): boolean;
   remove(file: string): void;
   exists(file: string): boolean;
   /** The file a link leads to. */
@@ -68,15 +71,12 @@ export function macInfoPlist(): string {
 /** Blob.app's own copy of Node: the program the app's process runs. */
 export const macAppNode = (home: string) => join(macAppPath(home), 'Contents', 'MacOS', 'Blob');
 
-/** Contents/MacOS/blob-launch, the app's start: it reads the start command from ~/.blob/launch.sh, so it never changes. */
-export const macLauncher = (script: string) => `#!/bin/sh
-# Blob's launcher, written by Blob (launcher.ts).
-. ${sh(script)}
-`;
+/** Contents/MacOS/blob-launch, the app's program, as built once (scripts/mac-launcher.sh): it runs ~/.blob/launch.sh. */
+export const macLauncher = (assets: string) => join(assets, 'mac', 'blob-launch');
 
 /**
- * ~/.blob/launch.sh, written at each start: what blob-launch runs. `exec`: the app's copy of Node takes that process's
- * place. When the copy no longer runs (an upgrade removed a library it needs), Node itself does, and that Blob copies
+ * ~/.blob/launch.sh, written at each start: what blob-launch runs (as its child). `exec`: the app's copy of Node takes
+ * the shell's place, so Node is blob-launch's child. When the copy no longer runs (an upgrade removed a library it needs), Node itself does, and that Blob copies
  * it again. BLOB_NODE: the Node it was copied from, for that next copy.
  */
 export function macStart(c: StartCommand, path: string, log: string, own: string): string {
@@ -95,7 +95,10 @@ export async function macInstall(d: LauncherDeps): Promise<void> {
   const app = macAppPath(d.home), contents = join(app, 'Contents'), node = macAppNode(d.home);
   const plist = join(contents, 'Info.plist'), launch = join(contents, 'MacOS', 'blob-launch');
   const icon = join(contents, 'Resources', 'blob.icns'), libDir = join(contents, 'lib'), script = join(d.blobHome, 'launch.sh');
-  const info = macInfoPlist(), launcher = macLauncher(script), start = macStart(d.command, d.path, join(d.blobHome, 'logs', 'blob-app.log'), node);
+  // The app's signature is written into blob-launch, so the copy in the app never equals the one shipped: what was put
+  // in last is kept beside it, outside the app, to compare with.
+  const put = join(d.blobHome, 'blob-launch.installed');
+  const info = macInfoPlist(), launcher = macLauncher(d.assets), start = macStart(d.command, d.path, join(d.blobHome, 'logs', 'blob-app.log'), node);
   if (d.read(script) !== start) d.write(script, start);                  // outside the app: nothing to sign
   // Node is copied once, and again only when the copy no longer runs (not at every Node upgrade): a new copy is a new
   // program to macOS, which then asks again for every permission the user gave Blob.
@@ -104,9 +107,10 @@ export async function macInstall(d: LauncherDeps): Promise<void> {
   // with Homebrew's libnode, which Node finds next to itself through @loader_path/../lib
   const libs = nodeNew ? d.list(lib).filter(f => /^libnode\..*dylib$/.test(f)).map(f => join(lib, f)) : [];
   // Rewritten only when it changed: a new signature is a new app to macOS, which would ask for the microphone again.
-  if (!nodeNew && d.read(plist) === info && d.read(launch) === launcher && d.exists(icon)) return;
+  if (!nodeNew && d.read(plist) === info && d.same(launcher, put) && d.exists(launch) && d.exists(icon)) return;
   d.write(plist, info);
-  d.write(launch, launcher, 0o755);
+  d.copy(launcher, launch);                                            // with its mode: it is a program
+  d.copy(launcher, put);
   d.copy(join(d.assets, 'blob.icns'), icon);
   if (nodeNew) {
     for (const f of d.list(libDir)) d.remove(join(libDir, f));          // an older libnode
@@ -219,6 +223,7 @@ export function systemLauncher(blobHome: string, command: StartCommand): Launche
       rmSync(to, { force: true });
       copyFileSync(from, to, constants.COPYFILE_FICLONE);                // a clone where the disk can: no second 100 MB
     },
+    same: (a, b) => { try { return readFileSync(a).equals(readFileSync(b)); } catch { return false; } },
     remove: file => rmSync(file, { force: true }),
     exists: existsSync,
     real: realpathSync,

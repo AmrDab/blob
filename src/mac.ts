@@ -249,6 +249,8 @@ export interface MacDeps {
   later?: (fn: () => void, ms: number) => unknown;
   /** Blob was opened again while open. */
   reopen?: () => void;
+  /** Where SIGUSR2 comes in (tests pass a fake). */
+  signals?: { on(signal: 'SIGUSR2', fn: () => void): unknown };
 }
 
 /** Everything above, in order. Call once, after the first web view is made. */
@@ -273,6 +275,10 @@ export function macSetup(app: Pick<Application, 'setMenu'>, quit: () => void, de
   tryFirstClick(false);
   step('Cmd+Q closes Blob without its clean-up', () => quitOnTerminate(oc, quit));
   const later = deps.later ?? setTimeout;
+  // Blob.app's own program (blob-launch) is the app macOS opens again: it passes that on to Blob as SIGUSR2.
+  if (deps.reopen) step('opening Blob again does not bring it forward', () => {
+    (deps.signals ?? process).on('SIGUSR2', () => { setImmediate(deps.reopen!); });
+  });
   LAUNCH_MS.forEach((ms, i) => later(() => {
     tryFirstClick(i === LAUNCH_MS.length - 1);
     if (deps.reopen) step('opening Blob again does not bring it forward', () => onReopen(oc, deps.reopen!));
