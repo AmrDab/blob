@@ -187,11 +187,13 @@ describe('the app menu (Linux)', () => {
 
 describe('blob-launch, the app\'s program (macOS)', () => {
   it('is shipped built, for Apple silicon and Intel, and is a program', async () => {
-    const { readFileSync, statSync } = await import('node:fs');
+    const { readFileSync } = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
     const { ASSETS } = await import('../src/launcher.ts');
     const file = join(ASSETS, 'mac', 'blob-launch'), bytes = readFileSync(file);
     expect(bytes.readUInt32BE(0)).toBe(0xcafebabe);                          // a universal Mach-O
-    expect(statSync(file).mode & 0o111).not.toBe(0);
+    // its mode as git keeps it (a checkout on Windows has no execute bit to look at)
+    expect(execFileSync('git', ['ls-files', '-s', file], { encoding: 'utf8' })).toMatch(/^100755 /);
   });
 
   it('starts Blob as its child, passes on reopen and quit, and shows nothing', async () => {
