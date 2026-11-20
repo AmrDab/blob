@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LogRow } from '../src/log.ts';
-import { MAX_REPORT, apologizes, issueUrl, lastRequests, reportText, reportTitle, scrub } from '../src/report.ts';
+import { MAX_REPORT, apologizes, complains, lastRequests, postReport, reportText, reportTitle, scrub } from '../src/report.ts';
 
 const rows: LogRow[] = [
   { t: 0, kind: 'request', text: 'an older request' },
@@ -23,7 +23,7 @@ describe('a report', () => {
 
   it("says what went wrong in Blob's words, where it ran, and the request's log", () => {
     const r = reportText(input);
-    expect(r).toContain("What went wrong (Blob's words): I typed eggs instead of milk.");
+    expect(r).toContain('What went wrong: I typed eggs instead of milk.');
     expect(r).toContain('Blob 0.1.1 · macOS · Claude Code · auto');
     expect(r).toContain('› Open my notes and add milk');
     expect(r).toContain('computer · click');
@@ -49,13 +49,23 @@ describe('a report', () => {
     expect(r).toContain('the middle is left out');
   });
 
-  it("is titled with the request's first words, and opens as a new GitHub issue", () => {
+  it("is titled with the request's first words", () => {
     expect(reportTitle(lastRequests(rows, 1))).toBe('Report: Open my notes and add milk');
     expect(reportTitle([])).toBe('Report: a request');
-    const u = new URL(issueUrl('Report: x', 'body text'));
-    expect(u.origin + u.pathname).toBe('https://github.com/AmrDab/blob/issues/new');
-    expect(u.searchParams.get('title')).toBe('Report: x');
-    expect(u.searchParams.get('body')).toBe('body text');
+  });
+
+  it("goes privately to the relay's /report, and says when it did not get there", async () => {
+    const sent: { url: string; body: unknown }[] = [];
+    const ok = (async (u: string, init: RequestInit) => { sent.push({ url: u, body: JSON.parse(String(init.body)) }); return new Response('{"ok":true}', { status: 200 }); }) as unknown as typeof fetch;
+    expect(await postReport('https://theblob.pages.dev', { title: 't', text: 'x', version: '0.1.1' }, ok)).toBe(true);
+    expect(sent).toEqual([{ url: 'https://theblob.pages.dev/report', body: { title: 't', text: 'x', version: '0.1.1' } }]);
+    const down = (async () => new Response('Not found', { status: 404 })) as unknown as typeof fetch;
+    const page = (async () => new Response('<html>', { status: 200 })) as unknown as typeof fetch;   // a site page, not the relay
+    expect(await postReport('https://theblob.pages.dev', { title: 't', text: 'x', version: '' }, page)).toBe(false);
+    expect(await postReport('https://theblob.pages.dev', { title: 't', text: 'x', version: '' }, down)).toBe(false);
+    const offline = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+    expect(await postReport('https://theblob.pages.dev', { title: 't', text: 'x', version: '' }, offline)).toBe(false);
+    expect(await postReport('', { title: 't', text: 'x', version: '' }, ok)).toBe(false);
   });
 
   it('sees an answer that owns up to a mistake, and not one that does not', () => {
@@ -63,5 +73,12 @@ describe('a report', () => {
       expect(apologizes(a), a).toBe(true);
     for (const a of ['144', 'Canberra is the capital.', 'No sorrow here.'])
       expect(apologizes(a), a).toBe(false);
+  });
+
+  it('sees the user saying Blob got it wrong, and not a question about something wrong', () => {
+    for (const r of ['That was wrong, I wanted words.', "That's still wrong", 'you got that wrong', 'You made a mistake', "this is not what I asked for", 'You are wrong'])
+      expect(complains(r), r).toBe(true);
+    for (const r of ["What's wrong with my Wi-Fi?", 'Find the wrong dates in this sheet', 'Is it wrong to nap?', 'Open Mail'])
+      expect(complains(r), r).toBe(false);
   });
 });

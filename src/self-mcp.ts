@@ -318,8 +318,8 @@ export async function serve(): Promise<void> {
   }, async () => reply(await tools.update()));
   server.registerTool('send_report', {
     description: 'You got something wrong, or the user says you did: after saying sorry in your answer, call this once. ' +
-      "It asks the user whether to send a report of this request (its words, your tool calls and answers) to Blob's " +
-      'developers; nothing is sent unless they say Yes and submit it. `what`: what went wrong, in one or two sentences.',
+      "It asks the user whether to send a private report of this request (its words, your tool calls and answers) to " +
+      "Blob's developers; nothing is sent unless they say Yes. `what`: what went wrong, in one or two sentences.",
     inputSchema: { what: z.string() },
   }, async a => reply(await tools.send_report(a)));
   server.registerTool('remember', {

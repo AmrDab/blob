@@ -8,7 +8,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { extname, join, normalize, resolve } from 'node:path';
+import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Application } from '@webviewjs/webview';
 import { Brain, callLabel, mcpConfig, mcpServers, type BrainEvent, type Call, type ServerCommand } from './brain.ts';
@@ -21,7 +21,7 @@ import type { FocusKeeper } from './focus.ts';
 import { habitsFile, record, type Proposal } from './habits.ts';
 import { systemLauncher } from './launcher.ts';
 import { formatRow, logFileName, type LogBody, type LogRow } from './log.ts';
-import { apologizes, issueUrl, lastRequests, reportText, reportTitle } from './report.ts';
+import { apologizes, complains, lastRequests, postReport, reportText, reportTitle } from './report.ts';
 import { memoryBrief, memoryFile } from './memory.ts';
 import { os } from './os/index.ts';
 import type { Overlay } from './overlay.ts';
@@ -318,8 +318,8 @@ function onBrain(e: BrainEvent): void {
   else if (e.type === 'busy') busy(e.busy);
   else if (e.type === 'done') {
     finished(e.calls, e.ok);
-    // Blob said sorry but did not offer the report itself: the host offers it, once per request
-    if (!reported && apologizes(lastAnswer)) void sendReport(lastAnswer);
+    // Blob said sorry, or the user said it got something wrong, and the model did not offer the report: the host does
+    if (!reported && (apologizes(lastAnswer) || complains(request))) void sendReport(complains(request) ? `The user said: ${request.slice(0, 300)}` : lastAnswer);
     if (e.signedOut) { signedOut(e.signedOut); void check(); }   // the sign-in card comes up under the answer
   }
   else if (e.type !== 'session') send(e);
@@ -506,13 +506,20 @@ async function sendReport(what: string): Promise<{ ok: boolean; text: string }> 
   if (!rows.length) return { ok: false, text: 'There is no request to report yet. Do not ask again' };
   if (reported) return { ok: false, text: 'The user was already asked about a report for this request. Do not ask again' };
   reported = true;
-  const yes = await questions.ask("Sorry about that. Send a report of this request to Blob's developers? It opens a GitHub issue with the steps, for you to check and submit.", undefined, what.slice(0, MAX_DETAIL));
+  const yes = await questions.ask("Sorry about that. Send a private report of this request to Blob's developers? Only they can read it.", undefined, what.slice(0, MAX_DETAIL));
   if (!yes) return { ok: false, text: 'the user said No (or did not answer); nothing was sent. Do not ask again' };
   const s = settings.get();
   const text = reportText({ what, rows, version: PKG.version, system: os.name, brain: BRAIN_NAME[brainNow()], model: s.model, home: homedir() });
-  try { await os.open(issueUrl(reportTitle(rows), text)); }
-  catch (e) { return { ok: false, text: `the report page did not open (${(e as Error).message})` }; }
-  return { ok: true, text: 'The report opened in their browser as a GitHub issue: they check it and submit it there. Thank them, briefly.' };
+  const title = reportTitle(rows);
+  if (await postReport(RELAY, { title, text, version: PKG.version })) {
+    caption('Report sent. Thank you.');
+    return { ok: true, text: 'The report was sent privately to the developers. Thank them, briefly.' };
+  }
+  // not reached (offline, or the relay is down): kept on this computer, so nothing is lost
+  const file = join(HOME, 'reports', `${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
+  try { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, `${title}\n\n${text}\n`); } catch { /* the caption says it was not sent */ }
+  caption("The report couldn't be sent. It's saved in ~/.blob/reports.");
+  return { ok: false, text: 'The report could not be sent (no connection to Blob\'s server); it is saved on this computer in ~/.blob/reports. Tell the user so, briefly' };
 }
 
 /** What only the host can do for the self server (self-mcp.ts). */
