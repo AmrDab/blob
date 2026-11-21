@@ -35,6 +35,9 @@ describe('a report', () => {
     expect(scrub('typed password: hunter2 and token=abc', '')).toBe('typed password: [hidden] and token=[hidden]');
     expect(scrub('key sk-ant-0123456789abcdef0123456789abcdef here', '')).toBe('key [hidden] here');
     expect(scrub('mail me at someone@example.com', '')).toBe('mail me at [email]');
+    // shorter keys known by their start, as a window title can show one
+    expect(scrub('"*notes rk_live_51ABCDEFGH12 - Notepad"', '')).toBe('"*notes [hidden] - Notepad"');
+    expect(scrub('ghp_abcdefghijklmnop1234 and AKIAABCDEFGHIJKLMNOP', '')).toBe('[hidden] and [hidden]');
     expect(reportText(input)).toContain('~/Documents');
   });
 

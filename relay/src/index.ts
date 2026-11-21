@@ -88,6 +88,7 @@ export class Reports {
       list: async limit => sql.exec('SELECT id, t, title, text, version FROM reports ORDER BY id DESC LIMIT ?', limit).toArray() as unknown as Report[],
       remove: async id => { sql.exec('DELETE FROM reports WHERE id = ?', id); },
       trim: async keep => { sql.exec('DELETE FROM reports WHERE id NOT IN (SELECT id FROM reports ORDER BY id DESC LIMIT ?)', keep); },
+      forget: async before => { sql.exec("UPDATE reports SET who = '' WHERE t < ? AND who != ''", before); },
     };
   }
 

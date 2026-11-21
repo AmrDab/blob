@@ -21,6 +21,8 @@ export interface Store {
   list(limit: number): Promise<Report[]>;
   remove(id: number): Promise<void>;
   trim(keep: number): Promise<void>;
+  /** Drops the sender hash of reports older than `before`: it is only needed for the hour's limit. */
+  forget(before: number): Promise<void>;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -45,6 +47,8 @@ export async function post(store: Store, body: unknown, who: string, now: number
   }
   await store.add({ t: now, title: text(b.title, MAX_TITLE), text: t, version: text(b.version, 40) }, who);
   await store.trim(KEEP);
+  // The hash is of an address with a salt anyone can read here, so an IPv4 one could be worked back: kept an hour only.
+  await store.forget(now - HOUR);
   return json({ ok: true });
 }
 

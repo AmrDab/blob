@@ -19,12 +19,14 @@ export function lastRequests(rows: readonly LogRow[], n: number = 2): LogRow[] {
 const KEYISH = /\b(pass(?:word|code|phrase)?|pin|api[ _-]?key|secret|token|bearer|authorization)\b(\s*(?:is|:|=)\s*)\S+/gi;
 const LONG = /\b(?:[A-Za-z0-9+/_-]{32,}={0,2})\b/g;                 // a key or token on its own
 const MAIL = /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g;
+// Keys that say what they are by their start, shorter than LONG catches: a window title or a typed line can carry one.
+const PREFIXED = /\b(?:[spr]k_(?:live|test)_[A-Za-z0-9]{8,}|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_\w{16,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})/g;
 
 /** The text with the home folder as ~, and what looks like a key, token, password or email address hidden. */
 export function scrub(text: string, home: string): string {
   let s = home ? text.split(home).join('~') : text;
   s = s.replace(KEYISH, (_m, word: string, sep: string) => `${word}${sep}[hidden]`);
-  return s.replace(LONG, '[hidden]').replace(MAIL, '[email]');
+  return s.replace(PREFIXED, '[hidden]').replace(LONG, '[hidden]').replace(MAIL, '[email]');
 }
 
 export interface ReportInput {

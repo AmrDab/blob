@@ -12,6 +12,7 @@ function memory(): Store & { all: (Report & { who: string })[] } {
     list: async limit => all.slice().reverse().slice(0, limit).map(({ who: _w, ...r }) => r),
     remove: async id => { const i = all.findIndex(r => r.id === id); if (i >= 0) all.splice(i, 1); },
     trim: async keep => { all.splice(0, Math.max(0, all.length - keep)); },
+    forget: async before => { for (const r of all) if (r.t < before) r.who = ''; },
   };
 }
 const KEY = 'secret-key-for-the-developers';
@@ -25,6 +26,13 @@ describe('private reports', () => {
     expect(s.all).toHaveLength(1);
     expect(s.all[0]).toMatchObject({ title: 'Report: x', text: 'what went wrong', version: '0.1.1', t: 1000 });
     expect(JSON.stringify(s.all)).not.toContain('203.0.113.9');
+  });
+
+  it('forgets the sender hash once the hour is over', async () => {
+    const s = memory(), who = await senderHash('203.0.113.9');
+    await post(s, { text: 'first' }, who, 1000);
+    await post(s, { text: 'later' }, who, 1000 + 3600_000 + 1);
+    expect(s.all.map(r => r.who)).toEqual(['', who]);
   });
 
   it('refuses an empty or too long one', async () => {
