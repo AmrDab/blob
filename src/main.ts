@@ -37,6 +37,7 @@ import { ASK, BRAINS, BRAIN_NAME, FIRST_RUN, SettingsStore, WHAT, blobHome, offe
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
 import { fix, fixNote, macNeeds, pickBrain, probe, runChecks, signedOut, type Check } from './setup.ts';
+import { firstName, greeting, wakeMatcher } from './wake.ts';
 import { install, installed, latest, newer, question as updateQuestion, skip, switchTo, systemUpdate, toOffer } from './update.ts';
 import { Watcher, activityFile, clawdcursorReader } from './watch.ts';
 
@@ -147,7 +148,7 @@ function sendSettings(): void {
   send({
     type: 'settings', brain: brainNow(), model: s.model, voice: s.voice, onboarded: s.onboarded, offerPair: offerPair(s, !!RELAY),
     micOfLauncher: !!os.micOfLauncher && !inApp, restart: !!os.launcher?.app && !inApp,
-    firstRun: FIRST_RUN.filter(key => key !== 'startAtLogin' || os.autostart).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
+    firstRun: FIRST_RUN.filter(key => (key !== 'startAtLogin' || os.autostart) && (key !== 'heyBlob' || os.keyWatch)).map(key => ({ key, title: ASK[key], text: WHAT[key] })),
   });
 }
 
@@ -589,8 +590,9 @@ async function setupFix(id: string, want: BrainName = settings.get().brain): Pro
   let ok = false;
   try { ok = await fix(id, undefined, undefined, want); } finally { busy(false); }
   if (ok && id === 'brain') settings.set('brain', want);   // installed and signed in: that is the one Blob thinks with
-  const still = (await check(!settings.get().onboarded || id === 'brain' || id === 'signin')).find(c => c.id === id && !c.ok);
-  if (still && id === 'mac') watchMac();
+  const card = id === 'mac-reset' ? 'mac' : id;
+  const still = (await check(!settings.get().onboarded || id === 'brain' || id === 'signin')).find(c => c.id === card && !c.ok);
+  if (still && card === 'mac') watchMac();
   else if (still && ok) caption(`${still.label}: not done yet.`);
   else if (still && fixNote) caption(fixNote);       // Blob knows why (macOS: npm can't write its global folder)
   else if (still) {
@@ -663,7 +665,13 @@ async function post(path: string, body: any): Promise<void> {
     }
     case '/shortcut/delete': store(shortcuts.filter(s => s.id !== body.id)); return;
     case '/setup/check': focus.restore(); await check(true); return;
-    case '/setup/fix': focus.restore(); await setupFix(str(body.id), body.id === 'brain' ? (body.second === true ? 'codex' : 'claude') : undefined); return;
+    case '/setup/fix': {
+      focus.restore();
+      const id = str(body.id);
+      if (id === 'mac' && body.second === true) { await setupFix('mac-reset'); return; }   // the mac card's Still asked?
+      await setupFix(id, id === 'brain' ? (body.second === true ? 'codex' : 'claude') : undefined);
+      return;
+    }
     case '/firstrun': {                             // a first-run card: the user's own tap, no question
       focus.restore();
       const key = FIRST_RUN.find(k => k === body.key);
@@ -963,6 +971,26 @@ if (process.env.BLOB_CAPTURE === '1') console.log('Blob: BLOB_CAPTURE=1, the bub
 else if (!os.hideFromCapture(win)) console.log('Blob: the bubble shows in screen captures on this system');
 win.show();
 focus = os.focusKeeper?.(win.getNativeHandle()) ?? focus;
+
+// "Hey Blob" typed in any app (wake.ts): Blob comes forward with the Type box open, greeting the user by name. The
+// watcher keeps only the last few characters, in memory; where the system has none (or no OK yet), nothing happens.
+const NAME = (() => { try { return firstName(os.userName?.() ?? ''); } catch { return ''; } })();
+function wake(): void {
+  if (exiting) return;
+  console.log('Blob: "hey Blob" typed, so the Type box opened');
+  try { win.show(); os.comeForward?.('Blob'); } catch { /* the window is still being made */ }
+  send({ type: 'wake', text: greeting(NAME) });
+}
+// Only after the user's Yes (the heyBlob setting): on a Mac that is when macOS asks for Input Monitoring.
+let keys: { stop(): void } | undefined;
+function listen(on: boolean): void {
+  keys?.stop(); keys = undefined;
+  if (!on) return;
+  try { keys = os.keyWatch?.(wakeMatcher(() => setImmediate(wake))); }
+  catch (e) { console.log(`Blob: "hey Blob" is not available (${(e as Error).message})`); }
+}
+listen(settings.get().heyBlob);
+settings.onChange((now, changed) => { if (changed.includes('heyBlob')) listen(now.heyBlob); });
 void check();
 
 // ── exit ─────────────────────────────────────────────────────────────────────
@@ -977,6 +1005,7 @@ function quit(): void {
   pairing?.close();
   settings.unwatch();
   focus.stop();
+  keys?.stop();
   through?.stop();
   rmSync(tmp, { recursive: true, force: true });
   try { app.exit(); } catch { /* already closed */ }

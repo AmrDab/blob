@@ -45,7 +45,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe('settings', () => {
   it('starts with the defaults: nothing that learns is on, not onboarded', () => {
     expect(loadSettings(file)).toEqual(DEFAULTS);
-    expect(DEFAULTS).toEqual({ brain: 'claude', model: 'auto', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false, pairOffered: false });
+    expect(DEFAULTS).toEqual({ brain: 'claude', model: 'auto', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, heyBlob: false, phonePaired: false, onboarded: false, pairOffered: false });
   });
 
   it('offers the phone card once, also to someone onboarded before phones were on', () => {

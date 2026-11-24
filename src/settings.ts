@@ -18,6 +18,7 @@ export interface Settings {
   autoShortcuts: boolean;   // build a shortcut from a task done about 3 times (habits.ts)
   voice: boolean;           // hold the blob and talk
   startAtLogin: boolean;    // start Blob when the user signs in, so schedules work (autostart.ts)
+  heyBlob: boolean;         // typing "hey Blob" in any app opens the Type box (wake.ts); macOS asks for Input Monitoring on Yes
   phonePaired: boolean;     // status only: the host sets it, nobody asks for it
   onboarded: boolean;       // the first-run questions were answered; the host sets it
   pairOffered: boolean;     // the "Pair your phone?" card was answered, or a QR was shown; the host sets it
@@ -26,13 +27,13 @@ export type Key = keyof Settings;
 
 /** Before the first-run questions: nothing that learns about the user is on until they say Yes. */
 export const DEFAULTS: Settings = {
-  brain: 'claude', model: 'auto', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, phonePaired: false, onboarded: false, pairOffered: false,
+  brain: 'claude', model: 'auto', watching: false, autoShortcuts: true, voice: true, startAtLogin: false, heyBlob: false, phonePaired: false, onboarded: false, pairOffered: false,
 };
 
 /** What the user can change by asking. The rest is set by the host. */
-export const CHANGEABLE = ['brain', 'model', 'watching', 'autoShortcuts', 'voice', 'startAtLogin'] as const;
+export const CHANGEABLE = ['brain', 'model', 'watching', 'autoShortcuts', 'voice', 'startAtLogin', 'heyBlob'] as const;
 /** What the first run asks about (phone pairing is its own step: the QR). */
-export const FIRST_RUN = ['watching', 'voice', 'autoShortcuts', 'startAtLogin'] as const;
+export const FIRST_RUN = ['watching', 'voice', 'autoShortcuts', 'startAtLogin', 'heyBlob'] as const;
 
 export const WHAT: Record<Key, string> = {
   brain: 'Which program does the thinking: claude (Claude Code) or codex (Codex). Each needs its own install and ' +
@@ -46,6 +47,8 @@ export const WHAT: Record<Key, string> = {
   autoShortcuts: 'When the same task has worked about 3 times, Blob makes a shortcut for it and asks once whether to keep it.',
   voice: 'Hold the blob and talk. Off means typing only.',
   startAtLogin: 'Blob opens by itself when you sign in to this computer, so reminders and scheduled tasks are not missed.',
+  heyBlob: 'Type "hey Blob" in any app and Blob opens its Type box. Blob keeps only the last few keys, in memory, to ' +
+    'spot the words; nothing typed is saved or sent. On a Mac, macOS asks once for Input Monitoring.',
   phonePaired: 'Whether a phone is paired (status only; "pair my phone" shows the QR).',
   onboarded: 'Whether the first-run questions were answered (status only).',
   pairOffered: 'Whether the "Pair your phone?" card was answered (status only).',
@@ -58,7 +61,7 @@ export const offerPair = (s: Settings, relay: boolean): boolean => relay && !s.p
 /** The first-run cards' questions, one per FIRST_RUN key. The card's text is WHAT. */
 export const ASK: Record<typeof FIRST_RUN[number], string> = {
   watching: 'Learn from what you do?', voice: 'Talk to Blob?', autoShortcuts: 'Make shortcuts for you?',
-  startAtLogin: 'Start Blob when you sign in?',
+  startAtLogin: 'Start Blob when you sign in?', heyBlob: 'Open Blob by typing "hey Blob"?',
 };
 
 export const blobHome = (env: NodeJS.ProcessEnv = process.env) => env.BLOB_HOME || join(homedir(), '.blob');

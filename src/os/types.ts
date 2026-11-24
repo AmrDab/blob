@@ -10,6 +10,7 @@ import type { FocusKeeper } from '../focus.ts';
 import type { LauncherDeps } from '../launcher.ts';
 import type { Overlay } from '../overlay.ts';
 import type { Proc } from '../own-ui.ts';
+import type { KeySink } from '../wake.ts';
 
 /** Runs a program to its end; rejects with what it wrote on stderr. */
 export type Exec = (cmd: string, args: string[]) => Promise<void>;
@@ -113,6 +114,12 @@ export interface Os {
   hideFromCapture(win: BrowserWindow): boolean;
   /** The native side of the pill's window (overlay.ts): left out of captures, and kept from taking the keyboard as far as the system lets it. */
   overlay(win: BrowserWindow): Overlay;
+  /** Typed keys from any app, for "hey Blob" (wake.ts). Undefined where the system can't, or the user's OK is not given yet. */
+  keyWatch?(sink: KeySink): { stop(): void } | undefined;
+  /** Blob in front, with the keyboard on its window titled `title`. */
+  comeForward?(title: string): void;
+  /** The user's full name, as the system has it ('' when it has none). */
+  userName?(): string;
   /** The sound of a reminder, where it is not the pill's own (overlay.ts's beep). */
   reminderSound?(): void;
   /** What the web view reads from the environment when it is made: set for that moment only (main.ts). */
