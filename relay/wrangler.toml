@@ -12,6 +12,15 @@ directory = "../phone/dist"
 name = "ROOM"
 class_name = "Room"
 
+[[durable_objects.bindings]]
+name = "REPORTS"
+class_name = "Reports"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
+
+# Blob's private reports (src/reports.ts). Read them with the REPORTS_KEY secret: `npx wrangler secret put REPORTS_KEY`.
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Reports"]
