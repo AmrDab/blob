@@ -262,6 +262,10 @@ describe('one-tap setup, with a fake runner', () => {
     expect(await fix('mac', run, 'darwin')).toBe(true);
     expect(ran).toContain('clawdcursor grant');
     expect(await fix('mac', run, 'win32')).toBe(false);
+    ran.length = 0;                                                    // Still asked?: clears the old switches first
+    expect(await fix('mac-reset', run, 'darwin')).toBe(true);
+    expect(ran.slice(0, 2)).toEqual(['tccutil reset All com.blob.app', 'clawdcursor grant']);
+    expect(await fix('mac-reset', run, 'win32')).toBe(false);
     expect(await macNeeds(MAC_PANES, run)).toEqual({ ok: false, pane: MAC_PANES.accessibility });
     pc.mac = 'Accessibility: Granted\nScreen Recording: Not granted';
     expect(await macNeeds(MAC_PANES, run)).toEqual({ ok: false, pane: MAC_PANES.screenRecording });

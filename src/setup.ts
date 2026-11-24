@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { claudeCommand, cleanEnv, clawdcursorCommand, codexCommand, needsSignIn, type ServerCommand } from './brain.ts';
 import { os, osFor, type Os } from './os/index.ts';
+import { APP_ID } from './launcher.ts';
 import { BRAINS, type BrainName } from './settings.ts';
 
 /**
@@ -31,9 +32,8 @@ export const CONSENT_TEXT =
 const MAC_TEXT =
   'Blob needs two permissions: Accessibility and Screen Recording. Tap Allow, then switch Blob on in the list that ' +
   'opens (it can be listed as the app you started Blob from, or as "node" when Blob started by itself at sign-in). I look again every 2 seconds, so there is nothing to ' +
-  'press here. Screen Recording may only count after you quit Blob and open it again. Blob already switched on and ' +
-  'macOS still asks? That switch is for an older copy of Blob: select Blob in the list, remove it with the minus ' +
-  'button, then tap Allow again.';
+  'press here. Screen Recording may only count after you quit Blob and open it again. Blob is switched on already and ' +
+  'macOS still asks? That switch is for an older copy of Blob: tap Still asked? to clear it, then switch Blob on again.';
 
 /** `claude auth status --json` → signed in? (It may exit non-zero when signed out; only the JSON counts.) */
 export function parseAuthStatus(stdout: string): boolean {
@@ -157,7 +157,7 @@ export async function runChecks(platform: string = os.id, run: Runner = shell, h
   });
   const panes = osFor(platform).permissionPanes;
   if (panes) {
-    checks.push({ id: 'mac', ok: (await macNeeds(panes, run)).ok, label: 'Allow Blob to use your Mac', fix: 'clawdcursor grant', tap: 'Allow', text: MAC_TEXT });
+    checks.push({ id: 'mac', ok: (await macNeeds(panes, run)).ok, label: 'Allow Blob to use your Mac', fix: 'clawdcursor grant', tap: 'Allow', tap2: 'Still asked?', text: MAC_TEXT });
   }
   return checks;
 }
@@ -182,6 +182,8 @@ async function npmInstall(pkg: string, run: Runner, sys: Os): Promise<boolean> {
  *   clawdcursor: `npm i -g clawdcursor`
  *   consent:     `clawdcursor consent --accept` (clawdcursor writes its own consent file; Blob never does)
  *   mac:         `clawdcursor grant` (macOS asks for Accessibility and Screen Recording)
+ *   mac-reset:   the card's Still asked?: `tccutil reset All com.blob.app` first, which clears switches left from an
+ *                older copy of Blob (on, but not for this one), then `clawdcursor grant`
  *   brain:       sets up the brain the user chose (`want`): Claude Code's own installer (os.claudeInstall) in the
  *                system's shell, or `npm i -g @openai/codex`, unless it is there already; then its sign-in, with no
  *                second tap. Without `codex` and `claude` each is looked up again once it is installed.
@@ -209,6 +211,7 @@ export async function fix(id: string, run: Runner = shell, platform: string = os
   }
   if (id === 'clawdcursor') return npmInstall('clawdcursor', run, sys);
   if (id === 'consent') return (await run(...clawd(['consent', '--accept']))).ok;
+  if (id === 'mac-reset' && sys.permissionPanes) { await run('tccutil', ['reset', 'All', APP_ID]); return fix('mac', run, platform); }
   if (id === 'mac' && sys.permissionPanes) return (await run(...clawd(['grant']), 40_000)).ok;
   return false;
 }
