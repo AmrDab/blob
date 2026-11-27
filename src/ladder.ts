@@ -46,7 +46,27 @@ function failure(c: Call): boolean {
   // the desk saying "go to the screen", "tell the user" or "not allowed": a stronger model would hear the same
   if (c.server === 'desk' && /· (NO_PATTERN|NOT_IN_BACKGROUND|EMPTY|DID_NOTHING|NOT_RESPONDING|BRIDGE|NOT_FOUND|AMBIGUOUS|ELEVATED|PASSWORD|AI_HOST|OWN_UI|NOT_APP)\b/.test(c.line)) return false;
   if (c.server === 'files' && c.tool === 'list_dir') return false;
+  if (/· USER_ACTIVE\b/.test(c.line)) return false;  // the user was typing or moving the mouse: the step waits, it did not go wrong
   return !(c.server === 'files' && (c.tool === 'run' || c.tool === 'script_run') && /· EXIT_\d+/.test(c.line));
+}
+
+// Steps that only look or wait: one that works shows nothing was got past.
+const LOOKS = /^(screenshot|screenshot_region|zoom|wait|read_tree|find|find_field|find_button|compile_ui|get_value|get_element|focused|state|list_children|smart_read|copy_all_text|ocr|active|list|list_displays|screen_size|clipboard_read|shortcuts_list)$/;
+
+/** A step that changed something and did not fail: the run got past what failed before it. */
+function acted(c: Call): boolean {
+  if (c.server !== 'clawdcursor' && c.server !== 'files' && c.server !== 'desk') return false;
+  if (failure(c) || c.outcome === 'failed' || c.outcome === 'error' || c.outcome === 'refused') return false;
+  if (c.server === 'desk') return c.tool !== 'read';
+  if (c.server === 'files') return c.tool !== 'list_dir';
+  return !LOOKS.test(String(c.args.action ?? ''));
+}
+
+/** Failures since the last step that worked: a run that got past them and finished is not stuck. */
+function failingAtEnd(calls: Call[]): number {
+  let n = 0;
+  for (let i = calls.length - 1; i >= 0 && !acted(calls[i]); i--) if (failure(calls[i])) n++;
+  return n;
 }
 
 /** The tier that takes over after this run, and why; nothing when the answer stands. */
@@ -60,7 +80,7 @@ export function stepUp(o: {
   if (o.stop === 'max_turns') return { tier, why: 'it ran out of steps' };
   if (o.resultError) return undefined;              // a stronger model would only repeat the error
   if (o.calls.some(askedUp)) return { tier, why: 'it asked for a stronger model' };
-  if (o.calls.filter(failure).length >= FAILS) return { tier, why: 'its steps kept failing' };
+  if (failingAtEnd(o.calls) >= FAILS) return { tier, why: 'its steps kept failing' };
   return undefined;
 }
 

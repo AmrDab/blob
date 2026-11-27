@@ -38,6 +38,20 @@ describe('stepping up', () => {
 });
 
 describe('not stepping up', () => {
+  it('when the model got past its failures and finished: a later step that changed something worked', () => {
+    const typed = { ...call('clawdcursor', 'computer', 'Typed 23 chars [confirmed]', 'confirmed'), args: { action: 'type' } };
+    const clicked = { ...call('clawdcursor', 'accessibility', 'Clicked "submit" [unverified]', 'unverified'), args: { action: 'smart_click' } };
+    expect(up({ calls: [...three, typed, clicked] })).toBeUndefined();
+    // looking between failures is not getting past them
+    const shot = { ...call('clawdcursor', 'computer', '[Image]'), args: { action: 'screenshot' } };
+    expect(up({ calls: [notFound, shot, notFound, shot, notFound] })?.tier).toBe('sonnet');
+  });
+
+  it('while the user was using the computer: those steps wait, they did not fail', () => {
+    const busy = call('clawdcursor', 'computer', '[refused · USER_ACTIVE · hint: the user is using the computer]');
+    expect(up({ calls: [notFound, busy, busy, busy, busy] })).toBeUndefined();
+  });
+
   it('for two failures, wherever they are', () => {
     expect(up({ calls: [call('files', 'make_folder', 'Made /a.\n[confirmed]', 'confirmed'), notFound, cantMove] })).toBeUndefined();
   });
