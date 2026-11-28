@@ -78,6 +78,33 @@ export function signedOut(brain: BrainName, out = true): void {
 /** Whether the test request passed: Blob sends it once, then goes by `auth status` and by what the runs say. */
 let probed = false;
 
+/**
+ * A request ended with no word from the AI (brain.ts: unreachable): installed and "signed in" or not, it does not work,
+ * so the card asks again which AI the user has, until a sign-in from it works. Kept only while Blob runs.
+ */
+let unreached = false;
+export function unreachable(on = true): void {
+  unreached = on;
+  if (on) probed = false;                            // the next sign-in is tried out again
+}
+
+/** The card that connects an AI: which one the user has, when none is installed or the one there did not answer. */
+export function aiCheck(platform: string, installed: boolean, ready: BrainName[] = []): Check {
+  const again = installed && unreached;
+  return {
+    id: 'brain', ok: installed && !unreached, label: again ? 'Connect your AI' : 'Which AI do you have?', ready,
+    fix: osFor(platform).claudeInstall,
+    alt: 'npm i -g @openai/codex',
+    tap: 'Claude', tap2: 'ChatGPT',
+    text: again
+      ? 'Blob couldn\'t reach your AI. Tap the one you have: Blob sets it up again (about a minute), then your browser ' +
+        'opens for you to sign in.'
+      : 'Blob thinks with your own Claude or ChatGPT subscription. Tap the one you have: Blob installs what it needs ' +
+        '(about a minute), then your browser opens for you to sign in. With Claude, Blob then sends one short test ' +
+        'message to make sure the sign-in works. It uses your subscription, once.',
+  };
+}
+
 /** The test request: Haiku, one turn, no tools, and none of the user's own MCP servers, plugins or hooks (brain.ts: claudeArgs). */
 export const PROBE_ARGS = ['-p', 'Reply with the one word: ok', '--model', 'haiku', '--max-turns', '1', '--output-format', 'json',
   '--strict-mcp-config', '--setting-sources', 'project', '--disable-slash-commands', '--no-chrome', '--tools', ''];
@@ -126,15 +153,7 @@ export async function runChecks(platform: string = os.id, run: Runner = shell, h
   const { has, ready } = await brains(platform, run, codex, claude);
   // Blob needs one of the two. With none installed the card asks which subscription the user has, and that tap
   // installs its program (Claude Code or Codex) and starts its sign-in; with one installed, its sign-in.
-  checks.push({
-    id: 'brain', ok: has.claude || has.codex, label: 'Which AI do you have?', ready,
-    fix: osFor(platform).claudeInstall,
-    alt: 'npm i -g @openai/codex',
-    tap: 'Claude', tap2: 'ChatGPT',
-    text: 'Blob thinks with your own Claude or ChatGPT subscription. Tap the one you have: Blob installs what it needs ' +
-      '(about a minute), then your browser opens for you to sign in. With Claude, Blob then sends one short test ' +
-      'message to make sure the sign-in works. It uses your subscription, once.',
-  });
+  checks.push(aiCheck(platform, has.claude || has.codex, ready));
   if (has.claude || has.codex) {
     const both = has.claude && has.codex;
     const cl = /\s/.test(claude) ? `"${claude}"` : claude;   // its full path when it is not on PATH
@@ -197,7 +216,8 @@ export async function fix(id: string, run: Runner = shell, platform: string = os
   const sys = osFor(platform);
   if (id === 'brain') {
     const { has } = await brains(platform, run, codex, claude);
-    if (!has[want] && !(want === 'codex' ? await npmInstall('@openai/codex', run, sys) : (await run(...sys.shell.argv(sys.claudeInstall, {}), 300_000)).ok)) return false;
+    // installed but it did not answer: its installer again, which repairs a broken copy, then the sign-in
+    if ((!has[want] || unreached) && !(want === 'codex' ? await npmInstall('@openai/codex', run, sys) : (await run(...sys.shell.argv(sys.claudeInstall, {}), 300_000)).ok)) return false;
     return fix('signin', run, platform, want, codex, claude);
   }
   if (id === 'signin') {
@@ -206,7 +226,7 @@ export async function fix(id: string, run: Runner = shell, platform: string = os
     const b = has[want] ? want : BRAINS.find(x => has[x]);
     if (!b) return false;
     const ok = (await (b === 'codex' ? run(cx.command, [...cx.args, 'login'], 300_000) : run(cl, ['auth', 'login', '--claudeai'], 300_000))).ok;
-    if (ok) lost.delete(b);                          // it signed in and saved it: the next run is the proof
+    if (ok) { lost.delete(b); unreached = false; }   // it signed in and saved it: the next run is the proof
     return ok;
   }
   if (id === 'clawdcursor') return npmInstall('clawdcursor', run, sys);

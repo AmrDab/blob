@@ -34,8 +34,13 @@ export type Update =
   | { type: 'log'; entry: LogEntry }
   | { type: 'session'; id: string };
 
-/** `signedOut`: the run ended because this brain is signed out (needsSignIn). */
-export type BrainEvent = Update | { type: 'busy'; busy: boolean } | { type: 'done'; calls: Call[]; ok: boolean; signedOut?: BrainName };
+/** `signedOut`: the run ended because this brain is signed out (needsSignIn). `unreachable`: it ended with no word from the brain (it would not start, closed, or never answered). */
+export type BrainEvent = Update | { type: 'busy'; busy: boolean } | { type: 'done'; calls: Call[]; ok: boolean; signedOut?: BrainName; unreachable?: true };
+
+/** What Blob says when the brain never answered: the card to connect it comes up with it (main.ts). */
+export const UNREACHABLE = 'I couldn\'t reach your AI. Tap Claude or ChatGPT below to connect it again.';
+/** A brain that has said nothing at all this long after a request is stuck (its first line comes within seconds). */
+const FIRST_WORD_MS = 60_000;
 
 /** Claude Code's read-only file tools; changes go through Blob's files server, which asks before trash/overwrite and before a command that changes something. */
 export const BUILTIN_TOOLS = ['Read', 'Glob', 'Grep'];
@@ -409,6 +414,7 @@ export class Brain {
   private child?: {
     p: ChildProcessWithoutNullStreams; brain: BrainName; model: Model; sent: boolean; halted: boolean; early: Update[]; input: (text: string) => string;
     tier: Tier; before: Call[]; next?: { tier: Tier; why: string };   // auto: the model running now, the earlier tiers' calls, and who takes over
+    heard?: boolean; silent?: ReturnType<typeof setTimeout>; mute?: boolean;   // a line came after the request; the stop when none does, and that it did
   };
   private session?: { id: string; brain: BrainName };
 
@@ -447,6 +453,7 @@ export class Brain {
     this.o.emit({ type: 'caption', text: 'Thinking…' });
     for (const u of c.early.splice(0)) this.o.emit(u);   // e.g. "Blob's file tools are failed." from a prewarmed start
     c.p.stdin.end(c.input(withContext(text, this.o.context)));
+    c.silent = setTimeout(() => { if (!c.heard) { c.mute = true; killTree(c.p); } }, FIRST_WORD_MS);   // never "Thinking…" for ever
     return true;
   }
 
@@ -487,6 +494,7 @@ export class Brain {
     p.stdin.on('error', () => { /* it exited before reading; the close handler reports it */ });
     p.stderr.on('data', d => { stderr = (stderr + d).slice(-2000); });
     createInterface({ input: p.stdout }).on('line', line => {
+      if (entry.sent) entry.heard = true;
       for (const u of parser.feed(line)) {
         if (u.type === 'session') { this.session = { id: u.id, brain }; continue; }
         // The run ended by itself: a stuck tier's answer is held back, and the next tier starts when this child closes.
@@ -506,6 +514,7 @@ export class Brain {
     const done = (why: string) => {
       if (finished) return;
       finished = true;
+      clearTimeout(entry.silent);
       if (this.child === entry) this.child = undefined;
       if (!entry.sent) return;
       if (entry.next && !entry.halted) {              // the next tier takes the same session, in the same tick: never idle in between
@@ -517,9 +526,13 @@ export class Brain {
           return;
         } catch (e) { why = `Could not start ${name}: ${(e as Error).message}`; }   // the request ends here, with that as its answer
       }
-      if (!parser.sawResult || entry.next) this.o.emit({ type: 'answer', text: entry.halted ? 'Stopped.' : parser.signedOut ? signInAgain(brain) : oneLine(stderr.trim().split('\n').pop() || why, 400) });
+      // No result and not stopped or signed out: the brain never got going. Its own words go to the Log, the user gets the card.
+      const unreachable = !parser.sawResult && !entry.halted && !parser.signedOut;
+      const reason = entry.mute ? `${name} said nothing for ${FIRST_WORD_MS / 1000} s` : oneLine(stderr.trim().split('\n').pop() || why, 400);
+      if (unreachable) this.o.emit({ type: 'log', entry: { tool: name, outcome: 'failed', line: reason } });
+      if (!parser.sawResult || entry.next) this.o.emit({ type: 'answer', text: entry.halted ? 'Stopped.' : parser.signedOut ? signInAgain(brain) : unreachable ? UNREACHABLE : reason });
       this.o.emit({ type: 'busy', busy: false });
-      this.o.emit({ type: 'done', calls: [...entry.before, ...parser.calls], ok: parser.sawResult && !parser.resultError, ...(parser.signedOut && { signedOut: brain }) });
+      this.o.emit({ type: 'done', calls: [...entry.before, ...parser.calls], ok: parser.sawResult && !parser.resultError, ...(parser.signedOut && { signedOut: brain }), ...(unreachable && { unreachable: true as const }) });
     };
     p.on('error', err => done(`Could not start ${name}: ${err.message}`));
     p.on('close', code => done(`${name} exited (${code}).`));

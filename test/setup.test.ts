@@ -91,6 +91,27 @@ describe('one-tap setup, with a fake runner', () => {
     expect(tried.join('\n')).not.toMatch(/login/);
   });
 
+  it('asks again which AI the user has when a request got no answer, though one is installed and "signed in"', async () => {
+    pc = { ...pc, clawdcursor: true };
+    expect((await runChecks('win32', run, home, codex, 'claude'))[0]).toMatchObject({ id: 'brain', ok: true });
+    setup.unreachable();
+    try {
+      const card = (await runChecks('win32', run, home, codex, 'claude'))[0];
+      expect(card).toMatchObject({ id: 'brain', ok: false, label: 'Connect your AI', tap: 'Claude', tap2: 'ChatGPT' });
+      expect(card.text).toMatch(/couldn't reach your AI/);
+      expect(card.text).not.toMatch(/terminal|copy|run /i);
+      // the tap puts the AI's program in again (that repairs a broken copy), then its sign-in, and the card goes
+      ran = [];
+      expect(await fix('brain', run, 'win32', 'claude', codex, 'claude')).toBe(true);
+      expect(ran.filter(l => /install\.ps1|--claudeai/.test(l))).toHaveLength(2);
+      expect((await runChecks('win32', run, home, codex, 'claude'))[0]).toMatchObject({ id: 'brain', ok: true, label: 'Which AI do you have?' });
+      // a sign-in that was not finished leaves the card up
+      setup.unreachable(); pc.browser = false;
+      expect(await fix('brain', run, 'win32', 'claude', codex, 'claude')).toBe(false);
+      expect((await runChecks('win32', run, home, codex, 'claude'))[0]).toMatchObject({ ok: false, label: 'Connect your AI' });
+    } finally { setup.unreachable(false); }
+  });
+
   it('one tap on ChatGPT installs Codex with npm and goes straight on to its sign-in', async () => {
     pc = { ...pc, claude: false, signedIn: false };
     expect(await fix('brain', run, 'win32', 'codex', codex, 'claude')).toBe(true);

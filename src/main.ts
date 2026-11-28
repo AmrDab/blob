@@ -36,7 +36,7 @@ import { loadSchedule, saveSchedule, scheduleFile, stamp, tick, type Entry } fro
 import { ASK, BRAINS, BRAIN_NAME, FIRST_RUN, SettingsStore, WHAT, blobHome, offerPair, parseValue, type BrainName, type Model } from './settings.ts';
 import { MAX_PINNED, MAX_SHORTCUTS } from './shared.ts';
 import { loadShortcuts, nameFrom, saveOffer, saveQuestion, saveShortcuts, type Shortcut } from './shortcuts.ts';
-import { fix, fixNote, macNeeds, pickBrain, probe, runChecks, signedOut, type Check } from './setup.ts';
+import { aiCheck, fix, fixNote, macNeeds, pickBrain, probe, runChecks, signedOut, unreachable, type Check } from './setup.ts';
 import { firstName, greeting, wakeMatcher } from './wake.ts';
 import { install, installed, latest, newer, question as updateQuestion, skip, switchTo, systemUpdate, toOffer } from './update.ts';
 import { Watcher, activityFile, clawdcursorReader } from './watch.ts';
@@ -322,6 +322,8 @@ function onBrain(e: BrainEvent): void {
     // Blob said sorry, or the user said it got something wrong, and the model did not offer the report: the host does
     if (!reported && (apologizes(lastAnswer) || complains(request))) void sendReport(complains(request) ? `The user said: ${request.slice(0, 300)}` : lastAnswer);
     if (e.signedOut) { signedOut(e.signedOut); void check(); }   // the sign-in card comes up under the answer
+    else if (e.unreachable) { unreachable(); void check(); }     // and the card to connect it again
+    else if (e.ok) unreachable(false);
   }
   else if (e.type !== 'session') send(e);
 }
@@ -581,7 +583,13 @@ async function check(tryOut = !settings.get().onboarded): Promise<Check[]> {
     // The cards are up already; a sign-in that only looked fine brings the sign-in card a moment later.
     if (tryOut && await probe(settings.get().brain, ready, WORK)) return check(false);
     return checks;
-  } catch { return []; }                            // checks are best effort
+  } catch (e) {
+    // The check itself failed: no cards would mean a Blob that looks ready and cannot think, so the AI card comes up.
+    console.log(`Blob: the setup check failed: ${(e as Error).message}`);
+    unreachable();
+    send({ type: 'setup', checks: [aiCheck(os.id, true)] });
+    return [];
+  }
 }
 
 /** One tap on a setup card: Blob runs the fix (the orb turns while it does) and checks again. `want`: the brain chosen on the 'brain' card. */
